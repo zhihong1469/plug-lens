@@ -1,0 +1,58 @@
+# ==========================================================================
+# Makefile.build：通用编译规则（被顶层 Makefile 调用）
+# 功能：编译 .c -> .o + 生成 .d 依赖 + 追加 compile_commands.json
+# ==========================================================================
+
+# 1. 接收传入的参数（CUR_DIR 是从顶层传下来的，比如 "app" 或 "lib"）
+SRC_DIR := $(TOPDIR)/$(CUR_DIR)
+OBJ_DIR := $(BUILDDIR)/$(CUR_DIR)
+
+# 2. 包含当前模块的 Makefile（也就是 app/Makefile 或 lib/Makefile）
+include $(SRC_DIR)/Makefile
+
+# 3. 定义生成的目标文件路径
+OBJS := $(patsubst %.c, $(OBJ_DIR)/%.o, $(SRC_FILES))
+DEPS := $(OBJS:.o=.d)
+
+# 4. 追加头文件路径和编译标志
+CFLAGS += $(INC_FLAGS)
+CFLAGS += -Wall -O2 -g -MMD -MP  # 默认开启警告、优化、调试信息、生成依赖
+
+# 5. 最终目标规则
+ifdef TARGET_NAME
+TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
+
+all: $(TARGET)
+
+# 链接规则
+$(TARGET): $(OBJS)
+	$(info OBJS = $(OBJS))
+	@echo "Linking $@"
+ifeq ($(TARGET_TYPE), LIB)
+	$(AR) rcs $@ $(OBJS)  # 打包静态库
+else
+	$(CC) $(OBJS) -o $@ $(LDFLAGS)  # 链接可执行文件
+endif
+	@echo "Built: $@"
+else
+all: $(OBJS)  # 没有定义目标名，只编译不链接
+endif
+
+# 6. 核心编译规则：.c -> .o + 生成 .d + 追加 compile_commands.json
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	@echo "Compiling $<"
+	# 执行编译
+	$(CC) $(CFLAGS) -c $< -o $@
+	# 追加 JSON 条目到 compile_commands.json（注意转义双引号）
+	$(eval COMPILE_CMD := $(CC) $(CFLAGS) -c $< -o $@)
+	@echo '  {' >> $(COMPILE_COMMANDS)
+	@echo '    "directory": "$(TOPDIR)",' >> $(COMPILE_COMMANDS)
+	@echo '    "command": "$(subst ",\",$(COMPILE_CMD))",' >> $(COMPILE_COMMANDS)
+	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
+	@echo '  },' >> $(COMPILE_COMMANDS)
+
+# 7. 包含依赖文件（第一次编译没有 .d，用 -include 忽略错误）
+-include $(DEPS)
+
+.PHONY: all

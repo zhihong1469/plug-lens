@@ -1,0 +1,2 @@
+arm-buildroot-linux-gnueabihf-gcc  -Wall -O2 -g  -MMD -MP -c /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/src/main.c -o /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/build/app/src/main.o
+make[1]: arm-buildroot-linux-gnueabihf-gcc: No such file or directory
