@@ -9,7 +9,7 @@ SRC_FILES := \
 # 2. 头文件路径（包含BSP的头文件）
 INC_FLAGS := \
 	-I$(TOPDIR)/BSP/common/inc \
-# 	-I$(TOPDIR)/BSP/v4l2_video/inc
+	-I$(TOPDIR)/BSP/v4l2_video/inc
 
 # 3. 生成可执行文件
 TARGET_NAME := vision_ai_app
