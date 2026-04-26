@@ -23,12 +23,12 @@ COMPILE_COMMANDS := $(OUTPUTDIR)/compile_commands.json
 export CC LD AR OBJCOPY OBJDUMP
 export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 
-# 2. 自动扫描子目录 + 强制 lib 优先编译（修复版）
+# 2. 自动扫描子目录 + 强制 BSP 优先编译（修复版）
 # 逻辑：
 # 1. find 找到所有子 Makefile（绝对路径）
 # 2. 用 patsubst 把 $(TOPDIR)/ 前缀去掉，变成相对路径（如 app/Makefile）
 # 3. 提取目录名（如 app）
-# 4. lib 放前面，其他放后面
+# 4. BSP 放前面，其他放后面
 SUB_MAKEFILES := $(shell find $(SRCDIR) -name "Makefile" \
 					-not -path "$(SRCDIR)/Makefile" \
 					-not -path "$(BUILDDIR)/%")
@@ -40,8 +40,8 @@ SUB_MAKEFILES_REL := $(patsubst $(TOPDIR)/%,%,$(SUB_MAKEFILES))
 # 提取目录名（如 app/Makefile -> app）
 SUBDIRS_RAW := $(patsubst %/,%,$(dir $(SUB_MAKEFILES_REL)))
 
-# 排序：lib 优先，其他在后
-SUBDIRS := $(filter lib,$(SUBDIRS_RAW)) $(filter-out lib,$(SUBDIRS_RAW))
+# 排序：BSP 优先，其他在后
+SUBDIRS := $(filter BSP,$(SUBDIRS_RAW)) $(filter-out BSP,$(SUBDIRS_RAW))
 
 # 3. 定义目标列表：格式为 build-xxx
 TARGETS := $(patsubst %, build-%, $(SUBDIRS))
