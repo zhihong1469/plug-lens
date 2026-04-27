@@ -17,28 +17,30 @@
 // ==========================================================================
 // 内部宏定义
 // ==========================================================================
-#define V4L2_VIDEO_MAX_BUFS 32  // 最大支持的缓冲区数量
+#define V4L2_VIDEO_MAX_BUFS 32
 
 // ==========================================================================
-// 内部静态变量（模块私有，不对外暴露）
+// 内部静态变量
 // ==========================================================================
-static int g_fd = -1;                                    // 摄像头文件描述符
-static bool g_is_init = false;                           // 初始化标志
-static bool g_is_streaming = false;                      // 流启动标志
-static v4l2_video_config_t g_config;                     // 保存的配置
-static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER; // 线程互斥锁
+static int g_fd = -1;
+static bool g_is_init = false;
+static bool g_is_streaming = false;
+static v4l2_video_config_t g_config;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// 缓冲区管理结构体
+// 【新增】摄像头能力检测结果
+static v4l2_video_capability_t g_capability;
+
 typedef struct {
-    void *start;    // MMAP映射的用户态起始地址
-    uint32_t length;// 缓冲区长度
+    void *start;
+    uint32_t length;
 } v4l2_video_buffer_t;
 
-static v4l2_video_buffer_t g_buffers[V4L2_VIDEO_MAX_BUFS]; // 缓冲区数组
-static uint32_t g_buf_count = 0;                              // 实际申请的缓冲区数量
+static v4l2_video_buffer_t g_buffers[V4L2_VIDEO_MAX_BUFS];
+static uint32_t g_buf_count = 0;
 
 // ==========================================================================
-// 内部辅助函数声明（static，仅模块内部使用）
+// 内部辅助函数声明
 // ==========================================================================
 static v4l2_video_err_t _v4l2_enum_formats(void);
 static v4l2_video_err_t _v4l2_set_format(void);
@@ -49,8 +51,12 @@ static v4l2_video_err_t _v4l2_lock_ai_params(void);
 static uint32_t _v4l2_format_to_fourcc(v4l2_video_format_t fmt);
 static v4l2_video_format_t _fourcc_to_v4l2_format(uint32_t fourcc);
 
+// 【新增】能力检测内部函数
+static v4l2_video_err_t _v4l2_detect_capability(void);
+static bool _v4l2_check_control_support(uint32_t cid);
+
 // ==========================================================================
-// 错误码字符串表（用于调试）
+// 错误码字符串表
 // ==========================================================================
 static const char* g_err_str[] = {
     [V4L2_VIDEO_OK] = "Success",
@@ -78,6 +84,14 @@ static const char* g_err_str[] = {
 };
 
 // ==========================================================================
+// 【新增】对外API：获取摄像头能力检测结果
+// ==========================================================================
+const v4l2_video_capability_t* v4l2_video_get_capability(void)
+{
+    return &g_capability;
+}
+
+// ==========================================================================
 // 对外API实现
 // ==========================================================================
 
@@ -86,23 +100,22 @@ v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config)
     v4l2_video_err_t err;
     int ret;
 
-    // 1. 参数检查
     if (config == NULL || config->dev_path == NULL) {
         return V4L2_VIDEO_ERR_INVALID_PARAM;
     }
 
-    // 2. 加锁保护
     if (pthread_mutex_lock(&g_mutex) != 0) {
         return V4L2_VIDEO_ERR_LOCK;
     }
 
-    // 3. 检查是否已初始化
     if (g_is_init) {
         pthread_mutex_unlock(&g_mutex);
         return V4L2_VIDEO_ERR_ALREADY_INIT;
     }
 
-    // 4. 保存配置（设置默认值）
+    // 清空能力检测结果
+    memset(&g_capability, 0, sizeof(g_capability));
+
     memcpy(&g_config, config, sizeof(v4l2_video_config_t));
     if (g_config.buf_count == 0) g_config.buf_count = 4;
     if (g_config.buf_count > V4L2_VIDEO_MAX_BUFS) g_config.buf_count = V4L2_VIDEO_MAX_BUFS;
@@ -111,7 +124,6 @@ v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config)
           g_config.dev_path, g_config.width, g_config.height,
           g_config.format, g_config.fps, g_config.buf_count);
 
-    // 5. 打开设备
     g_fd = open(g_config.dev_path, O_RDWR);
     if (g_fd < 0) {
         LOG_E("Open %s failed: %s", g_config.dev_path, strerror(errno));
@@ -119,7 +131,6 @@ v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config)
         goto error_unlock;
     }
 
-    // 6. 查询设备能力
     struct v4l2_capability cap;
     memset(&cap, 0, sizeof(cap));
     ret = ioctl(g_fd, VIDIOC_QUERYCAP, &cap);
@@ -129,7 +140,6 @@ v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config)
         goto error_close;
     }
 
-    // 7. 检查是否支持捕获和流式传输
     if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
         LOG_E("Device does not support video capture");
         err = V4L2_VIDEO_ERR_NOT_CAPTURE;
@@ -140,41 +150,47 @@ v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config)
         err = V4L2_VIDEO_ERR_NOT_STREAMING;
         goto error_close;
     }
-    LOG_I("Device: %s, Bus: %s", cap.card, cap.bus_info);
 
-    // 8. 枚举支持的格式（仅用于调试）
+    // 保存基础信息
+    strncpy(g_capability.device_name, (char*)cap.card, sizeof(g_capability.device_name) - 1);
+    strncpy(g_capability.bus_info, (char*)cap.bus_info, sizeof(g_capability.bus_info) - 1);
+    LOG_I("Device: %s, Bus: %s", g_capability.device_name, g_capability.bus_info);
+
+    // 【核心】一键检测摄像头所有核心能力
+    err = _v4l2_detect_capability();
+    if (err != V4L2_VIDEO_OK) {
+        // 检测失败不影响初始化，继续执行
+        LOG_W("Capability detect failed (non-critical)");
+    }
+
+    // 枚举格式（仅用于调试）
     (void)_v4l2_enum_formats();
 
-    // 9. 设置格式
     err = _v4l2_set_format();
     if (err != V4L2_VIDEO_OK) {
         goto error_close;
     }
 
-    // 10. 申请内核缓冲区
     err = _v4l2_alloc_buffers();
     if (err != V4L2_VIDEO_OK) {
         goto error_close;
     }
 
-    // 11. MMAP映射缓冲区
     err = _v4l2_mmap_buffers();
     if (err != V4L2_VIDEO_OK) {
         goto error_free_bufs;
     }
 
-    // 12. 锁定AI参数（曝光/白平衡/增益）
+    // 锁定AI参数（根据检测结果自动适配）
     if (g_config.lock_exposure || g_config.lock_white_balance || g_config.lock_gain) {
-        (void)_v4l2_lock_ai_params(); // 非关键错误，不影响初始化
+        (void)_v4l2_lock_ai_params();
     }
 
-    // 13. 初始化成功
     g_is_init = true;
     LOG_I("V4L2 video init success");
     pthread_mutex_unlock(&g_mutex);
     return V4L2_VIDEO_OK;
 
-    // 错误处理回滚
 error_free_bufs:
     for (uint32_t i = 0; i < g_buf_count; i++) {
         if (g_buffers[i].start != MAP_FAILED) {
@@ -197,13 +213,11 @@ v4l2_video_err_t v4l2_video_start(void)
 
     if (pthread_mutex_lock(&g_mutex) != 0) return V4L2_VIDEO_ERR_LOCK;
     if (!g_is_init) { err = V4L2_VIDEO_ERR_NOT_INIT; goto error; }
-    if (g_is_streaming) { err = V4L2_VIDEO_OK; goto error; } // 已启动，直接返回
+    if (g_is_streaming) { err = V4L2_VIDEO_OK; goto error; }
 
-    // 1. 把所有缓冲区放入队列
     err = _v4l2_queue_all_buffers();
     if (err != V4L2_VIDEO_OK) goto error;
 
-    // 2. 启动流
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     ret = ioctl(g_fd, VIDIOC_STREAMON, &type);
     if (ret < 0) {
@@ -233,18 +247,25 @@ v4l2_video_err_t v4l2_video_get_frame(v4l2_video_frame_t *frame)
         return V4L2_VIDEO_ERR_NOT_INIT;
     }
 
-    // 1. Poll等待数据（超时3秒）
     memset(&fds, 0, sizeof(fds));
     fds.fd = g_fd;
     fds.events = POLLIN;
     ret = poll(&fds, 1, 3000);
+
+    // 被信号打断(Ctrl+C 主动退出) → 直接返回，**不打印任何错误**
+    if (ret == -1 && errno == EINTR) {
+        pthread_mutex_unlock(&g_mutex);
+        return V4L2_VIDEO_ERR_POLL;
+    }
+
+    // 只有【真·超时/硬件错误】才打印日志
     if (ret <= 0) {
         LOG_E("Poll timeout or error: %s", strerror(errno));
         pthread_mutex_unlock(&g_mutex);
         return V4L2_VIDEO_ERR_POLL;
     }
+    // ==================================================
 
-    // 2. 从队列取出缓冲区
     memset(&buf, 0, sizeof(buf));
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_MMAP;
@@ -255,10 +276,8 @@ v4l2_video_err_t v4l2_video_get_frame(v4l2_video_frame_t *frame)
         return V4L2_VIDEO_ERR_DQBUF;
     }
 
-    // 3. 填充输出帧结构体（零拷贝）
     if (buf.index >= g_buf_count) {
         LOG_E("Invalid buffer index: %u", buf.index);
-        // 即使索引错了也要把缓冲区还回去
         ioctl(g_fd, VIDIOC_QBUF, &buf);
         pthread_mutex_unlock(&g_mutex);
         return V4L2_VIDEO_ERR_DQBUF;
@@ -266,16 +285,14 @@ v4l2_video_err_t v4l2_video_get_frame(v4l2_video_frame_t *frame)
 
     frame->data = g_buffers[buf.index].start;
     frame->length = buf.bytesused;
-    frame->width = g_config.width;  // 以S_FMT后的实际值为准
+    frame->width = g_config.width;
     frame->height = g_config.height;
     frame->format = g_config.format;
     frame->timestamp = (uint64_t)buf.timestamp.tv_sec * 1000000 + buf.timestamp.tv_usec;
     frame->index = buf.index;
 
     LOG_D("Got frame: idx=%u, len=%u, ts=%llu", buf.index, buf.bytesused, frame->timestamp);
-
-    // 注意：这里不解锁，也不QBUF，等用户调用put_frame时再操作
-    // 这样可以保证用户在处理数据时，缓冲区不会被驱动覆盖
+    pthread_mutex_unlock(&g_mutex);
     return V4L2_VIDEO_OK;
 }
 
@@ -287,22 +304,18 @@ v4l2_video_err_t v4l2_video_put_frame(const v4l2_video_frame_t *frame)
     if (frame == NULL) return V4L2_VIDEO_ERR_INVALID_PARAM;
     if (!g_is_init || !g_is_streaming) return V4L2_VIDEO_ERR_NOT_INIT;
 
-    // 1. 准备QBUF参数
     memset(&buf, 0, sizeof(buf));
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_MMAP;
     buf.index = frame->index;
 
-    // 2. 把缓冲区归还驱动
     ret = ioctl(g_fd, VIDIOC_QBUF, &buf);
     if (ret < 0) {
         LOG_E("VIDIOC_QBUF failed: %s", strerror(errno));
-        // QBUF失败不影响解锁，继续执行
     }
 
     LOG_D("Put frame: idx=%u", frame->index);
 
-    // 3. 解锁（注意：这里的锁是在get_frame里加的）
     if (pthread_mutex_unlock(&g_mutex) != 0) {
         return V4L2_VIDEO_ERR_UNLOCK;
     }
@@ -319,7 +332,6 @@ v4l2_video_err_t v4l2_video_stop(void)
     if (!g_is_init) { pthread_mutex_unlock(&g_mutex); return V4L2_VIDEO_OK; }
     if (!g_is_streaming) { pthread_mutex_unlock(&g_mutex); return V4L2_VIDEO_OK; }
 
-    // 停止流
     ret = ioctl(g_fd, VIDIOC_STREAMOFF, &type);
     if (ret < 0) {
         LOG_E("VIDIOC_STREAMOFF failed: %s", strerror(errno));
@@ -335,19 +347,17 @@ v4l2_video_err_t v4l2_video_stop(void)
 
 v4l2_video_err_t v4l2_video_deinit(void)
 {
-    v4l2_video_err_t err;
+    v4l2_video_err_t err = V4L2_VIDEO_OK;
 
     if (pthread_mutex_lock(&g_mutex) != 0) return V4L2_VIDEO_ERR_LOCK;
     if (!g_is_init) { pthread_mutex_unlock(&g_mutex); return V4L2_VIDEO_OK; }
 
-    // 1. 先停止流
     if (g_is_streaming) {
         enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        ioctl(g_fd, VIDIOC_STREAMOFF, &type);
+        err = ioctl(g_fd, VIDIOC_STREAMOFF, &type);
         g_is_streaming = false;
     }
 
-    // 2. Munmap所有缓冲区
     for (uint32_t i = 0; i < g_buf_count; i++) {
         if (g_buffers[i].start != MAP_FAILED) {
             if (munmap(g_buffers[i].start, g_buffers[i].length) < 0) {
@@ -358,7 +368,6 @@ v4l2_video_err_t v4l2_video_deinit(void)
     }
     g_buf_count = 0;
 
-    // 3. 关闭设备
     if (g_fd >= 0) {
         if (close(g_fd) < 0) {
             LOG_E("Close device failed: %s", strerror(errno));
@@ -366,13 +375,13 @@ v4l2_video_err_t v4l2_video_deinit(void)
         g_fd = -1;
     }
 
-    // 4. 清理标志
     g_is_init = false;
     memset(&g_config, 0, sizeof(g_config));
+    memset(&g_capability, 0, sizeof(g_capability));
     LOG_I("V4L2 video deinit success");
 
     pthread_mutex_unlock(&g_mutex);
-    return V4L2_VIDEO_OK;
+    return err;
 }
 
 const char* v4l2_video_err_str(v4l2_video_err_t err)
@@ -381,6 +390,79 @@ const char* v4l2_video_err_str(v4l2_video_err_t err)
         return "Unknown error";
     }
     return g_err_str[err];
+}
+
+// ==========================================================================
+// 【核心新增】一键检测摄像头所有核心能力
+// ==========================================================================
+static v4l2_video_err_t _v4l2_detect_capability(void)
+{
+    struct v4l2_fmtdesc fmtdesc;
+    uint32_t index = 0;
+
+    LOG_I("========================================");
+    LOG_I("Camera Capability Detection Result:");
+    LOG_I("========================================");
+    LOG_I("Device Name: %s", g_capability.device_name);
+    LOG_I("Bus Info: %s", g_capability.bus_info);
+
+    // 1. 检测支持的像素格式
+    LOG_I("--- Supported Formats ---");
+    while (1) {
+        memset(&fmtdesc, 0, sizeof(fmtdesc));
+        fmtdesc.index = index;
+        fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+        if (ioctl(g_fd, VIDIOC_ENUM_FMT, &fmtdesc) < 0) {
+            break;
+        }
+
+        LOG_I("  [%u] %s (0x%08X)", index, fmtdesc.description, fmtdesc.pixelformat);
+
+        if (fmtdesc.pixelformat == V4L2_PIX_FMT_YUYV) {
+            g_capability.support_yuyv = true;
+        } else if (fmtdesc.pixelformat == V4L2_PIX_FMT_MJPEG) {
+            g_capability.support_mjpeg = true;
+        } else if (fmtdesc.pixelformat == V4L2_PIX_FMT_NV12) {
+            g_capability.support_nv12 = true;
+        }
+
+        index++;
+    }
+
+    // 2. 检测AI控制参数支持
+    LOG_I("--- AI Control Support ---");
+    g_capability.support_manual_exposure = _v4l2_check_control_support(V4L2_CID_EXPOSURE_AUTO);
+    g_capability.support_lock_white_balance = _v4l2_check_control_support(V4L2_CID_AUTO_WHITE_BALANCE);
+    g_capability.support_lock_gain = _v4l2_check_control_support(V4L2_CID_AUTOGAIN);
+
+    LOG_I("  Manual Exposure: %s", g_capability.support_manual_exposure ? "Yes" : "No");
+    LOG_I("  Lock White Balance: %s", g_capability.support_lock_white_balance ? "Yes" : "No");
+    LOG_I("  Lock Auto Gain: %s", g_capability.support_lock_gain ? "Yes" : "No");
+    LOG_I("========================================");
+
+    return V4L2_VIDEO_OK;
+}
+
+// ==========================================================================
+// 【辅助】检测某个控制参数是否支持
+// ==========================================================================
+static bool _v4l2_check_control_support(uint32_t cid)
+{
+    struct v4l2_queryctrl qctrl;
+    memset(&qctrl, 0, sizeof(qctrl));
+    qctrl.id = cid;
+
+    if (ioctl(g_fd, VIDIOC_QUERYCTRL, &qctrl) < 0) {
+        return false;
+    }
+
+    // 检查是否是禁用的控制
+    if (qctrl.flags & V4L2_CTRL_FLAG_DISABLED) {
+        return false;
+    }
+
+    return true;
 }
 
 // ==========================================================================
@@ -426,7 +508,6 @@ static v4l2_video_err_t _v4l2_set_format(void)
         return V4L2_VIDEO_ERR_SET_FMT;
     }
 
-    // 【重要】驱动可能会调整参数，必须读取回填值！
     g_config.width = fmt.fmt.pix.width;
     g_config.height = fmt.fmt.pix.height;
     g_config.format = _fourcc_to_v4l2_format(fmt.fmt.pix.pixelformat);
@@ -519,9 +600,8 @@ static v4l2_video_err_t _v4l2_lock_ai_params(void)
 
     LOG_I("Locking AI parameters (exposure/wb/gain)...");
 
-    // 1. 锁定自动曝光
-    if (g_config.lock_exposure) {
-        // 先尝试设置为手动模式
+    // 1. 锁定自动曝光（仅在硬件支持时执行）
+    if (g_config.lock_exposure && g_capability.support_manual_exposure) {
         memset(&ctl, 0, sizeof(ctl));
         ctl.id = V4L2_CID_EXPOSURE_AUTO;
         ctl.value = V4L2_EXPOSURE_MANUAL;
@@ -531,32 +611,38 @@ static v4l2_video_err_t _v4l2_lock_ai_params(void)
         } else {
             LOG_I("Exposure locked to manual");
         }
+    } else if (g_config.lock_exposure && !g_capability.support_manual_exposure) {
+        LOG_I("Manual exposure not supported, skipped");
     }
 
-    // 2. 锁定自动白平衡
-    if (g_config.lock_white_balance) {
+    // 2. 锁定自动白平衡（仅在硬件支持时执行）
+    if (g_config.lock_white_balance && g_capability.support_lock_white_balance) {
         memset(&ctl, 0, sizeof(ctl));
         ctl.id = V4L2_CID_AUTO_WHITE_BALANCE;
-        ctl.value = 0; // 0 = disable
+        ctl.value = 0;
         ret = ioctl(g_fd, VIDIOC_S_CTRL, &ctl);
         if (ret < 0) {
             LOG_W("Failed to lock white balance (non-critical): %s", strerror(errno));
         } else {
             LOG_I("White balance locked");
         }
+    } else if (g_config.lock_white_balance && !g_capability.support_lock_white_balance) {
+        LOG_I("Lock white balance not supported, skipped");
     }
 
-    // 3. 锁定自动增益
-    if (g_config.lock_gain) {
+    // 3. 锁定自动增益（仅在硬件支持时执行，彻底消除警告）
+    if (g_config.lock_gain && g_capability.support_lock_gain) {
         memset(&ctl, 0, sizeof(ctl));
         ctl.id = V4L2_CID_AUTOGAIN;
-        ctl.value = 0; // 0 = disable
+        ctl.value = 0;
         ret = ioctl(g_fd, VIDIOC_S_CTRL, &ctl);
         if (ret < 0) {
             LOG_W("Failed to lock gain (non-critical): %s", strerror(errno));
         } else {
             LOG_I("Gain locked");
         }
+    } else if (g_config.lock_gain && !g_capability.support_lock_gain) {
+        LOG_I("Lock gain not supported, skipped (no warning)");
     }
 
     return V4L2_VIDEO_OK;
@@ -564,20 +650,16 @@ static v4l2_video_err_t _v4l2_lock_ai_params(void)
 
 static uint32_t _v4l2_format_to_fourcc(v4l2_video_format_t fmt)
 {
-    switch (fmt) {
-        case V4L2_PIX_FMT_YUYV: return V4L2_PIX_FMT_YUYV;
-        case V4L2_PIX_FMT_NV12: return V4L2_PIX_FMT_NV12;
-        case V4L2_PIX_FMT_MJPEG: return V4L2_PIX_FMT_MJPEG;
-        default: return V4L2_PIX_FMT_YUYV;
-    }
+    if (fmt == V4L2_PIX_FMT_YUYV) return V4L2_PIX_FMT_YUYV;
+    if (fmt == V4L2_PIX_FMT_NV12) return V4L2_PIX_FMT_NV12;
+    if (fmt == V4L2_PIX_FMT_MJPEG) return V4L2_PIX_FMT_MJPEG;
+    return V4L2_PIX_FMT_YUYV;
 }
 
 static v4l2_video_format_t _fourcc_to_v4l2_format(uint32_t fourcc)
 {
-    switch (fourcc) {
-        case V4L2_PIX_FMT_YUYV: return V4L2_PIX_FMT_YUYV;
-        case V4L2_PIX_FMT_NV12: return V4L2_PIX_FMT_NV12;
-        case V4L2_PIX_FMT_MJPEG: return V4L2_PIX_FMT_MJPEG;
-        default: return V4L2_PIX_FMT_YUYV;
-    }
+    if (fourcc == V4L2_PIX_FMT_YUYV) return V4L2_PIX_FMT_YUYV;
+    if (fourcc == V4L2_PIX_FMT_NV12) return V4L2_PIX_FMT_NV12;
+    if (fourcc == V4L2_PIX_FMT_MJPEG) return V4L2_PIX_FMT_MJPEG;
+    return V4L2_PIX_FMT_YUYV;
 }

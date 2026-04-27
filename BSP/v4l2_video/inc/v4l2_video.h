@@ -43,7 +43,26 @@ typedef enum {
 } v4l2_video_format_t;
 
 // ==========================================================================
-// 3. 采集配置结构体（AI专用优化）
+// 3. 摄像头能力检测结果结构体（系统自洽核心）
+// ==========================================================================
+typedef struct {
+    // 基础硬件信息
+    char device_name[32];       // 摄像头名称（如 "USB 2.0 Camera"）
+    char bus_info[32];          // 总线信息（用于调试多摄像头）
+
+    // 像素格式支持（AI推理常用）
+    bool support_yuyv;          // 是否支持 YUYV 4:2:2（首选）
+    bool support_mjpeg;         // 是否支持 MJPEG（高带宽备选）
+    bool support_nv12;          // 是否支持 NV12（NPU专用）
+
+    // AI稳定性控制参数支持
+    bool support_manual_exposure;   // 是否支持手动曝光锁定
+    bool support_lock_white_balance;// 是否支持自动白平衡锁定
+    bool support_lock_gain;          // 是否支持自动增益锁定
+} v4l2_video_capability_t;
+
+// ==========================================================================
+// 4. 采集配置结构体（AI专用优化）
 // ==========================================================================
 typedef struct {
     const char *dev_path;        // 摄像头设备路径（如 "/dev/video0"）
@@ -60,7 +79,7 @@ typedef struct {
 } v4l2_video_config_t;
 
 // ==========================================================================
-// 4. 帧数据结构体（零拷贝输出给AI）
+// 5. 帧数据结构体（零拷贝输出给AI）
 // ==========================================================================
 typedef struct {
     void *data;          // 帧数据指针（直接指向内核MMAP缓冲区，零拷贝）
@@ -73,13 +92,14 @@ typedef struct {
 } v4l2_video_frame_t;
 
 // ==========================================================================
-// 5. 对外API接口（极简、通用、线程安全）
+// 6. 对外API接口（极简、通用、线程安全）
 // ==========================================================================
 
 /**
  * @brief 初始化V4L2视频采集模块
  * @param config 采集配置结构体指针（不能为空）
  * @return 错误码（V4L2_VIDEO_OK 表示成功）
+ * @note 【内部自动执行】初始化时会自动完成摄像头能力检测
  */
 v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config);
 
@@ -123,5 +143,12 @@ v4l2_video_err_t v4l2_video_deinit(void);
  * @return 错误描述字符串（永远不为NULL）
  */
 const char* v4l2_video_err_str(v4l2_video_err_t err);
+
+/**
+ * @brief 【新增】获取摄像头能力检测结果（系统自洽核心）
+ * @return 摄像头能力结构体指针（永远不为NULL，init后有效）
+ * @note 可用于：1. 打印硬件支持报告 2. 根据检测结果自动适配参数
+ */
+const v4l2_video_capability_t* v4l2_video_get_capability(void);
 
 #endif /* __V4L2_VIDEO_H */
