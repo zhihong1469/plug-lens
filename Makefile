@@ -10,6 +10,13 @@ AR 			:= $(CROSS_COMPILE)ar
 OBJCOPY 	:= $(CROSS_COMPILE)objcopy
 OBJDUMP 	:= $(CROSS_COMPILE)objdump
 
+# 自动获取交叉编译器 sysroot自动适配，无需手动填写
+SYSROOT := $(shell $(CC) -print-sysroot)
+# 标准系统头文件编译选项GCC/Clangd 通用
+SYSROOT_CFLAGS := -isystem $(SYSROOT)/usr/include --sysroot=$(SYSROOT)
+# 导出给子 Makefile.build 使用
+export SYSROOT_CFLAGS
+
 # 1. 定义目录路径 (绝对路径，防止混乱)
 TOPDIR 		:= $(shell pwd)
 SRCDIR 		:= $(TOPDIR)
@@ -61,7 +68,7 @@ $(BUILDDIR):
 	mkdir -p $@
 
 # 初始化 compile_commands.json（清空旧文件，写入 [ 开头）
-init_compile_commands:
+init_compile_commands: $(OUTPUTDIR)
 	@echo "[" > $(COMPILE_COMMANDS)
 
 # 收尾 compile_commands.json（去掉最后一个逗号，写入 ] 结尾）
