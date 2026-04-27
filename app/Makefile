@@ -18,4 +18,5 @@ TARGET_TYPE := EXE
 # 4. 链接 libbsp.a
 LDFLAGS := \
 	-L$(OUTPUTDIR) \
-	-lbsp
+	-lbsp \
+	-pthread
