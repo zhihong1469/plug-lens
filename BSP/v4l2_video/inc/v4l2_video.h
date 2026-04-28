@@ -30,7 +30,9 @@ typedef enum {
     V4L2_VIDEO_ERR_NOT_INIT,
     V4L2_VIDEO_ERR_ALREADY_INIT,
     V4L2_VIDEO_ERR_MUNMAP,
-    V4L2_VIDEO_ERR_CLOSE
+    V4L2_VIDEO_ERR_CLOSE,
+    V4L2_VIDEO_ERR_SET_FPS,       // 【新增】设置帧率失败
+    V4L2_VIDEO_ERR_DUMP_FILE       // 【新增】保存文件失败
 } v4l2_video_err_t;
 
 // ==========================================================================
@@ -150,5 +152,51 @@ const char* v4l2_video_err_str(v4l2_video_err_t err);
  * @note 可用于：1. 打印硬件支持报告 2. 根据检测结果自动适配参数
  */
 const v4l2_video_capability_t* v4l2_video_get_capability(void);
+
+// ==========================================================================
+// 【新增】高级功能 API
+// ==========================================================================
+
+/**
+ * @brief 枚举指定格式下支持的所有分辨率
+ * @param fmt      像素格式
+ * @param sizes    输出数组，存放分辨率对 [width, height]
+ * @param max_cnt  输入数组的最大容量
+ * @return 实际枚举到的分辨率数量
+ */
+uint32_t v4l2_video_enum_sizes(v4l2_video_format_t fmt,
+                                 uint32_t (*sizes)[2],
+                                 uint32_t max_cnt);
+
+/**
+ * @brief 枚举指定格式和分辨率下支持的帧率
+ * @param fmt    像素格式
+ * @param width  宽度
+ * @param height 高度
+ * @param fps    输出数组，存放支持的帧率 (如 15, 30)
+ * @param max_cnt 输入数组的最大容量
+ * @return 实际枚举到的帧率数量
+ */
+uint32_t v4l2_video_enum_fps(v4l2_video_format_t fmt,
+                               uint32_t width,
+                               uint32_t height,
+                               uint32_t *fps,
+                               uint32_t max_cnt);
+
+/**
+ * @brief 动态设置帧率（需在 STOP 状态下调用）
+ * @param fps 期望帧率
+ * @return 错误码
+ * @note 必须先 stop，再 set_fps，再 start
+ */
+v4l2_video_err_t v4l2_video_set_fps(uint32_t fps);
+
+/**
+ * @brief 保存帧为 YUYV 裸数据文件（底层调试用）
+ * @param frame    帧数据指针
+ * @param filepath 保存的完整文件路径
+ * @return 错误码
+ */
+v4l2_video_err_t v4l2_video_dump_yuv(const v4l2_video_frame_t *frame, const char *filepath);
 
 #endif /* __V4L2_VIDEO_H */
