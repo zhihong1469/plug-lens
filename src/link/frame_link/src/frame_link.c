@@ -1,402 +1,416 @@
-#include "v4l2_video.h"
-#include "log.h"
-#include <stdio.h>
+// src/link/frame_link/src/frame_link.c
+#include "frame_link.h"
+#include "video_hal.h"
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <pthread.h>
-#include <errno.h>
-#include <sys/time.h>
+#include <unistd.h>
 
 // ==========================================================================
 // 内部宏定义
 // ==========================================================================
-#define V4L2_APP_MAX_POOL_SIZE  32
-#define V4L2_APP_DEFAULT_QUEUE_SIZE 4  // 【新增】默认队列大小
+#define FRAME_LINK_MAX_POOL_SIZE 32
+#define FRAME_LINK_MAX_QUEUE_SIZE 16
 
 // ==========================================================================
-// 内部帧池项结构体
+// 内部帧节点结构体
 // ==========================================================================
 typedef struct {
-    v4l2_video_frame_t frame;
-    bool is_valid;
-    bool in_use;
-} app_frame_item_t;
+    video_frame_t frame;       // 帧数据
+    bool in_use;               // 是否被占用
+    uint32_t ref_count;        // 引用计数（预留）
+} frame_node_t;
 
 // ==========================================================================
-// 内部静态变量
+// 【核心】内部状态结构体（完全封装）
 // ==========================================================================
-static bool g_is_init = false;
-static bool g_is_running = false;
-static v4l2_app_config_t g_config;
+typedef struct {
+    // HAL层相关
+    video_handle_t hal_handle;
+    video_capability_t hal_cap;
+    frame_link_config_t config;
 
-static app_frame_item_t *g_frame_pool = NULL;
-static uint32_t g_pool_size = 0;
-static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+    // 帧池管理
+    frame_node_t *frame_pool;
+    uint32_t pool_size;
+    pthread_mutex_t pool_lock;
 
-static Queue_t g_frame_queue;
-static void **g_queue_buffer = NULL;
+    // 队列管理
+    frame_node_t **queue;
+    uint32_t queue_size;
+    uint32_t queue_head;
+    uint32_t queue_tail;
+    uint32_t queue_count;
+    pthread_mutex_t queue_lock;
+    pthread_cond_t queue_not_empty;
+    pthread_cond_t queue_not_full;
 
-static pthread_t g_capture_thread;
-static volatile bool g_thread_should_exit = false;
-static volatile bool g_device_error = false; // 【新增】硬件错误标志位
+    // 采集线程
+    pthread_t capture_thread;
+    bool running;
+    bool streaming;
+
+    // 【预留】Service层回调
+    frame_link_frame_ready_cb frame_ready_cb;
+    void *cb_user_data;
+} frame_link_context_t;
 
 // ==========================================================================
 // 内部辅助函数声明
 // ==========================================================================
-static void* _capture_thread_func(void *arg);
-static app_frame_item_t* _pool_get_free_item(void);
-static void _pool_return_item(app_frame_item_t *item);
-static int _wait_queue_not_empty(int timeout_ms);
+static frame_node_t* _frame_link_alloc_frame(frame_link_context_t *ctx);
+static void _frame_link_free_frame(frame_link_context_t *ctx, frame_node_t *node);
+static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node);
+static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t timeout_ms);
+static void* _frame_link_capture_thread(void *arg);
 
 // ==========================================================================
-// 对外 API 实现
+// 对外API实现
 // ==========================================================================
 
-int v4l2_app_init(const v4l2_app_config_t *config)
+video_err_t frame_link_init(const frame_link_config_t *config,
+                            frame_link_handle_t *out_handle)
 {
-    if (config == NULL || config->v4l2_cfg.dev_path == NULL) {
-        LOG_E("Invalid param");
-        return -1;
+    if (config == NULL || out_handle == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
     }
 
-    if (g_is_init) {
-        LOG_E("Already initialized");
-        return -1;
+    // 分配上下文
+    frame_link_context_t *ctx = (frame_link_context_t*)malloc(sizeof(frame_link_context_t));
+    if (ctx == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    memset(ctx, 0, sizeof(frame_link_context_t));
+
+    // 拷贝配置
+    memcpy(&ctx->config, config, sizeof(frame_link_config_t));
+    if (ctx->config.frame_pool_size == 0) ctx->config.frame_pool_size = 8;
+    if (ctx->config.frame_pool_size > FRAME_LINK_MAX_POOL_SIZE) ctx->config.frame_pool_size = FRAME_LINK_MAX_POOL_SIZE;
+    if (ctx->config.queue_size == 0) ctx->config.queue_size = 4;
+    if (ctx->config.queue_size > FRAME_LINK_MAX_QUEUE_SIZE) ctx->config.queue_size = FRAME_LINK_MAX_QUEUE_SIZE;
+
+    // 初始化锁
+    pthread_mutex_init(&ctx->pool_lock, NULL);
+    pthread_mutex_init(&ctx->queue_lock, NULL);
+    pthread_cond_init(&ctx->queue_not_empty, NULL);
+    pthread_cond_init(&ctx->queue_not_full, NULL);
+
+    // 分配帧池
+    ctx->pool_size = ctx->config.frame_pool_size;
+    ctx->frame_pool = (frame_node_t*)malloc(ctx->pool_size * sizeof(frame_node_t));
+    if (ctx->frame_pool == NULL) {
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    memset(ctx->frame_pool, 0, ctx->pool_size * sizeof(frame_node_t));
+
+    // 分配队列
+    ctx->queue_size = ctx->config.queue_size;
+    ctx->queue = (frame_node_t**)malloc(ctx->queue_size * sizeof(frame_node_t*));
+    if (ctx->queue == NULL) {
+        free(ctx->frame_pool);
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    memset(ctx->queue, 0, ctx->queue_size * sizeof(frame_node_t*));
+
+    // 初始化HAL层
+    video_err_t err = video_open(&ctx->config.hal_config, &ctx->hal_cap, &ctx->hal_handle);
+    if (err != VIDEO_OK) {
+        free(ctx->queue);
+        free(ctx->frame_pool);
+        free(ctx);
+        return err;
     }
 
-    LOG_I("Initializing V4L2 App...");
-    memset(&g_config, 0, sizeof(g_config));
-    memcpy(&g_config, config, sizeof(v4l2_app_config_t));
+    ctx->running = false;
+    ctx->streaming = false;
+    ctx->frame_ready_cb = NULL;
+    ctx->cb_user_data = NULL;
 
-    // 【修复 1】强制设置默认值，防止 queue_size 为 0
-    if (g_config.queue_size == 0) {
-        g_config.queue_size = V4L2_APP_DEFAULT_QUEUE_SIZE;
-        LOG_W("Queue size not set, using default: %u", g_config.queue_size);
-    }
-
-    // 1. 初始化底层 V4L2
-    v4l2_video_err_t err = v4l2_video_init(&g_config.v4l2_cfg);
-    if (err != V4L2_VIDEO_OK) {
-        LOG_E("V4L2 init failed: %s", v4l2_video_err_str(err));
-        return -1;
-    }
-
-    // 2. 确定帧池大小
-    g_pool_size = g_config.queue_size;
-    if (g_pool_size > g_config.v4l2_cfg.buf_count) {
-        g_pool_size = g_config.v4l2_cfg.buf_count;
-    }
-    if (g_pool_size > V4L2_APP_MAX_POOL_SIZE) {
-        g_pool_size = V4L2_APP_MAX_POOL_SIZE;
-    }
-    
-    // 【修复 2】二次校验，防止为 0
-    if (g_pool_size == 0) {
-        LOG_E("Fatal: Pool size is zero!");
-        goto error_v4l2_deinit;
-    }
-
-    LOG_I("Frame pool size: %u", g_pool_size);
-
-    // 3. 分配帧池内存
-    g_frame_pool = (app_frame_item_t*)calloc(g_pool_size, sizeof(app_frame_item_t));
-    if (g_frame_pool == NULL) {
-        LOG_E("Failed to alloc frame pool");
-        goto error_v4l2_deinit;
-    }
-
-    // 4. 分配环形队列缓冲区
-    g_queue_buffer = (void**)calloc(g_pool_size + 1, sizeof(void*));
-    if (g_queue_buffer == NULL) {
-        LOG_E("Failed to alloc queue buffer");
-        goto error_free_pool;
-    }
-
-    // 5. 初始化环形队列
-    Queue_Init(&g_frame_queue, g_queue_buffer, g_pool_size + 1);
-
-    g_device_error = false;
-    g_is_init = true;
-    LOG_I("V4L2 App init success");
-    return 0;
-
-error_free_pool:
-    free(g_frame_pool);
-    g_frame_pool = NULL;
-error_v4l2_deinit:
-    v4l2_video_deinit();
-    return -1;
+    *out_handle = (frame_link_handle_t)ctx;
+    return VIDEO_OK;
 }
 
-int v4l2_app_start(void)
+video_err_t frame_link_start(frame_link_handle_t handle)
 {
-    if (!g_is_init) {
-        LOG_E("Not initialized");
-        return -1;
+    if (handle == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
     }
-    if (g_is_running) {
-        LOG_W("Already running");
-        return 0;
-    }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    LOG_I("Starting V4L2 capture...");
-
-    v4l2_video_err_t err = v4l2_video_start();
-    if (err != V4L2_VIDEO_OK) {
-        LOG_E("V4L2 start failed: %s", v4l2_video_err_str(err));
-        return -1;
+    if (ctx->running) {
+        return VIDEO_OK;
     }
 
-    g_thread_should_exit = false;
-    Queue_Clear(&g_frame_queue);
-
-    pthread_mutex_lock(&g_pool_mutex);
-    for (uint32_t i = 0; i < g_pool_size; i++) {
-        g_frame_pool[i].in_use = false;
-        g_frame_pool[i].is_valid = false;
+    // 启动HAL层流
+    video_err_t err = video_start_stream(ctx->hal_handle);
+    if (err != VIDEO_OK) {
+        return err;
     }
-    pthread_mutex_unlock(&g_pool_mutex);
+    ctx->streaming = true;
 
-    if (pthread_create(&g_capture_thread, NULL, _capture_thread_func, NULL) != 0) {
-        LOG_E("Failed to create capture thread: %s", strerror(errno));
-        v4l2_video_stop();
-        return -1;
+    // 启动采集线程
+    ctx->running = true;
+    if (pthread_create(&ctx->capture_thread, NULL, _frame_link_capture_thread, ctx) != 0) {
+        video_stop_stream(ctx->hal_handle);
+        ctx->streaming = false;
+        return VIDEO_ERR_INVALID_PARAM;
     }
-    g_is_running = true;
-    LOG_I("Capture thread started");
-    return 0;
+
+    return VIDEO_OK;
 }
 
-int v4l2_app_get_frame(v4l2_video_frame_t **frame, int timeout_ms)
+video_err_t frame_link_stop(frame_link_handle_t handle)
 {
-    if (frame == NULL) return -1;
-    if (!g_is_init) return -1;
-    
-    // 检查硬件错误标志
-    if (g_device_error) {
-        LOG_E("Device error detected, cannot get frame");
-        return -1;
+    if (handle == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
+
+    if (!ctx->running) {
+        return VIDEO_OK;
     }
 
-    void *item_ptr = NULL;
-    
-    if (timeout_ms == 0) {
-        if (Queue_Get(&g_frame_queue, &item_ptr) != QUEUE_OK) {
-            return -1;
+    // 停止采集线程
+    ctx->running = false;
+    pthread_cond_broadcast(&ctx->queue_not_empty);
+    pthread_cond_broadcast(&ctx->queue_not_full);
+    pthread_join(ctx->capture_thread, NULL);
+
+    // 停止HAL层流
+    if (ctx->streaming) {
+        video_stop_stream(ctx->hal_handle);
+        ctx->streaming = false;
+    }
+
+    // 清空队列
+    pthread_mutex_lock(&ctx->queue_lock);
+    while (ctx->queue_count > 0) {
+        frame_node_t *node = ctx->queue[ctx->queue_head];
+        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
+        ctx->queue_count--;
+        _frame_link_free_frame(ctx, node);
+    }
+    pthread_mutex_unlock(&ctx->queue_lock);
+
+    return VIDEO_OK;
+}
+
+video_err_t frame_link_get_frame(frame_link_handle_t handle,
+                                  video_frame_t *frame,
+                                  uint32_t timeout_ms)
+{
+    if (handle == NULL || frame == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
+
+    // 从队列取帧
+    frame_node_t *node = _frame_link_dequeue(ctx, timeout_ms);
+    if (node == NULL) {
+        return VIDEO_ERR_POLL;
+    }
+
+    // 拷贝帧数据（不修改原始数据）
+    memcpy(frame, &node->frame, sizeof(video_frame_t));
+    return VIDEO_OK;
+}
+
+video_err_t frame_link_put_frame(frame_link_handle_t handle,
+                                  const video_frame_t *frame)
+{
+    if (handle == NULL || frame == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
+
+    // 通过index找到对应的帧节点
+    pthread_mutex_lock(&ctx->pool_lock);
+    frame_node_t *node = NULL;
+    for (uint32_t i = 0; i < ctx->pool_size; i++) {
+        if (ctx->frame_pool[i].frame.index == frame->index) {
+            node = &ctx->frame_pool[i];
+            break;
         }
-    } else if (timeout_ms < 0) {
-        while (Queue_Get(&g_frame_queue, &item_ptr) != QUEUE_OK) {
-            usleep(10000);
-            if (!g_is_running || g_device_error) return -1;
-        }
-    } else {
-        if (_wait_queue_not_empty(timeout_ms) != 0) {
-            return -1;
-        }
-        if (Queue_Get(&g_frame_queue, &item_ptr) != QUEUE_OK) {
-            return -1;
-        }
+    }
+    pthread_mutex_unlock(&ctx->pool_lock);
+
+    if (node == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
     }
 
-    if (item_ptr == NULL) return -1;
+    // 先归还HAL层缓冲区
+    video_put_frame(ctx->hal_handle, frame);
 
-    app_frame_item_t *item = (app_frame_item_t*)item_ptr;
-    *frame = &item->frame;
-    return 0;
+    // 再释放帧节点
+    _frame_link_free_frame(ctx, node);
+    return VIDEO_OK;
 }
 
-void v4l2_app_release_frame(v4l2_video_frame_t *frame)
+video_err_t frame_link_register_frame_ready_cb(frame_link_handle_t handle,
+                                                 frame_link_frame_ready_cb cb,
+                                                 void *user_data)
 {
-    if (frame == NULL || !g_is_init) return;
+    if (handle == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    app_frame_item_t *item = (app_frame_item_t*)
-        ((uint8_t*)frame - offsetof(app_frame_item_t, frame));
+    pthread_mutex_lock(&ctx->queue_lock);
+    ctx->frame_ready_cb = cb;
+    ctx->cb_user_data = user_data;
+    pthread_mutex_unlock(&ctx->queue_lock);
 
-    // 即使硬件出错，也要尝试归还驱动
-    v4l2_video_put_frame(&item->frame);
-    _pool_return_item(item);
+    return VIDEO_OK;
 }
 
-int v4l2_app_stop(void)
+video_err_t frame_link_deinit(frame_link_handle_t handle)
 {
-    if (!g_is_init) return 0;
-    if (!g_is_running) return 0;
-
-    LOG_I("Stopping V4L2 capture...");
-
-    g_thread_should_exit = true;
-
-    if (pthread_join(g_capture_thread, NULL) != 0) {
-        LOG_E("Failed to join thread: %s", strerror(errno));
+    if (handle == NULL) {
+        return VIDEO_ERR_INVALID_PARAM;
     }
+    frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    // 【修复】即使 stop 失败，也要继续清理，不要返回错误阻塞流程
-    v4l2_video_stop(); // 忽略返回值
+    // 先停止
+    frame_link_stop(handle);
 
-    g_is_running = false;
-    LOG_I("V4L2 capture stopped");
-    return 0;
-}
+    // 关闭HAL层
+    video_close(ctx->hal_handle);
 
-void v4l2_app_deinit(void)
-{
-    if (!g_is_init) return;
+    // 释放资源
+    pthread_mutex_destroy(&ctx->pool_lock);
+    pthread_mutex_destroy(&ctx->queue_lock);
+    pthread_cond_destroy(&ctx->queue_not_empty);
+    pthread_cond_destroy(&ctx->queue_not_full);
 
-    if (g_is_running) {
-        v4l2_app_stop();
-    }
+    free(ctx->queue);
+    free(ctx->frame_pool);
+    free(ctx);
 
-    LOG_I("Deinitializing V4L2 App...");
-
-    if (g_queue_buffer != NULL) {
-        free(g_queue_buffer);
-        g_queue_buffer = NULL;
-    }
-
-    if (g_frame_pool != NULL) {
-        free(g_frame_pool);
-        g_frame_pool = NULL;
-    }
-
-    v4l2_video_deinit();
-
-    g_is_init = false;
-    g_pool_size = 0;
-    g_device_error = false;
-    LOG_I("V4L2 App deinit success");
-}
-
-int v4l2_app_save_yuv(const v4l2_video_frame_t *frame, const char *save_dir)
-{
-    if (frame == NULL || save_dir == NULL) return -1;
-    if (frame->data == NULL || frame->length == 0) return -1;
-
-    char filepath[256];
-    static uint32_t file_counter = 0;
-
-    snprintf(filepath, sizeof(filepath), "%s/frame_%06u.yuv", save_dir, file_counter++);
-    return v4l2_video_dump_yuv(frame, filepath) == V4L2_VIDEO_OK ? 0 : -1;
+    return VIDEO_OK;
 }
 
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
 
-static void* _capture_thread_func(void *arg)
+static frame_node_t* _frame_link_alloc_frame(frame_link_context_t *ctx)
 {
-    (void)arg;
-    LOG_I("Capture thread running");
-    int consecutive_errors = 0;
-
-    while (!g_thread_should_exit) {
-        // 检查硬件错误标志
-        if (g_device_error) {
-            LOG_E("Device error flag set, exiting capture thread");
+    pthread_mutex_lock(&ctx->pool_lock);
+    frame_node_t *node = NULL;
+    for (uint32_t i = 0; i < ctx->pool_size; i++) {
+        if (!ctx->frame_pool[i].in_use) {
+            node = &ctx->frame_pool[i];
+            node->in_use = true;
+            node->ref_count = 1;
             break;
         }
+    }
+    pthread_mutex_unlock(&ctx->pool_lock);
+    return node;
+}
 
-        app_frame_item_t *item = _pool_get_free_item();
-        if (item == NULL) {
-            // 帧池耗尽，说明消费者处理太慢
-            usleep(20000);
+static void _frame_link_free_frame(frame_link_context_t *ctx, frame_node_t *node)
+{
+    if (node == NULL) return;
+
+    pthread_mutex_lock(&ctx->pool_lock);
+    node->in_use = false;
+    node->ref_count = 0;
+    memset(&node->frame, 0, sizeof(video_frame_t));
+    pthread_mutex_unlock(&ctx->pool_lock);
+}
+
+static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node)
+{
+    pthread_mutex_lock(&ctx->queue_lock);
+
+    // 队列满：丢旧帧（流控）
+    if (ctx->queue_count >= ctx->queue_size) {
+        frame_node_t *old_node = ctx->queue[ctx->queue_head];
+        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
+        ctx->queue_count--;
+        _frame_link_free_frame(ctx, old_node);
+    }
+
+    // 入队
+    ctx->queue[ctx->queue_tail] = node;
+    ctx->queue_tail = (ctx->queue_tail + 1) % ctx->queue_size;
+    ctx->queue_count++;
+
+    // 通知等待者
+    pthread_cond_signal(&ctx->queue_not_empty);
+
+    // 【预留】调用Service层回调
+    if (ctx->frame_ready_cb != NULL) {
+        ctx->frame_ready_cb(&node->frame, ctx->cb_user_data);
+    }
+
+    pthread_mutex_unlock(&ctx->queue_lock);
+    return 0;
+}
+
+static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t timeout_ms)
+{
+    pthread_mutex_lock(&ctx->queue_lock);
+
+    // 等待队列非空
+    while (ctx->queue_count == 0 && ctx->running) {
+        if (timeout_ms == 0) {
+            pthread_cond_wait(&ctx->queue_not_empty, &ctx->queue_lock);
+        } else {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += timeout_ms / 1000;
+            ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+            if (ts.tv_nsec >= 1000000000) {
+                ts.tv_sec++;
+                ts.tv_nsec -= 1000000000;
+            }
+            pthread_cond_timedwait(&ctx->queue_not_empty, &ctx->queue_lock, &ts);
+        }
+    }
+
+    if (!ctx->running || ctx->queue_count == 0) {
+        pthread_mutex_unlock(&ctx->queue_lock);
+        return NULL;
+    }
+
+    // 出队
+    frame_node_t *node = ctx->queue[ctx->queue_head];
+    ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
+    ctx->queue_count--;
+
+    pthread_cond_signal(&ctx->queue_not_full);
+    pthread_mutex_unlock(&ctx->queue_lock);
+
+    return node;
+}
+
+static void* _frame_link_capture_thread(void *arg)
+{
+    frame_link_context_t *ctx = (frame_link_context_t*)arg;
+
+    while (ctx->running) {
+        // 从HAL层取帧
+        frame_node_t *node = _frame_link_alloc_frame(ctx);
+        if (node == NULL) {
+            usleep(10000); // 帧池满，等待
             continue;
         }
 
-        // 从 V4L2 获取帧
-        v4l2_video_err_t err = v4l2_video_get_frame(&item->frame);
-        if (err != V4L2_VIDEO_OK) {
-            if (err != V4L2_VIDEO_ERR_POLL) {
-                LOG_E("Get frame failed: %s (consecutive=%d)", 
-                      v4l2_video_err_str(err), ++consecutive_errors);
-                
-                // 【新增】连续错误超过 5 次，触发硬件错误保护
-                if (consecutive_errors > 5) {
-                    g_device_error = true;
-                    LOG_E("Too many errors, marking device as faulty");
-                    _pool_return_item(item);
-                    break;
-                }
-            } else {
-                // 正常超时，重置计数
-                consecutive_errors = 0;
-            }
-            
-            _pool_return_item(item);
+        video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
+        if (err != VIDEO_OK) {
+            _frame_link_free_frame(ctx, node);
+            if (!ctx->running) break;
             usleep(10000);
             continue;
         }
 
-        // 成功获取帧
-        consecutive_errors = 0;
-        item->is_valid = true;
-
-        // 【新增】调试日志：打印获取到的帧信息
-        LOG_D("Capture thread got frame: idx=%u, len=%u", 
-              item->frame.index, item->frame.length);
-
-        // 推入队列
-        if (Queue_Put(&g_frame_queue, (void*)item) != QUEUE_OK) {
-            LOG_W("Queue full, dropping frame");
-            v4l2_video_put_frame(&item->frame);
-            _pool_return_item(item);
-            continue;
-        }
+        // 入队
+        _frame_link_enqueue(ctx, node);
     }
 
-    LOG_I("Capture thread exiting");
     return NULL;
-}
-
-static app_frame_item_t* _pool_get_free_item(void)
-{
-    app_frame_item_t *ret = NULL;
-
-    pthread_mutex_lock(&g_pool_mutex);
-    for (uint32_t i = 0; i < g_pool_size; i++) {
-        if (!g_frame_pool[i].in_use) {
-            g_frame_pool[i].in_use = true;
-            g_frame_pool[i].is_valid = false;
-            ret = &g_frame_pool[i];
-            break;
-        }
-    }
-    pthread_mutex_unlock(&g_pool_mutex);
-
-    return ret;
-}
-
-static void _pool_return_item(app_frame_item_t *item)
-{
-    if (item == NULL) return;
-
-    pthread_mutex_lock(&g_pool_mutex);
-    item->in_use = false;
-    item->is_valid = false;
-    pthread_mutex_unlock(&g_pool_mutex);
-}
-
-static int _wait_queue_not_empty(int timeout_ms)
-{
-    struct timeval start, now;
-    gettimeofday(&start, NULL);
-
-    while (1) {
-        if (!Queue_IsEmpty(&g_frame_queue)) {
-            return 0;
-        }
-        if (!g_is_running || g_device_error) {
-            return -1;
-        }
-
-        gettimeofday(&now, NULL);
-        int elapsed = (now.tv_sec - start.tv_sec) * 1000 + 
-                      (now.tv_usec - start.tv_usec) / 1000;
-        
-        if (elapsed >= timeout_ms) {
-            return -1;
-        }
-
-        usleep(5000);
-    }
 }
