@@ -1,202 +1,191 @@
-#ifndef __V4L2_HAL_H
-#define __V4L2_HAL_H
+// src/hal/video/inc/video_hal.h
+#ifndef VIDEO_HAL_H
+#define VIDEO_HAL_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 // ==========================================================================
-// 1. 错误码定义（完善、可追溯）
+// 【HAL层铁律】
+// 1. 绝对不创建业务线程
+// 2. 绝对不碰数据流、业务逻辑
+// 3. 锁完全私有，不向上暴露（本层无锁！）
+// 4. 不依赖任何上层代码
+// 5. 无状态、无全局变量、纯函数操作
+// ==========================================================================
+
+// ==========================================================================
+// 1. 不透明句柄（状态由Link层管理，HAL层不维护）
+// ==========================================================================
+typedef void* video_handle_t;
+
+// ==========================================================================
+// 2. 通用错误码定义（全硬件兼容）
 // ==========================================================================
 typedef enum {
-    V4L2_VIDEO_OK = 0,
-    V4L2_VIDEO_ERR_OPEN,
-    V4L2_VIDEO_ERR_QUERYCAP,
-    V4L2_VIDEO_ERR_NOT_CAPTURE,
-    V4L2_VIDEO_ERR_NOT_STREAMING,
-    V4L2_VIDEO_ERR_ENUM_FMT,
-    V4L2_VIDEO_ERR_SET_FMT,
-    V4L2_VIDEO_ERR_REQBUFS,
-    V4L2_VIDEO_ERR_QUERYBUF,
-    V4L2_VIDEO_ERR_MMAP,
-    V4L2_VIDEO_ERR_QBUF,
-    V4L2_VIDEO_ERR_STREAMON,
-    V4L2_VIDEO_ERR_STREAMOFF,
-    V4L2_VIDEO_ERR_POLL,
-    V4L2_VIDEO_ERR_DQBUF,
-    V4L2_VIDEO_ERR_LOCK,
-    V4L2_VIDEO_ERR_UNLOCK,
-    V4L2_VIDEO_ERR_INVALID_PARAM,
-    V4L2_VIDEO_ERR_NOT_INIT,
-    V4L2_VIDEO_ERR_ALREADY_INIT,
-    V4L2_VIDEO_ERR_MUNMAP,
-    V4L2_VIDEO_ERR_CLOSE,
-    V4L2_VIDEO_ERR_SET_FPS,       // 【新增】设置帧率失败
-    V4L2_VIDEO_ERR_DUMP_FILE       // 【新增】保存文件失败
-} v4l2_video_err_t;
+    VIDEO_OK = 0,
+    VIDEO_ERR_OPEN,
+    VIDEO_ERR_QUERYCAP,
+    VIDEO_ERR_NOT_CAPTURE,
+    VIDEO_ERR_NOT_STREAMING,
+    VIDEO_ERR_ENUM_FMT,
+    VIDEO_ERR_SET_FMT,
+    VIDEO_ERR_REQBUFS,
+    VIDEO_ERR_QUERYBUF,
+    VIDEO_ERR_MMAP,
+    VIDEO_ERR_QBUF,
+    VIDEO_ERR_STREAMON,
+    VIDEO_ERR_STREAMOFF,
+    VIDEO_ERR_POLL,
+    VIDEO_ERR_DQBUF,
+    VIDEO_ERR_INVALID_PARAM,
+    VIDEO_ERR_MUNMAP,
+    VIDEO_ERR_CLOSE,
+    VIDEO_ERR_SET_FPS,
+    VIDEO_ERR_DUMP_FILE
+} video_err_t;
 
 // ==========================================================================
-// 2. 像素格式定义（AI视觉常用）
+// 3. 通用像素格式定义（AI视觉常用）
 // ==========================================================================
 typedef enum {
-    V4L2_PIX_FMT_YUYV = 0,  // 默认：AI首选无压缩4:2:2格式
-    V4L2_PIX_FMT_NV12,       // 备选：部分NPU/CNN偏好的4:2:0格式
-    V4L2_PIX_FMT_MJPEG       // 预留：仅用于特殊高带宽场景
-} v4l2_video_format_t;
+    VIDEO_PIX_FMT_YUYV = 0,
+    VIDEO_PIX_FMT_NV12,
+    VIDEO_PIX_FMT_MJPEG
+} video_format_t;
 
 // ==========================================================================
-// 3. 摄像头能力检测结果结构体（系统自洽核心）
-// ==========================================================================
-typedef struct {
-    // 基础硬件信息
-    char device_name[32];       // 摄像头名称（如 "USB 2.0 Camera"）
-    char bus_info[32];          // 总线信息（用于调试多摄像头）
-
-    // 像素格式支持（AI推理常用）
-    bool support_yuyv;          // 是否支持 YUYV 4:2:2（首选）
-    bool support_mjpeg;         // 是否支持 MJPEG（高带宽备选）
-    bool support_nv12;          // 是否支持 NV12（NPU专用）
-
-    // AI稳定性控制参数支持
-    bool support_manual_exposure;   // 是否支持手动曝光锁定
-    bool support_lock_white_balance;// 是否支持自动白平衡锁定
-    bool support_lock_gain;          // 是否支持自动增益锁定
-} v4l2_video_capability_t;
-
-// ==========================================================================
-// 4. 采集配置结构体（AI专用优化）
+// 4. 摄像头能力检测结果
 // ==========================================================================
 typedef struct {
-    const char *dev_path;        // 摄像头设备路径（如 "/dev/video0"）
-    uint32_t width;               // 期望采集宽度（如 640/1280）
-    uint32_t height;              // 期望采集高度（如 480/720）
-    v4l2_video_format_t format;   // 像素格式
-    uint32_t fps;                 // 期望采集帧率（如 15/30）
-    uint32_t buf_count;           // 内核缓冲区数量（建议 3-5）
-    
-    // AI推理稳定性专用配置（默认全锁）
-    bool lock_exposure;           // 锁定自动曝光（防止画面忽明忽暗）
-    bool lock_white_balance;      // 锁定自动白平衡（防止颜色漂移）
-    bool lock_gain;               // 锁定自动增益（防止噪点波动）
-} v4l2_video_config_t;
+    char device_name[32];
+    char bus_info[32];
+    bool support_yuyv;
+    bool support_mjpeg;
+    bool support_nv12;
+    bool support_manual_exposure;
+    bool support_lock_white_balance;
+    bool support_lock_gain;
+} video_capability_t;
 
 // ==========================================================================
-// 5. 帧数据结构体（零拷贝输出给AI）
+// 5. 通用采集配置
 // ==========================================================================
 typedef struct {
-    void *data;          // 帧数据指针（直接指向内核MMAP缓冲区，零拷贝）
-    uint32_t length;     // 帧数据总长度（字节）
-    uint32_t width;      // 实际宽度（驱动可能会调整，以此为准）
-    uint32_t height;     // 实际高度（驱动可能会调整，以此为准）
-    v4l2_video_format_t format; // 实际像素格式
-    uint64_t timestamp;  // 帧时间戳（微秒，用于AI多模态同步）
-    uint32_t index;      // 内部缓冲区索引（用户无需关心）
-} v4l2_video_frame_t;
+    const char *dev_path;
+    uint32_t width;
+    uint32_t height;
+    video_format_t format;
+    uint32_t fps;
+    uint32_t buf_count;
+    bool lock_exposure;
+    bool lock_white_balance;
+    bool lock_gain;
+} video_config_t;
 
 // ==========================================================================
-// 6. 对外API接口（极简、通用、线程安全）
+// 6. 通用帧数据结构体（零拷贝）
+// ==========================================================================
+typedef struct {
+    void *data;
+    uint32_t length;
+    uint32_t width;
+    uint32_t height;
+    video_format_t format;
+    uint64_t timestamp;
+    uint32_t index;
+} video_frame_t;
+
+// ==========================================================================
+// 7. 【核心】完美重构后的通用摄像头接口（无状态、纯函数）
 // ==========================================================================
 
 /**
- * @brief 初始化V4L2视频采集模块
- * @param config 采集配置结构体指针（不能为空）
- * @return 错误码（V4L2_VIDEO_OK 表示成功）
- * @note 【内部自动执行】初始化时会自动完成摄像头能力检测
- */
-v4l2_video_err_t v4l2_video_init(const v4l2_video_config_t *config);
-
-/**
- * @brief 启动视频采集流
+ * @brief 打开摄像头设备（无状态，返回句柄）
+ * @param config 采集配置
+ * @param cap 输出：摄像头能力检测结果
+ * @param out_handle 输出：不透明句柄
  * @return 错误码
  */
-v4l2_video_err_t v4l2_video_start(void);
+video_err_t video_open(const video_config_t *config,
+                       video_capability_t *cap,
+                       video_handle_t *out_handle);
 
 /**
- * @brief 获取一帧原始数据（线程安全，阻塞等待）
- * @param frame 输出帧结构体指针（不能为空）
- * @return 错误码
- * @note 【重要】调用后必须调用 v4l2_video_put_frame() 归还缓冲区！
- *       否则会导致缓冲区耗尽，采集卡死！
- */
-v4l2_video_err_t v4l2_video_get_frame(v4l2_video_frame_t *frame);
-
-/**
- * @brief 归还帧缓冲区给驱动（必须与get_frame严格配对调用）
- * @param frame 帧结构体指针（不能为空）
+ * @brief 关闭摄像头设备（释放所有硬件资源）
+ * @param handle 句柄
  * @return 错误码
  */
-v4l2_video_err_t v4l2_video_put_frame(const v4l2_video_frame_t *frame);
+video_err_t video_close(video_handle_t handle);
 
 /**
- * @brief 停止视频采集流
+ * @brief 启动视频流
+ * @param handle 句柄
  * @return 错误码
  */
-v4l2_video_err_t v4l2_video_stop(void);
+video_err_t video_start_stream(video_handle_t handle);
 
 /**
- * @brief 反初始化模块，释放所有资源（必须调用！）
+ * @brief 停止视频流
+ * @param handle 句柄
  * @return 错误码
  */
-v4l2_video_err_t v4l2_video_deinit(void);
+video_err_t video_stop_stream(video_handle_t handle);
 
 /**
- * @brief 获取错误描述字符串（用于调试/日志）
- * @param err 错误码
- * @return 错误描述字符串（永远不为NULL）
+ * @brief 获取一帧数据（无锁、阻塞、纯硬件操作）
+ * @param handle 句柄
+ * @param frame 输出帧
+ * @return 错误码
+ * @note 【重要】必须调用 video_put_frame() 归还缓冲区！
  */
-const char* v4l2_video_err_str(v4l2_video_err_t err);
+video_err_t video_get_frame(video_handle_t handle, video_frame_t *frame);
 
 /**
- * @brief 【新增】获取摄像头能力检测结果（系统自洽核心）
- * @return 摄像头能力结构体指针（永远不为NULL，init后有效）
- * @note 可用于：1. 打印硬件支持报告 2. 根据检测结果自动适配参数
+ * @brief 归还帧缓冲区（无锁、纯硬件操作）
+ * @param handle 句柄
+ * @param frame 帧
+ * @return 错误码
  */
-const v4l2_video_capability_t* v4l2_video_get_capability(void);
+video_err_t video_put_frame(video_handle_t handle, const video_frame_t *frame);
 
-// ==========================================================================
-// 【新增】高级功能 API
-// ==========================================================================
+/**
+ * @brief 动态设置帧率（需在STOP状态下调用）
+ * @param handle 句柄
+ * @param fps 期望帧率
+ * @return 错误码
+ */
+video_err_t video_set_fps(video_handle_t handle, uint32_t fps);
 
 /**
  * @brief 枚举指定格式下支持的所有分辨率
- * @param fmt      像素格式
- * @param sizes    输出数组，存放分辨率对 [width, height]
- * @param max_cnt  输入数组的最大容量
- * @return 实际枚举到的分辨率数量
  */
-uint32_t v4l2_video_enum_sizes(v4l2_video_format_t fmt,
-                                 uint32_t (*sizes)[2],
-                                 uint32_t max_cnt);
+uint32_t video_enum_sizes(video_handle_t handle,
+                           video_format_t fmt,
+                           uint32_t (*sizes)[2],
+                           uint32_t max_cnt);
 
 /**
  * @brief 枚举指定格式和分辨率下支持的帧率
- * @param fmt    像素格式
- * @param width  宽度
- * @param height 高度
- * @param fps    输出数组，存放支持的帧率 (如 15, 30)
- * @param max_cnt 输入数组的最大容量
- * @return 实际枚举到的帧率数量
  */
-uint32_t v4l2_video_enum_fps(v4l2_video_format_t fmt,
-                               uint32_t width,
-                               uint32_t height,
-                               uint32_t *fps,
-                               uint32_t max_cnt);
+uint32_t video_enum_fps(video_handle_t handle,
+                         video_format_t fmt,
+                         uint32_t width,
+                         uint32_t height,
+                         uint32_t *fps,
+                         uint32_t max_cnt);
 
 /**
- * @brief 动态设置帧率（需在 STOP 状态下调用）
- * @param fps 期望帧率
- * @return 错误码
- * @note 必须先 stop，再 set_fps，再 start
+ * @brief 保存帧为YUYV裸数据文件（调试用）
  */
-v4l2_video_err_t v4l2_video_set_fps(uint32_t fps);
+video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath);
 
 /**
- * @brief 保存帧为 YUYV 裸数据文件（底层调试用）
- * @param frame    帧数据指针
- * @param filepath 保存的完整文件路径
- * @return 错误码
+ * @brief 获取错误描述字符串
+ * @param err 错误码
+ * @return 错误描述（永远不为NULL）
  */
-v4l2_video_err_t v4l2_video_dump_yuv(const v4l2_video_frame_t *frame, const char *filepath);
+const char* video_err_str(video_err_t err);
 
-#endif /* __V4L2_HAL_H */
+#endif /* VIDEO_HAL_H */

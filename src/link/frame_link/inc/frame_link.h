@@ -1,73 +1,101 @@
-#ifndef __V4L2_VIDEO_H
-#define __V4L2_VIDEO_H
+// src/link/frame_link/inc/frame_link.h
+#ifndef FRAME_LINK_H
+#define FRAME_LINK_H
 
-#include "v4l2_hal.h"
-#include "queue.h"
+#include "video_hal.h"
 #include <stdint.h>
 #include <stdbool.h>
 
 // ==========================================================================
-// APP 层配置结构体
+// 【Link层铁律】
+// 1. 绝对不修改帧数据、不做AI推理/编码
+// 2. 绝对不直接向上层暴露帧池、队列、锁
+// 3. 只调用HAL层接口，不依赖更上层代码
+// ==========================================================================
+
+// ==========================================================================
+// 1. 不透明句柄（内部实现完全封装）
+// ==========================================================================
+typedef void* frame_link_handle_t;
+
+// ==========================================================================
+// 2. 链路配置
 // ==========================================================================
 typedef struct {
-    v4l2_video_config_t v4l2_cfg;   // 底层 V4L2 配置（直接透传给驱动层）
-    uint32_t queue_size;              // 环形队列缓存帧数（建议 3-5，需 <= V4L2 buf_count）
-} v4l2_app_config_t;
+    video_config_t hal_config;  // HAL层配置（透传）
+    uint32_t frame_pool_size;   // 帧池大小（建议5-10）
+    uint32_t queue_size;        // 队列大小（建议3-5）
+} frame_link_config_t;
 
 // ==========================================================================
-// 对外 API 接口
+// 3. 【预留】Service层回调接口（后续接入总线）
 // ==========================================================================
-
-/**
- * @brief 初始化 V4L2 应用层
- * @param config 配置结构体指针（不能为空）
- * @return 0 成功，-1 失败
- * @note 内部会自动完成：1. 初始化 V4L2 驱动 2. 初始化帧池 3. 初始化环形队列
- */
-int v4l2_app_init(const v4l2_app_config_t *config);
-
-/**
- * @brief 启动视频采集（内部创建采集线程）
- * @return 0 成功，-1 失败
- */
-int v4l2_app_start(void);
-
-/**
- * @brief 获取一帧数据（消费者接口，从环形队列取）
- * @param frame      输出参数，返回帧数据指针的地址
- * @param timeout_ms 超时时间（毫秒）：0=非阻塞，-1=无限阻塞，>0=等待指定时间
- * @return 0 成功获取，-1 超时/失败
- * @note 【重要】获取后必须调用 v4l2_app_release_frame() 归还！否则会导致资源泄漏！
- */
-int v4l2_app_get_frame(v4l2_video_frame_t **frame, int timeout_ms);
-
-/**
- * @brief 归还帧数据（消费者接口，释放回驱动和帧池）
- * @param frame 帧数据指针（由 get_frame 获取）
- */
-void v4l2_app_release_frame(v4l2_video_frame_t *frame);
-
-/**
- * @brief 停止视频采集（停止采集线程）
- * @return 0 成功，-1 失败
- */
-int v4l2_app_stop(void);
-
-/**
- * @brief 反初始化，释放所有资源（必须在 stop 之后调用）
- */
-void v4l2_app_deinit(void);
+typedef void (*frame_link_frame_ready_cb)(const video_frame_t *frame, void *user_data);
 
 // ==========================================================================
-// 调试工具接口
+// 4. 【核心】Link层对外接口
 // ==========================================================================
 
 /**
- * @brief 保存一帧为 YUYV 裸数据文件（应用层调试用）
- * @param frame    帧数据指针
- * @param save_dir 保存目录（如 "/tmp"，文件会自动命名为 frame_xxxxxx.yuv）
- * @return 0 成功，-1 失败
+ * @brief 初始化视频帧链路
+ * @param config 链路配置
+ * @param out_handle 输出：不透明句柄
+ * @return 错误码（复用HAL层错误码）
  */
-int v4l2_app_save_yuv(const v4l2_video_frame_t *frame, const char *save_dir);
+video_err_t frame_link_init(const frame_link_config_t *config,
+                            frame_link_handle_t *out_handle);
 
-#endif 
+/**
+ * @brief 启动链路（启动采集线程）
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t frame_link_start(frame_link_handle_t handle);
+
+/**
+ * @brief 停止链路（停止采集线程）
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t frame_link_stop(frame_link_handle_t handle);
+
+/**
+ * @brief 【Service层用】从链路获取一帧（阻塞）
+ * @param handle 句柄
+ * @param frame 输出帧
+ * @param timeout_ms 超时时间（毫秒，0表示无限等待）
+ * @return 错误码
+ * @note 必须调用 frame_link_put_frame() 归还！
+ */
+video_err_t frame_link_get_frame(frame_link_handle_t handle,
+                                  video_frame_t *frame,
+                                  uint32_t timeout_ms);
+
+/**
+ * @brief 【Service层用】归还帧到链路
+ * @param handle 句柄
+ * @param frame 帧
+ * @return 错误码
+ */
+video_err_t frame_link_put_frame(frame_link_handle_t handle,
+                                  const video_frame_t *frame);
+
+/**
+ * @brief 【预留】注册帧就绪回调（后续接入总线）
+ * @param handle 句柄
+ * @param cb 回调函数
+ * @param user_data 用户数据
+ * @return 错误码
+ */
+video_err_t frame_link_register_frame_ready_cb(frame_link_handle_t handle,
+                                                 frame_link_frame_ready_cb cb,
+                                                 void *user_data);
+
+/**
+ * @brief 反初始化链路（释放所有资源）
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t frame_link_deinit(frame_link_handle_t handle);
+
+#endif /* FRAME_LINK_H */
