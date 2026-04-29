@@ -45,7 +45,6 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "Compiling $<"
 	# 执行编译
 	$(CC) $(CFLAGS) -c $< -o $@
-	# 追加 JSON 条目到 compile_commands.json（注意转义双引号）
 	$(eval COMPILE_CMD := $(CC) $(CFLAGS) -c $< -o $@)
 	@echo '  {' >> $(COMPILE_COMMANDS)
 	@echo '    "directory": "$(TOPDIR)",' >> $(COMPILE_COMMANDS)

@@ -163,7 +163,6 @@ int v4l2_app_start(void)
         v4l2_video_stop();
         return -1;
     }
-
     g_is_running = true;
     LOG_I("Capture thread started");
     return 0;
@@ -174,7 +173,7 @@ int v4l2_app_get_frame(v4l2_video_frame_t **frame, int timeout_ms)
     if (frame == NULL) return -1;
     if (!g_is_init) return -1;
     
-    // 【新增】检查硬件错误标志
+    // 检查硬件错误标志
     if (g_device_error) {
         LOG_E("Device error detected, cannot get frame");
         return -1;
