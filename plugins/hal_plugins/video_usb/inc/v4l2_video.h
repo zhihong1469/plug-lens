@@ -1,7 +1,7 @@
-#ifndef __V4L2_APP_H
-#define __V4L2_APP_H
+#ifndef __V4L2_VIDEO_H
+#define __V4L2_VIDEO_H
 
-#include "v4l2_video.h"
+#include "v4l2_hal.h"
 #include "queue.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -70,4 +70,4 @@ void v4l2_app_deinit(void);
  */
 int v4l2_app_save_yuv(const v4l2_video_frame_t *frame, const char *save_dir);
 
-#endif /* __V4L2_APP_H */
+#endif 
