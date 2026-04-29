@@ -1,5 +1,9 @@
 # ==========================================================================
-# 顶层 Makefile：自动扫描子目录 + 控制编译顺序 + 生成 compile_commands.json
+# 顶层 Makefile：修复版
+# 核心改动：
+# 1. 明确编译顺序：common → plugins → src
+# 2. 修复路径处理逻辑
+# 3. 支持 src/ 下多子模块编译
 # ==========================================================================
 
 # 0. 定义交叉编译工具链
@@ -34,13 +38,13 @@ export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 # 顺序：common（公共库）→ plugins（插件）→ src（核心框架）
 SUBDIRS := common plugins src
 
-# 3. 定义目标列表：格式为 build-xxx
+# 3. 目标列表
 TARGETS := $(patsubst %, build-%, $(SUBDIRS))
 
 # 默认目标
 all: $(OUTPUTDIR) $(BUILDDIR) init_compile_commands $(TARGETS) finalize_compile_commands
 	@echo "=========================================="
-	@echo "Build complete! Check output directory."
+	@echo "Build complete! Output: $(OUTPUTDIR)"
 	@echo "=========================================="
 
 # 创建输出目录
@@ -57,12 +61,11 @@ init_compile_commands: $(OUTPUTDIR)
 
 # 收尾 compile_commands.json（去掉最后一个逗号，写入 ] 结尾）
 finalize_compile_commands:
-	@# 这是一个小技巧：用 sed 去掉文件倒数第二行的逗号（JSON 格式要求）
 	@sed -i '$$s/,$$//' $(COMPILE_COMMANDS)
 	@echo "]" >> $(COMPILE_COMMANDS)
 	@echo "Generated: $(COMPILE_COMMANDS)"
 
-# 4. 核心规则：针对每一个子目录，调用 Makefile.build
+# 4. 核心编译规则
 $(TARGETS): build-%:
 	@mkdir -p $(BUILDDIR)/$*
 	@echo "=========================================="
