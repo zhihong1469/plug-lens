@@ -21,15 +21,18 @@ int main(int argc, char **argv) {
 
     // 2. 填充配置（这里可以从 configs 文件读，或者写死）
     memset(&app_cfg, 0, sizeof(app_cfg));
-    app_cfg.v4l2_cfg.dev_path = argv[1] ? argv[1] : "/dev/video1";
+    app_cfg.v4l2_cfg.dev_path = "/dev/video1";
     app_cfg.v4l2_cfg.width = 640;
     app_cfg.v4l2_cfg.height = 480;
     app_cfg.v4l2_cfg.format = V4L2_PIX_FMT_YUYV;
     app_cfg.v4l2_cfg.fps = 30;
+    app_cfg.v4l2_cfg.buf_count = 4;
     app_cfg.v4l2_cfg.lock_exposure = true;
-    app_cfg.queue_size = 4; // 队列缓存 4 帧
+    app_cfg.v4l2_cfg.lock_white_balance = true;
+    app_cfg.v4l2_cfg.lock_gain = true;
+    app_cfg.queue_size = 4; 
 
-    // 3. 初始化 APP 层（一行搞定，内部自动开线程）
+    // 3. 初始化 APP 层
     if (v4l2_app_init(&app_cfg) != 0) {
         LOG_E("App init failed");
         return -1;

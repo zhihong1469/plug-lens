@@ -1,115 +1,69 @@
-
-[root@100ask:/mnt]# ./vision_ai_app /dev/video1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:58][main] Starting V4L2 capture demo...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:125][v4l2_video_init] Initializing V4L2 video: dev=/dev/video1, 640x480, fmt=0, fps=15, bufs=4
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:157][v4l2_video_init] Device: Wed Camera, Bus: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:403][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:404][_v4l2_detect_capability] Camera Capability Detection Result:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:405][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:406][_v4l2_detect_capability] Device Name: Wed Camera
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:407][_v4l2_detect_capability] Bus Info: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:410][_v4l2_detect_capability] --- Supported Formats ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:420][_v4l2_detect_capability]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:420][_v4l2_detect_capability]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:434][_v4l2_detect_capability] --- AI Control Support ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:439][_v4l2_detect_capability]   Manual Exposure: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:440][_v4l2_detect_capability]   Lock White Balance: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:441][_v4l2_detect_capability]   Lock Auto Gain: No
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:442][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:477][_v4l2_enum_formats] Enumerating supported formats:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:487][_v4l2_enum_formats]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:487][_v4l2_enum_formats]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:516][_v4l2_set_format] Set format success: actual 640x480, fmt=0x56595559
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:537][_v4l2_alloc_buffers] Allocated 4 buffers
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:570][_v4l2_mmap_buffers] Mmap buffer 0: offset=0x0, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:570][_v4l2_mmap_buffers] Mmap buffer 1: offset=0x96000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:570][_v4l2_mmap_buffers] Mmap buffer 2: offset=0x12C000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:570][_v4l2_mmap_buffers] Mmap buffer 3: offset=0x1C2000, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:601][_v4l2_lock_ai_params] Locking AI parameters (exposure/wb/gain)...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:612][_v4l2_lock_ai_params] Exposure locked to manual
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:627][_v4l2_lock_ai_params] White balance locked
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:645][_v4l2_lock_ai_params] Lock gain not supported, skipped (no warning)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:190][v4l2_video_init] V4L2 video init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:65][main] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:66][main] Final Camera Capability Report:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:67][main]   YUYV Support: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:68][main]   MJPEG Support: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:69][main]   Manual Exposure: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:70][main]   Lock WB: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:71][main]   Lock Gain: No
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:72][main] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:592][_v4l2_queue_all_buffers] Queued 4 buffers
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:230][v4l2_video_start] V4L2 stream started
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:81][main] Capture started, press Ctrl+C to exit
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077022059
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #1: 640x480, format=1448695129, len=614400 bytes, ts=10077022059 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077054463
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #2: 640x480, format=1448695129, len=614400 bytes, ts=10077054463 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=10077086771
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #3: 640x480, format=1448695129, len=614400 bytes, ts=10077086771 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=10077122187
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #4: 640x480, format=1448695129, len=614400 bytes, ts=10077122187 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077154585
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #5: 640x480, format=1448695129, len=614400 bytes, ts=10077154585 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077186872
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #6: 640x480, format=1448695129, len=614400 bytes, ts=10077186872 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=10077222334
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #7: 640x480, format=1448695129, len=614400 bytes, ts=10077222334 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=10077254706
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #8: 640x480, format=1448695129, len=614400 bytes, ts=10077254706 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077290114
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #9: 640x480, format=1448695129, len=614400 bytes, ts=10077290114 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077322480
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #10: 640x480, format=1448695129, len=614400 bytes, ts=10077322480 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=10077354843
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #11: 640x480, format=1448695129, len=614400 bytes, ts=10077354843 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=10077390248
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #12: 640x480, format=1448695129, len=614400 bytes, ts=10077390248 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077422623
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #13: 640x480, format=1448695129, len=614400 bytes, ts=10077422623 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077458044
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #14: 640x480, format=1448695129, len=614400 bytes, ts=10077458044 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=10077490402
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #15: 640x480, format=1448695129, len=614400 bytes, ts=10077490402 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=10077522781
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #16: 640x480, format=1448695129, len=614400 bytes, ts=10077522781 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077558185
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #17: 640x480, format=1448695129, len=614400 bytes, ts=10077558185 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077590540
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #18: 640x480, format=1448695129, len=614400 bytes, ts=10077590540 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=10077622944
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #19: 640x480, format=1448695129, len=614400 bytes, ts=10077622944 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=10077658342
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #20: 640x480, format=1448695129, len=614400 bytes, ts=10077658342 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=10077690680
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #21: 640x480, format=1448695129, len=614400 bytes, ts=10077690680 us
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:294][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=10077726155
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:102][main] Frame #22: 640x480, format=1448695129, len=614400 bytes, ts=10077726155 us
-[D][/home/luo/linux/6ull/p^C[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:21][sig_handler] Received signal, exiting...
-uisition_terminal/BSP/v4l2_video/src/v4l2_video.c:317][v4l2_video_put_frame] Put frame: idx=2
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:116][main] Stopping capture...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:343][v4l2_video_stop] V4L2 stream stopped
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:381][v4l2_video_deinit] V4L2 video deinit success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:122][main] Demo exited successfully, total frames: 27
+[root@100ask:/mnt]# ./vision_ai_app
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:68][v4l2_app_init] Initializing V4L2 App...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:128][v4l2_video_init] Initializing V4L2 video: dev=/dev/video1, 640x480, fmt=0, fps=30, bufs=4
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:160][v4l2_video_init] Device: Wed Camera, Bus: usb-ci_hdrc.1-1
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:421][_v4l2_detect_capability] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:422][_v4l2_detect_capability] Camera Capability Detection Result:
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:423][_v4l2_detect_capability] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:424][_v4l2_detect_capability] Device Name: Wed Camera
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:425][_v4l2_detect_capability] Bus Info: usb-ci_hdrc.1-1
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:427][_v4l2_detect_capability] --- Supported Formats ---
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [0] Motion-JPEG (0x47504A4D)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [1] YUYV 4:2:2 (0x56595559)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:450][_v4l2_detect_capability] --- AI Control Support ---
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:455][_v4l2_detect_capability]   Manual Exposure: Yes
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:456][_v4l2_detect_capability]   Lock White Balance: Yes
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:457][_v4l2_detect_capability]   Lock Auto Gain: No
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:458][_v4l2_detect_capability] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:489][_v4l2_enum_formats] Enumerating supported formats:
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [0] Motion-JPEG (0x47504A4D)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [1] YUYV 4:2:2 (0x56595559)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:528][_v4l2_set_format] Set format success: actual 640x480, fmt=0x56595559
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:569][_v4l2_set_fps] Set FPS success: requested 30, actual 30
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:590][_v4l2_alloc_buffers] Allocated 4 buffers
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 0: offset=0x0, len=614400
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 1: offset=0x96000, len=614400
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 2: offset=0x12C000, len=614400
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 3: offset=0x1C2000, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:654][_v4l2_lock_ai_params] Locking AI parameters (exposure/wb/gain)...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:664][_v4l2_lock_ai_params] Exposure locked to manual
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:676][_v4l2_lock_ai_params] White balance locked
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:198][v4l2_video_init] V4L2 video init success
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:100][v4l2_app_init] Frame pool size: 4
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:121][v4l2_app_init] V4L2 App init success
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:143][v4l2_app_start] Starting V4L2 capture...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:645][_v4l2_queue_all_buffers] Queued 4 buffers
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:238][v4l2_video_start] V4L2 stream started
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:168][v4l2_app_start] Capture thread started
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:43][main] System running...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:290][_capture_thread_func] Capture thread running
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=92928405
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:820][v4l2_video_dump_yuv] Dump YUV success: /tmp/frame_000000.yuv (614400 bytes)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=92960872
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=1, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=92993183
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=2, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95276474
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95308910
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
+[D][/^C[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95777232
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:227][v4l2_app_stop] Stopping V4L2 capture...
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95812691
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:348][_capture_thread_func] Capture thread exiting
+^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C
