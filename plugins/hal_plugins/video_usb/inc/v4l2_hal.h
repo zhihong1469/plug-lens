@@ -1,5 +1,5 @@
-#ifndef __V4L2_VIDEO_H
-#define __V4L2_VIDEO_H
+#ifndef __V4L2_HAL_H
+#define __V4L2_HAL_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -199,4 +199,4 @@ v4l2_video_err_t v4l2_video_set_fps(uint32_t fps);
  */
 v4l2_video_err_t v4l2_video_dump_yuv(const v4l2_video_frame_t *frame, const char *filepath);
 
-#endif /* __V4L2_VIDEO_H */
+#endif /* __V4L2_HAL_H */

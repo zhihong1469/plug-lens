@@ -47,8 +47,8 @@ SUB_MAKEFILES_REL := $(patsubst $(TOPDIR)/%,%,$(SUB_MAKEFILES))
 # 提取目录名（如 app/Makefile -> app）
 SUBDIRS_RAW := $(patsubst %/,%,$(dir $(SUB_MAKEFILES_REL)))
 
-# 排序：BSP 优先，其他在后
-SUBDIRS := $(filter BSP,$(SUBDIRS_RAW)) $(filter-out BSP,$(SUBDIRS_RAW))
+# 排序：common 优先，其他在后
+SUBDIRS := $(filter common,$(SUBDIRS_RAW)) $(filter-out common,$(SUBDIRS_RAW))
 
 # 3. 定义目标列表：格式为 build-xxx
 TARGETS := $(patsubst %, build-%, $(SUBDIRS))
@@ -82,7 +82,7 @@ finalize_compile_commands:
 $(TARGETS): build-%:
 	@mkdir -p $(BUILDDIR)/$*
 	@echo "=========================================="
-	@echo "Building Module: $*"
+	@echo "Building : $*"
 	@echo "=========================================="
 	@make -C $(BUILDDIR)/$* -f $(TOPDIR)/Makefile.build CUR_DIR=$*
 

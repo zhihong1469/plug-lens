@@ -1,4 +1,4 @@
-#include "v4l2_app.h"
+#include "v4l2_video.h"
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
