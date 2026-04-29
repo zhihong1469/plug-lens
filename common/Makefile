@@ -1,20 +1,20 @@
 # ==========================================================================
-# BSP/Makefile：硬件抽象层（V4L2 + 公共工具）
+# common/Makefile：公共组件库
 # ==========================================================================
 
-# 1. 源文件（所有BSP子模块的.c文件，相对BSP目录）
+# 1. 源文件（相对于 common/ 目录，直接写子路径）
 SRC_FILES := \
-	common/log/src/log.c \
-	common/queue/src/queue.c \
+	log/src/log.c \
+	queue/src/queue.c
 
-# 2. 头文件路径（必须包含所有BSP的inc目录）
+# 2. 头文件路径
 INC_FLAGS := \
-	-I$(SRC_DIR)/common/log/inc \
-	-I$(SRC_DIR)/common/queue/inc \
+	-I$(TOPDIR)/common/log/inc \
+	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/thread/inc \
+	-I$(TOPDIR)/common/utils/inc
 
-	
-
-# 3. 编译为静态库 libbsp.a
+# 3. 生成静态库
 TARGET_NAME := libcom.a
 TARGET_TYPE := LIB
 
