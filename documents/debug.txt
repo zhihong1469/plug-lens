@@ -1,69 +1,86 @@
 [root@100ask:/mnt]# ./vision_ai_app
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:68][v4l2_app_init] Initializing V4L2 App...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:128][v4l2_video_init] Initializing V4L2 video: dev=/dev/video1, 640x480, fmt=0, fps=30, bufs=4
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:160][v4l2_video_init] Device: Wed Camera, Bus: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:421][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:422][_v4l2_detect_capability] Camera Capability Detection Result:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:423][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:424][_v4l2_detect_capability] Device Name: Wed Camera
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:425][_v4l2_detect_capability] Bus Info: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:427][_v4l2_detect_capability] --- Supported Formats ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:450][_v4l2_detect_capability] --- AI Control Support ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:455][_v4l2_detect_capability]   Manual Exposure: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:456][_v4l2_detect_capability]   Lock White Balance: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:457][_v4l2_detect_capability]   Lock Auto Gain: No
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:458][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:489][_v4l2_enum_formats] Enumerating supported formats:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:528][_v4l2_set_format] Set format success: actual 640x480, fmt=0x56595559
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:569][_v4l2_set_fps] Set FPS success: requested 30, actual 30
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:590][_v4l2_alloc_buffers] Allocated 4 buffers
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 0: offset=0x0, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 1: offset=0x96000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 2: offset=0x12C000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 3: offset=0x1C2000, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:654][_v4l2_lock_ai_params] Locking AI parameters (exposure/wb/gain)...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:664][_v4l2_lock_ai_params] Exposure locked to manual
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:676][_v4l2_lock_ai_params] White balance locked
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:198][v4l2_video_init] V4L2 video init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:100][v4l2_app_init] Frame pool size: 4
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:121][v4l2_app_init] V4L2 App init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:143][v4l2_app_start] Starting V4L2 capture...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:645][_v4l2_queue_all_buffers] Queued 4 buffers
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:238][v4l2_video_start] V4L2 stream started
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:168][v4l2_app_start] Capture thread started
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:43][main] System running...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:290][_capture_thread_func] Capture thread running
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=92928405
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:820][v4l2_video_dump_yuv] Dump YUV success: /tmp/frame_000000.yuv (614400 bytes)
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=92960872
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=1, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=92993183
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=2, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95276474
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95308910
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
-[D][/^C[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95777232
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:227][v4l2_app_stop] Stopping V4L2 capture...
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95812691
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:348][_capture_thread_func] Capture thread exiting
-^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:131][main] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:132][main]   Vision AI Demo
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:133][main] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:140][main] Main: Initializing framework...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:170][main] Main: Framework initialized successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:173][main] Main: Loading plugins...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:185][main] Main: Plugins loaded successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:32][capture_srv_plugin_init] Capture Srv Plugin: Initializing...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:57][capture_srv_plugin_init] Capture Srv Plugin: Initialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:28][demo_app_init] Demo App: Initializing...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:38][demo_app_init] Demo App: Initialized successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:195][main] Main: Starting plugins...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:63][capture_srv_plugin_start] Capture Srv Plugin: Starting...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:65][capture_srv_plugin_start] Capture Srv Plugin: Ready (press 's' to start capture)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:45][demo_app_start] Demo App: Starting...
+
+========================================
+  Vision AI Demo
+========================================
+  Commands:
+    h - Print this help
+    s - Start video capture
+    t - Stop video capture
+    q - Quit the application
+========================================
+
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:48][demo_app_start] Demo App: Started successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:202][main] Main: System is running...
+s
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:95][demo_app_command_loop] Demo App: Starting capture...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52680395
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52716802
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=52749151
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=52784542
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52816896
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52849278
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=52884720
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=52917056
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52952495
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52984834
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53017259
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53052652
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53084977
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53120412
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53152774
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53185098
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53220565
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53252965
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53285224
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53320707
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53353098
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53388484
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53420830
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53453251
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53488661
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53520969
+t[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53556414
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53588809
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53621117
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53656570
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53688992
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53721248
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53756739
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53789098
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53824543
+
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53856861
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:100][demo_app_command_loop] Demo App: Stopping capture...
+h
+
+========================================
+  Vision AI Demo
+========================================
+  Commands:
+    h - Print this help
+    s - Start video capture
+    t - Stop video capture
+    q - Quit the application
+========================================
+
+q
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:105][demo_app_command_loop] Demo App: User requested quit
+^C[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:124][_demo_app_signal_handler] Demo App: Received signal 2, stopping...
+^C[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:124][_demo_app_signal_handler] Demo App: Received signal 2, stopping...
+
