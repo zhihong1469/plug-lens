@@ -1,69 +1,141 @@
-#include <signal.h>
-#include <string.h>
-#include "v4l2_video.h"
+// src/app/main.c
+#include "vision_ai_config.h"
+#include "event_bus.h"
+#include "data_bus.h"
+#include "global_fsm.h"
+#include "plugin_loader.h"
+#include "demo_app.h"
 #include "log.h"
+#include <stdlib.h>
+#include <string.h>
 
+// ==========================================================================
+// 【main.c极简】只做3件事：初始化框架、加载插件、启动状态机
+// ==========================================================================
 
-static volatile sig_atomic_t g_running = 1;
+// 框架全局句柄（供插件使用，实际项目中应该提供getter函数）
+event_bus_handle_t g_event_bus = NULL;
+data_bus_handle_t g_data_bus = NULL;
+global_fsm_handle_t g_global_fsm = NULL;
 
-void sig_handler(int sig) {
-    (void)sig;
-    g_running = 0;
-}
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+    int ret = 0;
 
-int main(int argc, char **argv) {
-    v4l2_app_config_t app_cfg;
-    v4l2_video_frame_t *frame = NULL;
-    int save_counter = 0;
+    LOG_I("========================================");
+    LOG_I("  %s", CONFIG_APP_NAME);
+    LOG_I("========================================");
 
-    // 1. 信号处理
-    signal(SIGINT, sig_handler);
+    // ======================================================================
+    // 1. 初始化框架（双总线、全局FSM）
+    // ======================================================================
+    LOG_I("Main: Initializing framework...");
 
-    // 2. 填充配置（这里可以从 configs 文件读，或者写死）
-    memset(&app_cfg, 0, sizeof(app_cfg));
-    app_cfg.v4l2_cfg.dev_path = "/dev/video1";
-    app_cfg.v4l2_cfg.width = 640;
-    app_cfg.v4l2_cfg.height = 480;
-    app_cfg.v4l2_cfg.format = V4L2_PIX_FMT_YUYV;
-    app_cfg.v4l2_cfg.fps = 30;
-    app_cfg.v4l2_cfg.buf_count = 4;
-    app_cfg.v4l2_cfg.lock_exposure = true;
-    app_cfg.v4l2_cfg.lock_white_balance = true;
-    app_cfg.v4l2_cfg.lock_gain = true;
-    app_cfg.queue_size = 4; 
-
-    // 3. 初始化 APP 层
-    if (v4l2_app_init(&app_cfg) != 0) {
-        LOG_E("App init failed");
-        return -1;
+    // 初始化Event Bus
+    event_bus_config_t event_bus_cfg = {
+        .max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS,
+        .max_event_queue = CONFIG_EVENT_BUS_MAX_QUEUE,
+        .enable_stats = CONFIG_EVENT_BUS_ENABLE_STATS,
+    };
+    ret = event_bus_init(&event_bus_cfg, &g_event_bus);
+    if (ret != 0) {
+        LOG_E("Main: Failed to initialize Event Bus");
+        goto error_exit;
     }
 
-    // 4. 启动
-    v4l2_app_start();
-    LOG_I("System running...");
-
-    // 5. 主循环（Main 线程只干一件事：取帧 -> AI 推理）
-    while (g_running) {
-        // 5.1 从队列取帧（等待 100ms）
-        if (v4l2_app_get_frame(&frame, 100) != 0) {
-            continue; // 没数据，继续等
-        }
-
-        // 5.2 【核心业务】在这里做 AI 推理
-        LOG_I("Got frame for AI: %ux%u", frame->width, frame->height);
-
-        // 5.3 【调试】每隔 100 帧存一张图
-        if (save_counter++ % 100 == 0) {
-            v4l2_app_save_yuv(frame, "/tmp");
-        }
-
-        // 5.4 推理完，归还帧（非常重要）
-        v4l2_app_release_frame(frame);
+    // 初始化Data Bus
+    data_bus_config_t data_bus_cfg = {
+        .max_frames = CONFIG_DATA_BUS_MAX_FRAMES,
+        .enable_stats = CONFIG_DATA_BUS_ENABLE_STATS,
+    };
+    ret = data_bus_init(&data_bus_cfg, &g_data_bus);
+    if (ret != 0) {
+        LOG_E("Main: Failed to initialize Data Bus");
+        goto error_event_bus;
     }
 
-    // 6. 优雅退出
-    v4l2_app_stop();
-    v4l2_app_deinit();
-    LOG_I("Exit success");
+    // 初始化全局FSM
+    global_fsm_config_t global_fsm_cfg = {
+        .max_module_count = CONFIG_GLOBAL_FSM_MAX_MODULES,
+    };
+    ret = global_fsm_init(&global_fsm_cfg, &g_global_fsm);
+    if (ret != 0) {
+        LOG_E("Main: Failed to initialize Global FSM");
+        goto error_data_bus;
+    }
+
+    LOG_I("Main: Framework initialized successfully");
+
+    // ======================================================================
+    // 2. 加载插件（静态插件注册）
+    // ======================================================================
+    LOG_I("Main: Loading plugins...");
+
+    // 注册demo_app插件
+    ret = plugin_register(&g_demo_app_desc);
+    if (ret != 0) {
+        LOG_E("Main: Failed to register demo_app plugin");
+        goto error_global_fsm;
+    }
+
+    // 初始化所有插件
+    ret = plugin_init_all();
+    if (ret != 0) {
+        LOG_E("Main: Failed to initialize plugins");
+        goto error_plugins;
+    }
+
+    LOG_I("Main: Plugins loaded successfully");
+
+    // ======================================================================
+    // 3. 启动插件（启动状态机）
+    // ======================================================================
+    LOG_I("Main: Starting plugins...");
+
+    ret = plugin_start_all();
+    if (ret != 0) {
+        LOG_E("Main: Failed to start plugins");
+        goto error_plugins_stop;
+    }
+
+    LOG_I("Main: System is running...");
+
+    // ======================================================================
+    // 4. 等待插件停止
+    // ======================================================================
+    // 插件启动后会进入自己的事件循环，main.c只需要等待
+    // 这里简化为无限循环，实际项目中可以用条件变量
+    while (1) {
+        sleep(1);
+    }
+
+    // ======================================================================
+    // 正常退出（不会走到这里）
+    // ======================================================================
+    plugin_stop_all();
+    plugin_deinit_all();
+    global_fsm_deinit(g_global_fsm);
+    data_bus_deinit(g_data_bus);
+    event_bus_deinit(g_event_bus);
+    LOG_I("Main: System exited normally");
     return 0;
+
+    // ======================================================================
+    // 错误退出
+    // ======================================================================
+error_plugins_stop:
+    plugin_stop_all();
+error_plugins:
+    plugin_deinit_all();
+error_global_fsm:
+    global_fsm_deinit(g_global_fsm);
+error_data_bus:
+    data_bus_deinit(g_data_bus);
+error_event_bus:
+    event_bus_deinit(g_event_bus);
+error_exit:
+    LOG_E("Main: System exited with error");
+    return -1;
 }
