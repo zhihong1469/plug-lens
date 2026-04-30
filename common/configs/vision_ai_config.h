@@ -1,4 +1,4 @@
-// common/configs/vision_ai_config.h（解耦）
+// common/configs/vision_ai_config.h
 #ifndef VISION_AI_CONFIG_H
 #define VISION_AI_CONFIG_H
 
@@ -39,5 +39,17 @@
 // 帧链路配置（纯数值）
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
+
+// ==========================================================================
+// [新增] 全局句柄声明（框架初始化后赋值，插件通过此获取框架实例）
+// ==========================================================================
+// 注意：实际项目中应该用getter函数，这里简化为全局变量
+#include "event_bus.h"
+#include "data_bus.h"
+#include "global_fsm.h"
+
+extern event_bus_handle_t g_event_bus;
+extern data_bus_handle_t g_data_bus;
+extern global_fsm_handle_t g_global_fsm;
 
 #endif /* VISION_AI_CONFIG_H */
