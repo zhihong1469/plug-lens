@@ -36,17 +36,10 @@
 // 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
-
-// ==========================================================================
-// 【修改】移除对bus/fsm头文件的依赖，避免循环依赖
-// 改为在main.c中定义全局句柄，这里只做声明
-// ==========================================================================
+// 只保留类型别名，方便使用
 typedef void* event_bus_handle_t;
 typedef void* data_bus_handle_t;
 typedef void* global_fsm_handle_t;
 
-extern event_bus_handle_t g_event_bus;
-extern data_bus_handle_t g_data_bus;
-extern global_fsm_handle_t g_global_fsm;
 
 #endif /* VISION_AI_CONFIG_H */

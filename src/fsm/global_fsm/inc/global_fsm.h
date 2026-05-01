@@ -134,4 +134,20 @@ const char* global_state_to_str(global_state_t state);
  */
 const char* global_event_to_str(global_event_t event);
 
+/**
+ * @brief 【标准回调】子模块状态变化回调（用于注册到具体 Service）
+ * 
+ * 这是 Global FSM 暴露给上层的标准回调函数指针类型。
+ * 具体 Service（如 capture_srv）应在初始化时，将此回调设为其 state_change_cb。
+ * 
+ * @param module_name 子模块名称
+ * @param old_state 旧状态
+ * @param new_state 新状态
+ * @param user_data 必须是 global_fsm_handle_t
+ */
+void global_fsm_on_module_state_change(const char *module_name,
+                                        module_state_t old_state,
+                                        module_state_t new_state,
+                                        void *user_data);
+
 #endif /* GLOBAL_FSM_H */

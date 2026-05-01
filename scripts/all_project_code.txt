@@ -190,19 +190,16 @@ LDFLAGS :=
 #ifndef VISION_AI_CONFIG_H
 #define VISION_AI_CONFIG_H
 
-// 【核心】只包含标准C库头文件，不包含任何业务层头文件！
 #include <stdint.h>
 #include <stdbool.h>
 
 // ==========================================================================
-// 【配置集中管理】所有系统参数统一在这里定义
+// 配置集中管理
 // ==========================================================================
-
-// 通用配置
 #define CONFIG_APP_NAME "Vision AI Demo"
 #define CONFIG_AUTO_START true
 
-// 双总线配置（纯数值，不依赖event_bus.h/data_bus.h类型）
+// 双总线配置
 #define CONFIG_EVENT_BUS_MAX_SUBSCRIBERS 64
 #define CONFIG_EVENT_BUS_MAX_QUEUE 256
 #define CONFIG_EVENT_BUS_ENABLE_STATS true
@@ -210,31 +207,31 @@ LDFLAGS :=
 #define CONFIG_DATA_BUS_MAX_FRAMES 128
 #define CONFIG_DATA_BUS_ENABLE_STATS true
 
-// 全局FSM配置（纯数值）
+// 全局FSM配置
 #define CONFIG_GLOBAL_FSM_MAX_MODULES 16
 
-// 采集服务配置（纯数值，不依赖video_hal.h类型）
-#define CONFIG_CAPTURE_DEV_PATH "/dev/video0"
+// 采集服务配置
+#define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
 #define CONFIG_CAPTURE_WIDTH 640
 #define CONFIG_CAPTURE_HEIGHT 480
-#define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV，纯数值
+#define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
-// 帧链路配置（纯数值）
+// 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
 
 // ==========================================================================
-// [新增] 全局句柄声明（框架初始化后赋值，插件通过此获取框架实例）
+// 【修改】移除对bus/fsm头文件的依赖，避免循环依赖
+// 改为在main.c中定义全局句柄，这里只做声明
 // ==========================================================================
-// 注意：实际项目中应该用getter函数，这里简化为全局变量
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
+typedef void* event_bus_handle_t;
+typedef void* data_bus_handle_t;
+typedef void* global_fsm_handle_t;
 
 extern event_bus_handle_t g_event_bus;
 extern data_bus_handle_t g_data_bus;
@@ -246,10 +243,24 @@ extern global_fsm_handle_t g_global_fsm;
 =============================================
 【公共层】common/log/inc/log.h
 =============================================
+// common/log/inc/log.h
 #ifndef __LOG_H
 #define __LOG_H
 
 #include <stdio.h>
+#include <stdint.h>
+
+// ==========================================================================
+// 日志级别定义
+// ==========================================================================
+typedef enum {
+    LOG_LEVEL_NONE = 0,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARN,
+    LOG_LEVEL_INFO,
+    LOG_LEVEL_DEBUG,
+    LOG_LEVEL_ALL
+} log_level_t;
 
 // ==========================================================================
 // 【核心开关：一键切换调试/发布模式】
@@ -259,6 +270,17 @@ extern global_fsm_handle_t g_global_fsm;
 
 // 调试日志开关：开启后DEBUG级日志生效，关闭后只保留ERROR/WARN/INFO
 #define DEBUG_ENABLE    1
+
+// 编译时日志级别控制
+#if RELEASE_MODE
+    #define COMPILE_LOG_LEVEL LOG_LEVEL_NONE
+#else
+    #if DEBUG_ENABLE
+        #define COMPILE_LOG_LEVEL LOG_LEVEL_DEBUG
+    #else
+        #define COMPILE_LOG_LEVEL LOG_LEVEL_INFO
+    #endif
+#endif
 
 // ==========================================================================
 // 日志格式化前缀（自动带文件名、行号、函数名，方便定位）
@@ -271,37 +293,65 @@ extern global_fsm_handle_t g_global_fsm;
 #define LOG_ARGS        __FILE__, __LINE__, __func__
 
 // ==========================================================================
+// 运行时日志级别（可选，用于动态调整）
+// ==========================================================================
+void log_set_level(log_level_t level);
+log_level_t log_get_level(void);
+
+// ==========================================================================
+// 初始化与反初始化（兼容之前的代码调用，实际上你的宏设计可以不需要，但为了架构完整保留）
+// ==========================================================================
+int log_init(log_level_t level);
+void log_deinit(void);
+
+// ==========================================================================
 // 【核心日志宏实现】
 // 用 do{...}while(0) 包裹，避免if/else悬挂语法坑，兼容所有C编译器
 // 关闭模式下，宏直接展开为空语句，预编译期完全剔除，无任何运行开销
 // ==========================================================================
 
-// 错误日志：发布模式也默认保留，用于故障排查（可自行关闭）
-#if RELEASE_MODE
-#define LOG_E(fmt, ...) do { } while(0)
+// 错误日志：发布模式也默认保留，用于故障排查
+#if COMPILE_LOG_LEVEL >= LOG_LEVEL_ERROR
+#define LOG_E(fmt, ...) do { \
+    if (log_get_level() >= LOG_LEVEL_ERROR) { \
+        printf(LOG_FMT_ERROR fmt "\n", LOG_ARGS, ##__VA_ARGS__); \
+    } \
+} while(0)
 #else
-#define LOG_E(fmt, ...) printf(LOG_FMT_ERROR fmt "\n", LOG_ARGS, ##__VA_ARGS__)
+#define LOG_E(fmt, ...) do { } while(0)
 #endif
 
 // 警告日志
-#if RELEASE_MODE
-#define LOG_W(fmt, ...) do { } while(0)
+#if COMPILE_LOG_LEVEL >= LOG_LEVEL_WARN
+#define LOG_W(fmt, ...) do { \
+    if (log_get_level() >= LOG_LEVEL_WARN) { \
+        printf(LOG_FMT_WARN fmt "\n", LOG_ARGS, ##__VA_ARGS__); \
+    } \
+} while(0)
 #else
-#define LOG_W(fmt, ...) printf(LOG_FMT_WARN fmt "\n", LOG_ARGS, ##__VA_ARGS__)
+#define LOG_W(fmt, ...) do { } while(0)
 #endif
 
 // 信息日志
-#if RELEASE_MODE
-#define LOG_I(fmt, ...) do { } while(0)
+#if COMPILE_LOG_LEVEL >= LOG_LEVEL_INFO
+#define LOG_I(fmt, ...) do { \
+    if (log_get_level() >= LOG_LEVEL_INFO) { \
+        printf(LOG_FMT_INFO fmt "\n", LOG_ARGS, ##__VA_ARGS__); \
+    } \
+} while(0)
 #else
-#define LOG_I(fmt, ...) printf(LOG_FMT_INFO fmt "\n", LOG_ARGS, ##__VA_ARGS__)
+#define LOG_I(fmt, ...) do { } while(0)
 #endif
 
-// 调试日志：单独开关，关闭后完全剔除
-#if RELEASE_MODE || !DEBUG_ENABLE
-#define LOG_D(fmt, ...) do { } while(0)
+// 调试日志
+#if COMPILE_LOG_LEVEL >= LOG_LEVEL_DEBUG
+#define LOG_D(fmt, ...) do { \
+    if (log_get_level() >= LOG_LEVEL_DEBUG) { \
+        printf(LOG_FMT_DEBUG fmt "\n", LOG_ARGS, ##__VA_ARGS__); \
+    } \
+} while(0)
 #else
-#define LOG_D(fmt, ...) printf(LOG_FMT_DEBUG fmt "\n", LOG_ARGS, ##__VA_ARGS__)
+#define LOG_D(fmt, ...) do { } while(0)
 #endif
 
 #endif /* __LOG_H */
@@ -310,10 +360,69 @@ extern global_fsm_handle_t g_global_fsm;
 =============================================
 【公共层】common/log/src/log.c
 =============================================
+// common/log/src/log.c
+#include "log.h"
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
 
+// ==========================================================================
+// 内部静态变量
+// ==========================================================================
+static log_level_t g_current_level = LOG_LEVEL_INFO;
+static int g_initialized = 0;
+static pthread_mutex_t g_log_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// ==========================================================================
+// 对外API实现
+// ==========================================================================
+
+int log_init(log_level_t level)
+{
+    pthread_mutex_lock(&g_log_lock);
+    
+    if (g_initialized) {
+        pthread_mutex_unlock(&g_log_lock);
+        return 0; // 重复初始化，直接返回
+    }
+
+    g_current_level = level;
+    g_initialized = 1;
+    
+    pthread_mutex_unlock(&g_log_lock);
+    
+    // 打印初始化信息（用标准输出，避免宏递归）
+    fprintf(stdout, "[I][log.c:0][log_init] Log system initialized (level=%d)\n", level);
+    return 0;
+}
+
+void log_deinit(void)
+{
+    pthread_mutex_lock(&g_log_lock);
+    
+    if (!g_initialized) {
+        pthread_mutex_unlock(&g_log_lock);
+        return;
+    }
+
+    g_initialized = 0;
+    pthread_mutex_unlock(&g_log_lock);
+}
+
+void log_set_level(log_level_t level)
+{
+    pthread_mutex_lock(&g_log_lock);
+    g_current_level = level;
+    pthread_mutex_unlock(&g_log_lock);
+}
+
+log_level_t log_get_level(void)
+{
+    // 这里不加锁，因为是原子读取，性能优先
+    // 如果需要绝对线程安全，可以加锁
+    return g_current_level;
+}
 
 
 =============================================
@@ -1048,17 +1157,23 @@ const char* video_err_str(video_err_t err);
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 // ==========================================================================
-// 【Event Bus铁律】
-// 1. 只做事件路由，不做业务处理
-// 2. 不依赖任何业务层，完全独立
-// 3. 轻量高效，只传递小数据
-// 4. 可监控，支持统计/调试
+// 【Event Bus 铁律】
+// 1. 纯发布-订阅，不做任何业务逻辑判断
+// 2. 线程安全，支持多生产者多消费者
+// 3. 事件回调在锁外执行，避免死锁
+// 4. 支持优先级（预留）
 // ==========================================================================
 
 // ==========================================================================
-// 1. 事件优先级（用于调度）
+// 1. 不透明句柄
+// ==========================================================================
+typedef void* event_bus_handle_t;
+
+// ==========================================================================
+// 2. 事件优先级（预留，当前默认使用 NORMAL）
 // ==========================================================================
 typedef enum {
     EVENT_PRIORITY_LOW = 0,
@@ -1069,136 +1184,132 @@ typedef enum {
 } event_priority_t;
 
 // ==========================================================================
-// 2. 通用事件类型（所有模块统一）
+// 3. 通用事件类型定义（分层预留，方便扩展）
 // ==========================================================================
 typedef enum {
     EVENT_TYPE_INVALID = 0,
-    // 系统事件
-    EVENT_TYPE_SYSTEM_INIT,
-    EVENT_TYPE_SYSTEM_START,
-    EVENT_TYPE_SYSTEM_STOP,
-    EVENT_TYPE_SYSTEM_SHUTDOWN,
-    // 采集事件
-    EVENT_TYPE_CAPTURE_START,
-    EVENT_TYPE_CAPTURE_STOP,
-    EVENT_TYPE_CAPTURE_FRAME_READY,
-    // AI事件
+
+    // 系统层事件 (0x0001 - 0x0FFF)
+    EVENT_TYPE_SYS_BASE = 0x0001,
+    EVENT_TYPE_SYS_STATE_CHANGED,
+    EVENT_TYPE_SYS_START,
+    EVENT_TYPE_SYS_STOP,
+    EVENT_TYPE_SYS_SHUTDOWN,
+    EVENT_TYPE_SYS_ERROR,
+
+    // 模块层事件 (0x1000 - 0x1FFF)
+    EVENT_TYPE_MOD_BASE = 0x1000,
+    EVENT_TYPE_MOD_STATE_CHANGED,
+    EVENT_TYPE_MOD_READY,
+    EVENT_TYPE_MOD_RUNNING,
+    EVENT_TYPE_MOD_ERROR,
+    EVENT_TYPE_MOD_STOPPED,
+
+    // 业务层事件 - 采集 (0x2000 - 0x2FFF)
+    EVENT_TYPE_CAP_BASE = 0x2000,
+    EVENT_TYPE_CAP_FRAME_READY,
+    EVENT_TYPE_CAP_START,
+    EVENT_TYPE_CAP_STOP,
+
+    // 业务层事件 - AI (0x3000 - 0x3FFF)
+    EVENT_TYPE_AI_BASE = 0x3000,
+    EVENT_TYPE_AI_RESULT_READY,
     EVENT_TYPE_AI_START,
     EVENT_TYPE_AI_STOP,
-    EVENT_TYPE_AI_RESULT_READY,
-    // 显示事件
-    EVENT_TYPE_DISPLAY_START,
-    EVENT_TYPE_DISPLAY_STOP,
-    // 存储事件
-    EVENT_TYPE_STORAGE_START,
-    EVENT_TYPE_STORAGE_STOP,
-    // 异常事件
-    EVENT_TYPE_ERROR,
-    EVENT_TYPE_WARNING,
-    // 自定义事件（模块可扩展）
-    EVENT_TYPE_CUSTOM_BASE = 0x1000,
-    EVENT_TYPE_MAX
+
+    // 业务层事件 - 显示 (0x4000 - 0x4FFF)
+    EVENT_TYPE_DISP_BASE = 0x4000,
+    EVENT_TYPE_DISP_VSYNC,
+    EVENT_TYPE_DISP_ERROR,
+
+    // 自定义事件扩展 (0xF000 - 0xFFFF)
+    EVENT_TYPE_CUSTOM_BASE = 0xF000,
+
+    EVENT_TYPE_MAX = 0xFFFF
 } event_type_t;
 
 // ==========================================================================
-// 3. 事件结构体（轻量，只传小数据）
+// 4. 通用事件结构体
 // ==========================================================================
 typedef struct {
-    event_type_t type;
-    event_priority_t priority;
-    uint64_t timestamp;       // 微秒级时间戳
-    const char *source;       // 事件源（模块名）
-    void *data;               // 事件数据（小数据，大数据走Data Bus）
-    uint32_t data_len;        // 数据长度
+    event_type_t type;          // 事件类型
+    event_priority_t priority;   // 事件优先级
+    uint64_t timestamp;          // 时间戳（微秒）
+    const char *source;          // 事件源（模块名）
+    void *data;                  // 事件数据（小数据，大数据走Data Bus）
+    uint32_t data_len;           // 事件数据长度
 } event_t;
 
 // ==========================================================================
-// 4. 事件回调函数类型
+// 5. 事件回调函数类型
 // ==========================================================================
 typedef void (*event_callback_t)(const event_t *event, void *user_data);
 
 // ==========================================================================
-// 5. 不透明句柄
-// ==========================================================================
-typedef void* event_bus_handle_t;
-
-// ==========================================================================
-// 6. 总线配置
+// 6. 订阅者信息结构体（用于注册）
 // ==========================================================================
 typedef struct {
-    uint32_t max_subscribers;   // 最大订阅者数量
-    uint32_t max_event_queue;   // 事件队列大小
-    bool enable_stats;          // 是否启用统计
+    event_type_t event_type;     // 订阅的事件类型（或 EVENT_TYPE_INVALID 表示订阅所有）
+    event_callback_t callback;    // 回调函数
+    void *user_data;              // 用户数据
+} event_subscriber_t;
+
+// ==========================================================================
+// 7. Event Bus 配置
+// ==========================================================================
+typedef struct {
+    uint32_t max_subscribers;     // 最大订阅者数量
 } event_bus_config_t;
 
 // ==========================================================================
-// 7. 统计信息（可监控）
-// ==========================================================================
-typedef struct {
-    uint64_t total_published;   // 总发布事件数
-    uint64_t total_delivered;    // 总投递事件数
-    uint64_t total_dropped;      // 总丢弃事件数
-    uint64_t event_count[EVENT_TYPE_MAX]; // 各类型事件计数
-} event_bus_stats_t;
-
-// ==========================================================================
-// 8. 核心接口
+// 8. 【核心】接口
 // ==========================================================================
 
 /**
- * @brief 初始化事件总线（单例）
+ * @brief 初始化事件总线
  * @param config 配置
  * @param out_handle 输出句柄
  * @return 0成功
  */
-int event_bus_init(const event_bus_config_t *config, event_bus_handle_t *out_handle);
+int event_bus_init(const event_bus_config_t *config,
+                   event_bus_handle_t *out_handle);
 
 /**
  * @brief 订阅事件
  * @param handle 句柄
- * @param type 事件类型
- * @param cb 回调函数
- * @param user_data 用户数据
- * @return 0成功
+ * @param subscriber 订阅者信息
+ * @return 订阅ID（用于取消订阅），<0失败
  */
 int event_bus_subscribe(event_bus_handle_t handle,
-                         event_type_t type,
-                         event_callback_t cb,
-                         void *user_data);
+                        const event_subscriber_t *subscriber);
 
 /**
  * @brief 取消订阅
  * @param handle 句柄
- * @param type 事件类型
- * @param cb 回调函数
+ * @param subscription_id 订阅ID
  * @return 0成功
  */
 int event_bus_unsubscribe(event_bus_handle_t handle,
-                           event_type_t type,
-                           event_callback_t cb);
+                          int subscription_id);
 
 /**
  * @brief 发布事件（核心入口）
  * @param handle 句柄
- * @param event 事件
+ * @param event 事件（会内部拷贝一份，调用者可立即释放）
  * @return 0成功
  */
 int event_bus_publish(event_bus_handle_t handle, const event_t *event);
 
 /**
- * @brief 获取统计信息（可监控）
+ * @brief 【辅助】快速发布简单事件（不需要填充完整结构体）
  * @param handle 句柄
- * @param stats 输出统计
+ * @param type 事件类型
+ * @param source 事件源
  * @return 0成功
  */
-int event_bus_get_stats(event_bus_handle_t handle, event_bus_stats_t *stats);
-
-/**
- * @brief 重置统计信息
- * @param handle 句柄
- * @return 0成功
- */
-int event_bus_reset_stats(event_bus_handle_t handle);
+int event_bus_publish_simple(event_bus_handle_t handle,
+                             event_type_t type,
+                             const char *source);
 
 /**
  * @brief 销毁事件总线
@@ -1208,21 +1319,13 @@ int event_bus_reset_stats(event_bus_handle_t handle);
 int event_bus_deinit(event_bus_handle_t handle);
 
 /**
- * @brief 事件类型转字符串（调试用）
+ * @brief 【辅助】事件类型转字符串
  * @param type 事件类型
- * @return 事件名称
+ * @return 字符串
  */
 const char* event_type_to_str(event_type_t type);
 
-/**
- * @brief 优先级转字符串
- * @param priority 优先级
- * @return 优先级名称
- */
-const char* event_priority_to_str(event_priority_t priority);
-
 #endif /* EVENT_BUS_H */
-
 
 
 =============================================
@@ -1230,6 +1333,7 @@ const char* event_priority_to_str(event_priority_t priority);
 =============================================
 // src/bus/event_bus/src/event_bus.c
 #include "event_bus.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -1238,92 +1342,57 @@ const char* event_priority_to_str(event_priority_t priority);
 // ==========================================================================
 // 内部宏定义
 // ==========================================================================
-#define MAX_SUBSCRIBERS 64
-#define MAX_EVENT_QUEUE 256
+#define EVENT_BUS_MAX_SUBSCRIBERS_DEFAULT 32
 
 // ==========================================================================
-// 订阅者结构体
+// 内部订阅者条目
 // ==========================================================================
 typedef struct {
-    event_type_t type;
-    event_callback_t cb;
+    int id;
+    event_type_t event_type;
+    event_callback_t callback;
     void *user_data;
-} subscriber_t;
+    bool valid;
+} subscriber_entry_t;
 
 // ==========================================================================
-// 内部上下文结构体
+// 内部上下文
 // ==========================================================================
 typedef struct {
-    subscriber_t subscribers[MAX_SUBSCRIBERS];
+    event_bus_config_t config;
+    subscriber_entry_t *subscribers;
     uint32_t subscriber_count;
-    event_bus_stats_t stats;
-    bool enable_stats;
+    uint32_t max_subscribers;
+    int next_subscription_id;
     pthread_mutex_t lock;
+    pthread_rwlock_t rwlock; // 读写锁：读（订阅者遍历）共享，写（注册/注销）互斥
 } event_bus_context_t;
 
 // ==========================================================================
-// 事件/优先级字符串映射表
+// 字符串映射表（简化版）
 // ==========================================================================
 static const char* g_event_type_str[] = {
     [EVENT_TYPE_INVALID] = "INVALID",
-    [EVENT_TYPE_SYSTEM_INIT] = "SYSTEM_INIT",
-    [EVENT_TYPE_SYSTEM_START] = "SYSTEM_START",
-    [EVENT_TYPE_SYSTEM_STOP] = "SYSTEM_STOP",
-    [EVENT_TYPE_SYSTEM_SHUTDOWN] = "SYSTEM_SHUTDOWN",
-    [EVENT_TYPE_CAPTURE_START] = "CAPTURE_START",
-    [EVENT_TYPE_CAPTURE_STOP] = "CAPTURE_STOP",
-    [EVENT_TYPE_CAPTURE_FRAME_READY] = "CAPTURE_FRAME_READY",
-    [EVENT_TYPE_AI_START] = "AI_START",
-    [EVENT_TYPE_AI_STOP] = "AI_STOP",
-    [EVENT_TYPE_AI_RESULT_READY] = "AI_RESULT_READY",
-    [EVENT_TYPE_DISPLAY_START] = "DISPLAY_START",
-    [EVENT_TYPE_DISPLAY_STOP] = "DISPLAY_STOP",
-    [EVENT_TYPE_STORAGE_START] = "STORAGE_START",
-    [EVENT_TYPE_STORAGE_STOP] = "STORAGE_STOP",
-    [EVENT_TYPE_ERROR] = "ERROR",
-    [EVENT_TYPE_WARNING] = "WARNING",
-};
-
-static const char* g_event_priority_str[] = {
-    [EVENT_PRIORITY_LOW] = "LOW",
-    [EVENT_PRIORITY_NORMAL] = "NORMAL",
-    [EVENT_PRIORITY_HIGH] = "HIGH",
-    [EVENT_PRIORITY_CRITICAL] = "CRITICAL",
+    [EVENT_TYPE_SYS_STATE_CHANGED] = "SYS_STATE_CHANGED",
+    [EVENT_TYPE_SYS_START] = "SYS_START",
+    [EVENT_TYPE_SYS_STOP] = "SYS_STOP",
+    [EVENT_TYPE_MOD_STATE_CHANGED] = "MOD_STATE_CHANGED",
+    [EVENT_TYPE_CAP_FRAME_READY] = "CAP_FRAME_READY",
 };
 
 // ==========================================================================
-// 内部辅助函数
+// 内部辅助函数声明
 // ==========================================================================
-static uint64_t _event_bus_get_timestamp_us(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
+static uint64_t _event_bus_get_timestamp_us(void);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
 
-const char* event_type_to_str(event_type_t type)
+int event_bus_init(const event_bus_config_t *config,
+                   event_bus_handle_t *out_handle)
 {
-    if (type < 0 || type >= EVENT_TYPE_MAX) {
-        return "CUSTOM";
-    }
-    return g_event_type_str[type];
-}
-
-const char* event_priority_to_str(event_priority_t priority)
-{
-    if (priority < 0 || priority >= EVENT_PRIORITY_MAX) {
-        return "UNKNOWN";
-    }
-    return g_event_priority_str[priority];
-}
-
-int event_bus_init(const event_bus_config_t *config, event_bus_handle_t *out_handle)
-{
-    if (out_handle == NULL) {
+    if (config == NULL || out_handle == NULL) {
         return -1;
     }
 
@@ -1333,65 +1402,86 @@ int event_bus_init(const event_bus_config_t *config, event_bus_handle_t *out_han
     }
     memset(ctx, 0, sizeof(event_bus_context_t));
 
-    ctx->enable_stats = config ? config->enable_stats : true;
-    ctx->subscriber_count = 0;
-    memset(&ctx->stats, 0, sizeof(ctx->stats));
+    memcpy(&ctx->config, config, sizeof(event_bus_config_t));
+    ctx->max_subscribers = (config->max_subscribers > 0) ? config->max_subscribers : EVENT_BUS_MAX_SUBSCRIBERS_DEFAULT;
+    ctx->next_subscription_id = 1;
+
+    ctx->subscribers = (subscriber_entry_t*)malloc(ctx->max_subscribers * sizeof(subscriber_entry_t));
+    if (ctx->subscribers == NULL) {
+        free(ctx);
+        return -1;
+    }
+    memset(ctx->subscribers, 0, ctx->max_subscribers * sizeof(subscriber_entry_t));
 
     pthread_mutex_init(&ctx->lock, NULL);
+    pthread_rwlock_init(&ctx->rwlock, NULL);
 
     *out_handle = (event_bus_handle_t)ctx;
+    LOG_I("Event Bus: Initialized, max subscribers=%u", ctx->max_subscribers);
     return 0;
 }
 
 int event_bus_subscribe(event_bus_handle_t handle,
-                         event_type_t type,
-                         event_callback_t cb,
-                         void *user_data)
+                        const event_subscriber_t *subscriber)
 {
-    if (handle == NULL || cb == NULL) {
+    if (handle == NULL || subscriber == NULL || subscriber->callback == NULL) {
         return -1;
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
-    pthread_mutex_lock(&ctx->lock);
-    if (ctx->subscriber_count >= MAX_SUBSCRIBERS) {
-        pthread_mutex_unlock(&ctx->lock);
-        return -1;
-    }
+    pthread_rwlock_wrlock(&ctx->rwlock); // 写锁：注册是写操作
 
-    // 添加订阅者
-    ctx->subscribers[ctx->subscriber_count].type = type;
-    ctx->subscribers[ctx->subscriber_count].cb = cb;
-    ctx->subscribers[ctx->subscriber_count].user_data = user_data;
-    ctx->subscriber_count++;
-
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
-}
-
-int event_bus_unsubscribe(event_bus_handle_t handle,
-                           event_type_t type,
-                           event_callback_t cb)
-{
-    if (handle == NULL || cb == NULL) {
-        return -1;
-    }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    for (uint32_t i = 0; i < ctx->subscriber_count; i++) {
-        if (ctx->subscribers[i].type == type && ctx->subscribers[i].cb == cb) {
-            // 前移覆盖
-            for (uint32_t j = i; j < ctx->subscriber_count - 1; j++) {
-                ctx->subscribers[j] = ctx->subscribers[j + 1];
-            }
-            ctx->subscriber_count--;
+    int id = -1;
+    for (uint32_t i = 0; i < ctx->max_subscribers; i++) {
+        if (!ctx->subscribers[i].valid) {
+            id = ctx->next_subscription_id++;
+            ctx->subscribers[i].id = id;
+            ctx->subscribers[i].event_type = subscriber->event_type;
+            ctx->subscribers[i].callback = subscriber->callback;
+            ctx->subscribers[i].user_data = subscriber->user_data;
+            ctx->subscribers[i].valid = true;
+            ctx->subscriber_count++;
             break;
         }
     }
-    pthread_mutex_unlock(&ctx->lock);
 
-    return 0;
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    if (id < 0) {
+        LOG_E("Event Bus: No more subscriber slots");
+        return -1;
+    }
+
+    LOG_I("Event Bus: Subscribed (id=%d, event_type=0x%X)", id, subscriber->event_type);
+    return id;
+}
+
+int event_bus_unsubscribe(event_bus_handle_t handle,
+                          int subscription_id)
+{
+    if (handle == NULL || subscription_id <= 0) {
+        return -1;
+    }
+    event_bus_context_t *ctx = (event_bus_context_t*)handle;
+
+    pthread_rwlock_wrlock(&ctx->rwlock);
+
+    int ret = -1;
+    for (uint32_t i = 0; i < ctx->max_subscribers; i++) {
+        if (ctx->subscribers[i].valid && ctx->subscribers[i].id == subscription_id) {
+            ctx->subscribers[i].valid = false;
+            ctx->subscriber_count--;
+            ret = 0;
+            break;
+        }
+    }
+
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    if (ret == 0) {
+        LOG_I("Event Bus: Unsubscribed (id=%d)", subscription_id);
+    }
+    return ret;
 }
 
 int event_bus_publish(event_bus_handle_t handle, const event_t *event)
@@ -1407,64 +1497,58 @@ int event_bus_publish(event_bus_handle_t handle, const event_t *event)
         local_event.timestamp = _event_bus_get_timestamp_us();
     }
 
-    pthread_mutex_lock(&ctx->lock);
+    LOG_D("Event Bus: Publishing event %s (source=%s)", 
+          event_type_to_str(local_event.type), 
+          local_event.source ? local_event.source : "unknown");
 
-    // 更新统计
-    if (ctx->enable_stats) {
-        ctx->stats.total_published++;
-        if (local_event.type < EVENT_TYPE_MAX) {
-            ctx->stats.event_count[local_event.type]++;
+    // 【核心】使用读锁遍历订阅者（读锁是共享的，不阻塞其他发布）
+    pthread_rwlock_rdlock(&ctx->rwlock);
+
+    // 先遍历一遍，把需要通知的回调和数据暂存起来（在锁外执行回调）
+    // 这是为了避免：
+    // 1. 回调里再次调用 bus 接口导致死锁
+    // 2. 持有锁的时间过长
+    #define MAX_TEMP_CALLBACKS 32
+    struct {
+        event_callback_t cb;
+        void *user_data;
+    } temp_callbacks[MAX_TEMP_CALLBACKS];
+    int temp_count = 0;
+
+    for (uint32_t i = 0; i < ctx->max_subscribers && temp_count < MAX_TEMP_CALLBACKS; i++) {
+        if (!ctx->subscribers[i].valid) continue;
+
+        // 检查是否匹配：订阅者订阅了该类型，或者订阅了所有类型（EVENT_TYPE_INVALID）
+        if (ctx->subscribers[i].event_type == EVENT_TYPE_INVALID ||
+            ctx->subscribers[i].event_type == local_event.type) {
+            temp_callbacks[temp_count].cb = ctx->subscribers[i].callback;
+            temp_callbacks[temp_count].user_data = ctx->subscribers[i].user_data;
+            temp_count++;
         }
     }
 
-    // 投递事件给所有匹配的订阅者
-    uint32_t delivered = 0;
-    for (uint32_t i = 0; i < ctx->subscriber_count; i++) {
-        if (ctx->subscribers[i].type == local_event.type 
-            || ctx->subscribers[i].type == EVENT_TYPE_INVALID) { // 订阅所有事件
-            ctx->subscribers[i].cb(&local_event, ctx->subscribers[i].user_data);
-            delivered++;
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    // 【关键】在锁外执行回调
+    for (int i = 0; i < temp_count; i++) {
+        if (temp_callbacks[i].cb != NULL) {
+            temp_callbacks[i].cb(&local_event, temp_callbacks[i].user_data);
         }
     }
-
-    // 更新统计
-    if (ctx->enable_stats) {
-        ctx->stats.total_delivered += delivered;
-        if (delivered == 0 && ctx->subscriber_count > 0) {
-            ctx->stats.total_dropped++;
-        }
-    }
-
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
-}
-
-int event_bus_get_stats(event_bus_handle_t handle, event_bus_stats_t *stats)
-{
-    if (handle == NULL || stats == NULL) {
-        return -1;
-    }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    memcpy(stats, &ctx->stats, sizeof(event_bus_stats_t));
-    pthread_mutex_unlock(&ctx->lock);
 
     return 0;
 }
 
-int event_bus_reset_stats(event_bus_handle_t handle)
+int event_bus_publish_simple(event_bus_handle_t handle,
+                             event_type_t type,
+                             const char *source)
 {
-    if (handle == NULL) {
-        return -1;
-    }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    memset(&ctx->stats, 0, sizeof(ctx->stats));
-    pthread_mutex_unlock(&ctx->lock);
-
-    return 0;
+    event_t evt = {0};
+    evt.type = type;
+    evt.priority = EVENT_PRIORITY_NORMAL;
+    evt.source = source;
+    evt.timestamp = 0;
+    return event_bus_publish(handle, &evt);
 }
 
 int event_bus_deinit(event_bus_handle_t handle)
@@ -1474,15 +1558,38 @@ int event_bus_deinit(event_bus_handle_t handle)
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
-    pthread_mutex_lock(&ctx->lock);
+    pthread_rwlock_wrlock(&ctx->rwlock);
+    free(ctx->subscribers);
+    ctx->subscribers = NULL;
     ctx->subscriber_count = 0;
-    pthread_mutex_unlock(&ctx->lock);
+    pthread_rwlock_unlock(&ctx->rwlock);
 
+    pthread_rwlock_destroy(&ctx->rwlock);
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
+
+    LOG_I("Event Bus: Deinitialized");
     return 0;
 }
 
+const char* event_type_to_str(event_type_t type)
+{
+    // 简化版，实际项目中可以完善
+    if (type >= EVENT_TYPE_CUSTOM_BASE) return "CUSTOM";
+    if (type >= EVENT_TYPE_DISP_BASE) return "DISP";
+    if (type >= EVENT_TYPE_AI_BASE) return "AI";
+    if (type >= EVENT_TYPE_CAP_BASE) return "CAP";
+    if (type >= EVENT_TYPE_MOD_BASE) return "MOD";
+    if (type >= EVENT_TYPE_SYS_BASE) return "SYS";
+    return "UNKNOWN";
+}
+
+static uint64_t _event_bus_get_timestamp_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 
 
 =============================================
@@ -1494,168 +1601,154 @@ int event_bus_deinit(event_bus_handle_t handle)
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 // ==========================================================================
-// 【Data Bus铁律】
-// 1. 零拷贝传递，只传指针+元信息
-// 2. 不做数据修改/处理
-// 3. 不依赖任何业务层，完全独立
-// 4. 引用计数管理，自动释放
-// 5. 可监控，支持统计/调试
+// 【Data Bus 铁律】
+// 1. 零拷贝：只传递指针，引用计数管理生命周期
+// 2. 线程安全：引用计数操作原子化
+// 3. 类型安全：支持多种数据类型，带类型校验
+// 4. 生产者-消费者模式：一次生产，多处消费
 // ==========================================================================
 
 // ==========================================================================
-// 1. 数据类型枚举
+// 1. 不透明句柄
+// ==========================================================================
+typedef void* data_bus_handle_t;
+typedef void* data_bus_item_handle_t; // 数据项句柄
+
+// ==========================================================================
+// 2. 数据类型枚举（分层预留）
 // ==========================================================================
 typedef enum {
     DATA_TYPE_INVALID = 0,
-    DATA_TYPE_VIDEO_FRAME,    // 视频帧
-    DATA_TYPE_AUDIO_FRAME,    // 音频帧
-    DATA_TYPE_AI_RESULT,      // AI推理结果
-    DATA_TYPE_IMAGE,          // 图片
-    DATA_TYPE_CUSTOM_BASE = 0x1000,
-    DATA_TYPE_MAX
+
+    // 视频数据 (0x01 - 0x0F)
+    DATA_TYPE_VIDEO_FRAME = 0x01,
+    DATA_TYPE_VIDEO_FRAME_YUV420,
+    DATA_TYPE_VIDEO_FRAME_RGB,
+
+    // AI数据 (0x10 - 0x1F)
+    DATA_TYPE_AI_RESULT = 0x10,
+    DATA_TYPE_AI_DETECTION,
+    DATA_TYPE_AI_CLASSIFICATION,
+
+    // 音频数据 (0x20 - 0x2F)
+    DATA_TYPE_AUDIO_FRAME = 0x20,
+
+    // 自定义扩展 (0xF0 - 0xFF)
+    DATA_TYPE_CUSTOM_BASE = 0xF0,
+
+    DATA_TYPE_MAX = 0xFF
 } data_type_t;
 
 // ==========================================================================
-// 2. 数据帧结构体（零拷贝，只传指针）
+// 3. 数据项元信息
 // ==========================================================================
 typedef struct {
-    data_type_t type;
-    uint64_t timestamp;       // 微秒级时间戳
-    const char *source;       // 数据源（模块名）
-    void *data;               // 数据指针（零拷贝，不修改）
-    uint32_t data_len;        // 数据长度
-    uint32_t ref_count;       // 引用计数（自动管理）
-    // 元信息（根据数据类型填充）
-    union {
-        struct {
-            uint32_t width;
-            uint32_t height;
-            uint32_t format;
-        } video;
-        struct {
-            uint32_t sample_rate;
-            uint32_t channels;
-            uint32_t bits_per_sample;
-        } audio;
-        struct {
-            uint32_t class_id;
-            float confidence;
-            float bbox[4];
-        } ai;
-    } meta;
-} data_frame_t;
+    data_type_t type;          // 数据类型
+    uint64_t timestamp;         // 时间戳（微秒）
+    uint32_t data_size;         // 数据大小（字节）
+    uint32_t ref_count;         // 当前引用计数（只读）
+    const char *producer;       // 生产者名称
+} data_bus_item_info_t;
 
 // ==========================================================================
-// 3. 数据释放回调类型（用于自定义释放逻辑）
-// ==========================================================================
-typedef void (*data_free_callback_t)(void *data, void *user_data);
-
-// ==========================================================================
-// 4. 不透明句柄
-// ==========================================================================
-typedef void* data_bus_handle_t;
-
-// ==========================================================================
-// 5. 总线配置
+// 4. Data Bus 配置
 // ==========================================================================
 typedef struct {
-    uint32_t max_frames;       // 最大帧数量
-    bool enable_stats;          // 是否启用统计
+    uint32_t max_items;         // 最大数据项数量（池大小）
+    size_t max_item_size;       // 单个数据项最大大小
 } data_bus_config_t;
 
 // ==========================================================================
-// 6. 统计信息（可监控）
-// ==========================================================================
-typedef struct {
-    uint64_t total_published;   // 总发布帧数
-    uint64_t total_acquired;    // 总获取帧数
-    uint64_t total_released;    // 总释放帧数
-    uint64_t frame_count[DATA_TYPE_MAX]; // 各类型帧数
-} data_bus_stats_t;
-
-// ==========================================================================
-// 7. 核心接口
+// 5. 【核心】接口
 // ==========================================================================
 
 /**
- * @brief 初始化数据总线（单例）
+ * @brief 初始化数据总线
  * @param config 配置
  * @param out_handle 输出句柄
  * @return 0成功
  */
-int data_bus_init(const data_bus_config_t *config, data_bus_handle_t *out_handle);
+int data_bus_init(const data_bus_config_t *config,
+                  data_bus_handle_t *out_handle);
+
+// -------------------------------------------------------------------------
+// 生产者接口
+// -------------------------------------------------------------------------
 
 /**
- * @brief 分配数据帧（由生产者调用）
+ * @brief 申请一个数据项（生产者用）
  * @param handle 句柄
  * @param type 数据类型
- * @param data_len 数据长度
- * @param out_frame 输出帧
+ * @param size 数据大小
+ * @param producer 生产者名称
+ * @param out_item 输出数据项句柄
  * @return 0成功
  */
-int data_bus_alloc_frame(data_bus_handle_t handle,
-                         data_type_t type,
-                         uint32_t data_len,
-                         data_frame_t **out_frame);
+int data_bus_alloc(data_bus_handle_t handle,
+                   data_type_t type,
+                   size_t size,
+                   const char *producer,
+                   data_bus_item_handle_t *out_item);
 
 /**
- * @brief 发布数据帧（生产者调用，引用计数+1）
- * @param handle 句柄
- * @param frame 帧
- * @return 0成功
+ * @brief 获取数据项的可写指针（生产者用，填充数据）
+ * @param item 数据项句柄
+ * @return 可写指针，NULL失败
  */
-int data_bus_publish(data_bus_handle_t handle, data_frame_t *frame);
+void* data_bus_get_writable_ptr(data_bus_item_handle_t item);
 
 /**
- * @brief 获取数据帧（消费者调用，引用计数+1）
+ * @brief 发布数据项（发布后，生产者不应再修改数据）
  * @param handle 句柄
- * @param type 数据类型
- * @param out_frame 输出帧
- * @param timeout_ms 超时时间（毫秒，0表示无限等待）
+ * @param item 数据项句柄
  * @return 0成功
  */
-int data_bus_acquire(data_bus_handle_t handle,
-                     data_type_t type,
-                     data_frame_t **out_frame,
-                     uint32_t timeout_ms);
+int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item);
+
+// -------------------------------------------------------------------------
+// 消费者接口
+// -------------------------------------------------------------------------
 
 /**
- * @brief 释放数据帧（消费者调用，引用计数-1，为0时自动释放）
+ * @brief 获取最新的数据项（消费者用，引用计数+1）
  * @param handle 句柄
- * @param frame 帧
+ * @param type 期望的数据类型
+ * @param out_item 输出数据项句柄
  * @return 0成功
  */
-int data_bus_release(data_bus_handle_t handle, data_frame_t *frame);
+int data_bus_acquire_latest(data_bus_handle_t handle,
+                             data_type_t type,
+                             data_bus_item_handle_t *out_item);
 
 /**
- * @brief 设置自定义释放回调
- * @param handle 句柄
- * @param frame 帧
- * @param cb 释放回调
- * @param user_data 用户数据
- * @return 0成功
+ * @brief 获取数据项的只读指针（消费者用）
+ * @param item 数据项句柄
+ * @return 只读指针，NULL失败
  */
-int data_bus_set_free_callback(data_bus_handle_t handle,
-                                data_frame_t *frame,
-                                data_free_callback_t cb,
-                                void *user_data);
+const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item);
 
 /**
- * @brief 获取统计信息（可监控）
- * @param handle 句柄
- * @param stats 输出统计
+ * @brief 获取数据项信息
+ * @param item 数据项句柄
+ * @param out_info 输出信息
  * @return 0成功
  */
-int data_bus_get_stats(data_bus_handle_t handle, data_bus_stats_t *stats);
+int data_bus_get_item_info(data_bus_item_handle_t item,
+                           data_bus_item_info_t *out_info);
 
 /**
- * @brief 重置统计信息
- * @param handle 句柄
+ * @brief 释放数据项（引用计数-1，计数为0时自动回收）
+ * @param item 数据项句柄
  * @return 0成功
  */
-int data_bus_reset_stats(data_bus_handle_t handle);
+int data_bus_release(data_bus_item_handle_t item);
+
+// -------------------------------------------------------------------------
+// 管理接口
+// -------------------------------------------------------------------------
 
 /**
  * @brief 销毁数据总线
@@ -1665,9 +1758,9 @@ int data_bus_reset_stats(data_bus_handle_t handle);
 int data_bus_deinit(data_bus_handle_t handle);
 
 /**
- * @brief 数据类型转字符串（调试用）
- * @param type 数据类型
- * @return 数据类型名称
+ * @brief 【辅助】数据类型转字符串
+ * @param type 类型
+ * @return 字符串
  */
 const char* data_type_to_str(data_type_t type);
 
@@ -1679,81 +1772,74 @@ const char* data_type_to_str(data_type_t type);
 =============================================
 // src/bus/data_bus/src/data_bus.c
 #include "data_bus.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-#include <stddef.h>
+
 // ==========================================================================
 // 内部宏定义
 // ==========================================================================
-#define MAX_FRAMES 128
+#define DATA_BUS_MAX_ITEMS_DEFAULT 32
+#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT (4 * 1024 * 1024) // 4MB
 
 // ==========================================================================
-// 内部帧扩展结构体
+// 内部数据项结构体
 // ==========================================================================
 typedef struct {
-    data_frame_t public_frame;    // 对外公开的帧
-    data_free_callback_t free_cb; // 自定义释放回调
-    void *free_user_data;
-    bool in_use;
-} internal_frame_t;
+    data_bus_item_info_t info;
+    void *data_ptr;          // 指向实际数据的指针
+    bool in_use;             // 是否在使用中
+    bool published;          // 是否已发布
+    pthread_mutex_t ref_lock; // 引用计数锁
+} data_item_t;
 
 // ==========================================================================
 // 内部上下文结构体
 // ==========================================================================
 typedef struct {
-    internal_frame_t frames[MAX_FRAMES];
-    uint32_t frame_count;
-    // 队列（按类型）
-    internal_frame_t *queue[DATA_TYPE_MAX][MAX_FRAMES];
-    uint32_t queue_head[DATA_TYPE_MAX];
-    uint32_t queue_tail[DATA_TYPE_MAX];
-    uint32_t queue_count[DATA_TYPE_MAX];
-    // 统计
-    data_bus_stats_t stats;
-    bool enable_stats;
-    // 锁
+    data_bus_config_t config;
+    data_item_t *items;
+    uint32_t item_count;
+    uint32_t max_items;
+    size_t max_item_size;
+    
+    // 最新数据项索引（用于 acquire_latest）
+    int latest_item_index;
+    
+    // 内存池（预分配）
+    void *memory_pool;
+    
     pthread_mutex_t lock;
-    pthread_cond_t not_empty[DATA_TYPE_MAX];
+    pthread_rwlock_t rwlock;
 } data_bus_context_t;
 
 // ==========================================================================
-// 数据类型字符串映射表
+// 字符串映射表
 // ==========================================================================
 static const char* g_data_type_str[] = {
     [DATA_TYPE_INVALID] = "INVALID",
     [DATA_TYPE_VIDEO_FRAME] = "VIDEO_FRAME",
-    [DATA_TYPE_AUDIO_FRAME] = "AUDIO_FRAME",
     [DATA_TYPE_AI_RESULT] = "AI_RESULT",
-    [DATA_TYPE_IMAGE] = "IMAGE",
+    [DATA_TYPE_AUDIO_FRAME] = "AUDIO_FRAME",
 };
 
 // ==========================================================================
-// 内部辅助函数
+// 内部辅助函数声明
 // ==========================================================================
-static uint64_t _data_bus_get_timestamp_us(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
+static uint64_t _data_bus_get_timestamp_us(void);
+static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx);
+static void _data_bus_reset_item(data_item_t *item);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
 
-const char* data_type_to_str(data_type_t type)
+int data_bus_init(const data_bus_config_t *config,
+                  data_bus_handle_t *out_handle)
 {
-    if (type < 0 || type >= DATA_TYPE_MAX) {
-        return "CUSTOM";
-    }
-    return g_data_type_str[type];
-}
-
-int data_bus_init(const data_bus_config_t *config, data_bus_handle_t *out_handle)
-{
-    if (out_handle == NULL) {
+    if (config == NULL || out_handle == NULL) {
         return -1;
     }
 
@@ -1763,258 +1849,241 @@ int data_bus_init(const data_bus_config_t *config, data_bus_handle_t *out_handle
     }
     memset(ctx, 0, sizeof(data_bus_context_t));
 
-    ctx->enable_stats = config ? config->enable_stats : true;
-    ctx->frame_count = config ? (config->max_frames > 0 ? config->max_frames : MAX_FRAMES) : MAX_FRAMES;
+    // 拷贝配置
+    memcpy(&ctx->config, config, sizeof(data_bus_config_t));
+    ctx->max_items = (config->max_items > 0) ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
+    ctx->max_item_size = (config->max_item_size > 0) ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
+    ctx->latest_item_index = -1;
 
-    // 初始化队列
-    for (int i = 0; i < DATA_TYPE_MAX; i++) {
-        ctx->queue_head[i] = 0;
-        ctx->queue_tail[i] = 0;
-        ctx->queue_count[i] = 0;
-        pthread_cond_init(&ctx->not_empty[i], NULL);
+    // 分配数据项数组
+    ctx->items = (data_item_t*)malloc(ctx->max_items * sizeof(data_item_t));
+    if (ctx->items == NULL) {
+        free(ctx);
+        return -1;
+    }
+    memset(ctx->items, 0, ctx->max_items * sizeof(data_item_t));
+
+    // 预分配内存池（一次性分配，避免运行时碎片）
+    size_t total_pool_size = ctx->max_items * ctx->max_item_size;
+    ctx->memory_pool = malloc(total_pool_size);
+    if (ctx->memory_pool == NULL) {
+        free(ctx->items);
+        free(ctx);
+        return -1;
+    }
+    memset(ctx->memory_pool, 0, total_pool_size);
+
+    // 初始化每个数据项
+    for (uint32_t i = 0; i < ctx->max_items; i++) {
+        ctx->items[i].data_ptr = (uint8_t*)ctx->memory_pool + (i * ctx->max_item_size);
+        ctx->items[i].in_use = false;
+        ctx->items[i].published = false;
+        pthread_mutex_init(&ctx->items[i].ref_lock, NULL);
     }
 
     pthread_mutex_init(&ctx->lock, NULL);
+    pthread_rwlock_init(&ctx->rwlock, NULL);
 
     *out_handle = (data_bus_handle_t)ctx;
+    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%zuKB", 
+          ctx->max_items, ctx->max_item_size / 1024);
     return 0;
 }
 
-int data_bus_alloc_frame(data_bus_handle_t handle,
-                         data_type_t type,
-                         uint32_t data_len,
-                         data_frame_t **out_frame)
+// -------------------------------------------------------------------------
+// 生产者接口
+// -------------------------------------------------------------------------
+
+int data_bus_alloc(data_bus_handle_t handle,
+                   data_type_t type,
+                   size_t size,
+                   const char *producer,
+                   data_bus_item_handle_t *out_item)
 {
-    if (handle == NULL || out_frame == NULL || type == DATA_TYPE_INVALID) {
+    if (handle == NULL || out_item == NULL || type == DATA_TYPE_INVALID) {
         return -1;
     }
     data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
-    pthread_mutex_lock(&ctx->lock);
-
-    // 找空闲帧
-    internal_frame_t *int_frame = NULL;
-    for (uint32_t i = 0; i < ctx->frame_count; i++) {
-        if (!ctx->frames[i].in_use) {
-            int_frame = &ctx->frames[i];
-            break;
-        }
+    if (size > ctx->max_item_size) {
+        LOG_E("Data Bus: Alloc size %zu > max %zu", size, ctx->max_item_size);
+        return -1;
     }
 
-    if (int_frame == NULL) {
+    pthread_mutex_lock(&ctx->lock);
+
+    // 找一个空闲的 item
+    data_item_t *item = _data_bus_find_free_item(ctx);
+    if (item == NULL) {
+        LOG_W("Data Bus: No free items available");
         pthread_mutex_unlock(&ctx->lock);
         return -1;
     }
 
-    // 分配数据内存
-    void *data = NULL;
-    if (data_len > 0) {
-        data = malloc(data_len);
-        if (data == NULL) {
-            pthread_mutex_unlock(&ctx->lock);
-            return -1;
-        }
-    }
+    // 初始化 item
+    _data_bus_reset_item(item);
+    item->info.type = type;
+    item->info.data_size = (uint32_t)size;
+    item->info.timestamp = _data_bus_get_timestamp_us();
+    item->info.producer = producer;
+    item->info.ref_count = 1; // 生产者持有一个引用
+    item->in_use = true;
+    item->published = false;
 
-    // 初始化帧
-    memset(int_frame, 0, sizeof(internal_frame_t));
-    int_frame->in_use = true;
-    int_frame->public_frame.type = type;
-    int_frame->public_frame.timestamp = _data_bus_get_timestamp_us();
-    int_frame->public_frame.data = data;
-    int_frame->public_frame.data_len = data_len;
-    int_frame->public_frame.ref_count = 1;
-
-    *out_frame = &int_frame->public_frame;
     pthread_mutex_unlock(&ctx->lock);
+
+    *out_item = (data_bus_item_handle_t)item;
+    LOG_D("Data Bus: Allocated item (type=%s, size=%u)", data_type_to_str(type), (uint32_t)size);
     return 0;
 }
 
-int data_bus_publish(data_bus_handle_t handle, data_frame_t *frame)
+void* data_bus_get_writable_ptr(data_bus_item_handle_t item)
 {
-    if (handle == NULL || frame == NULL) {
+    if (item == NULL) return NULL;
+    data_item_t *ditem = (data_item_t*)item;
+
+    // 只有未发布的 item 才能写
+    if (ditem->published) {
+        LOG_W("Data Bus: Attempt to write published item");
+        return NULL;
+    }
+
+    return ditem->data_ptr;
+}
+
+int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
+{
+    if (handle == NULL || item == NULL) {
+        return -1;
+    }
+    data_bus_context_t *ctx = (data_bus_context_t*)handle;
+    data_item_t *ditem = (data_item_t*)item;
+
+    pthread_mutex_lock(&ctx->lock);
+
+    if (!ditem->in_use || ditem->published) {
+        pthread_mutex_unlock(&ctx->lock);
+        return -1;
+    }
+
+    // 标记为已发布
+    ditem->published = true;
+    ditem->info.timestamp = _data_bus_get_timestamp_us(); // 更新发布时间
+
+    // 更新最新 item 索引
+    // 这里我们通过指针偏移计算索引
+    int index = (int)((uint8_t*)ditem - (uint8_t*)ctx->items) / sizeof(data_item_t);
+    ctx->latest_item_index = index;
+
+    pthread_mutex_unlock(&ctx->lock);
+
+    LOG_D("Data Bus: Published item (type=%s, producer=%s)", 
+          data_type_to_str(ditem->info.type), 
+          ditem->info.producer);
+    return 0;
+}
+
+// -------------------------------------------------------------------------
+// 消费者接口
+// -------------------------------------------------------------------------
+
+int data_bus_acquire_latest(data_bus_handle_t handle,
+                             data_type_t type,
+                             data_bus_item_handle_t *out_item)
+{
+    if (handle == NULL || out_item == NULL) {
         return -1;
     }
     data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
-    // 找到内部帧
-    internal_frame_t *int_frame = (internal_frame_t*)((uint8_t*)frame - offsetof(internal_frame_t, public_frame));
+    pthread_rwlock_rdlock(&ctx->rwlock); // 读锁
 
-    pthread_mutex_lock(&ctx->lock);
-
-    // 入队
-    data_type_t type = frame->type;
-    if (ctx->queue_count[type] >= MAX_FRAMES) {
-        // 队列满，丢最旧的帧
-        internal_frame_t *old_frame = ctx->queue[type][ctx->queue_head[type]];
-        ctx->queue_head[type] = (ctx->queue_head[type] + 1) % MAX_FRAMES;
-        ctx->queue_count[type]--;
-        // 释放旧帧
-        if (old_frame->public_frame.ref_count > 0) {
-            old_frame->public_frame.ref_count--;
-            if (old_frame->public_frame.ref_count == 0) {
-                if (old_frame->free_cb) {
-                    old_frame->free_cb((void*)old_frame->public_frame.data, old_frame->free_user_data);
-                } else {
-                    free((void*)old_frame->public_frame.data);
-                }
-                old_frame->in_use = false;
-            }
-        }
+    if (ctx->latest_item_index < 0) {
+        pthread_rwlock_unlock(&ctx->rwlock);
+        return -1; // 没有数据
     }
 
-    ctx->queue[type][ctx->queue_tail[type]] = int_frame;
-    ctx->queue_tail[type] = (ctx->queue_tail[type] + 1) % MAX_FRAMES;
-    ctx->queue_count[type]++;
+    data_item_t *item = &ctx->items[ctx->latest_item_index];
 
-    // 更新统计
-    if (ctx->enable_stats) {
-        ctx->stats.total_published++;
-        if (type < DATA_TYPE_MAX) {
-            ctx->stats.frame_count[type]++;
-        }
-    }
-
-    // 通知等待者
-    pthread_cond_broadcast(&ctx->not_empty[type]); // 原：pthread_cond_signal
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
-}
-
-int data_bus_acquire(data_bus_handle_t handle,
-                     data_type_t type,
-                     data_frame_t **out_frame,
-                     uint32_t timeout_ms)
-{
-    if (handle == NULL || out_frame == NULL || type == DATA_TYPE_INVALID) {
+    // 类型校验
+    if (type != DATA_TYPE_INVALID && item->info.type != type) {
+        pthread_rwlock_unlock(&ctx->rwlock);
         return -1;
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
-	    if (timeout_ms == 0) {
-        timeout_ms = 3000; // 默认3秒超时
-    }
-    pthread_mutex_lock(&ctx->lock);
 
-    // 等待队列非空
-    while (ctx->queue_count[type] == 0) {
-        if (timeout_ms == 0) {
-            pthread_cond_wait(&ctx->not_empty[type], &ctx->lock);
-        } else {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += timeout_ms / 1000;
-            ts.tv_nsec += (timeout_ms % 1000) * 1000000;
-            if (ts.tv_nsec >= 1000000000) {
-                ts.tv_sec++;
-                ts.tv_nsec -= 1000000000;
-            }
-            int ret = pthread_cond_timedwait(&ctx->not_empty[type], &ctx->lock, &ts);
-            if (ret != 0) {
-                pthread_mutex_unlock(&ctx->lock);
-                return -1;
-            }
-        }
-    }
-
-    // 出队
-    internal_frame_t *int_frame = ctx->queue[type][ctx->queue_head[type]];
-    ctx->queue_head[type] = (ctx->queue_head[type] + 1) % MAX_FRAMES;
-    ctx->queue_count[type]--;
-
-    // 引用计数+1
-    int_frame->public_frame.ref_count++;
-
-    // 更新统计
-    if (ctx->enable_stats) {
-        ctx->stats.total_acquired++;
-    }
-
-    *out_frame = &int_frame->public_frame;
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
-}
-
-int data_bus_release(data_bus_handle_t handle, data_frame_t *frame)
-{
-    if (handle == NULL || frame == NULL) {
+    if (!item->in_use || !item->published) {
+        pthread_rwlock_unlock(&ctx->rwlock);
         return -1;
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
-    // 找到内部帧
-    internal_frame_t *int_frame = (internal_frame_t*)((uint8_t*)frame - offsetof(internal_frame_t, public_frame));
+    // 原子增加引用计数
+    pthread_mutex_lock(&item->ref_lock);
+    item->info.ref_count++;
+    pthread_mutex_unlock(&item->ref_lock);
 
-    pthread_mutex_lock(&ctx->lock);
+    pthread_rwlock_unlock(&ctx->rwlock);
 
-    // 引用计数-1
-    int_frame->public_frame.ref_count--;
-
-    // 更新统计
-    if (ctx->enable_stats) {
-        ctx->stats.total_released++;
-    }
-
-    // 引用计数为0，释放
-    if (int_frame->public_frame.ref_count == 0) {
-        if (int_frame->free_cb) {
-            int_frame->free_cb((void*)int_frame->public_frame.data, int_frame->free_user_data);
-        } else {
-            free((void*)int_frame->public_frame.data);
-        }
-        int_frame->in_use = false;
-    }
-
-    pthread_mutex_unlock(&ctx->lock);
+    *out_item = (data_bus_item_handle_t)item;
+    LOG_D("Data Bus: Acquired latest item (ref_count=%u)", item->info.ref_count);
     return 0;
 }
 
-int data_bus_set_free_callback(data_bus_handle_t handle,
-                                data_frame_t *frame,
-                                data_free_callback_t cb,
-                                void *user_data)
+const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item)
 {
-    if (handle == NULL || frame == NULL) {
+    if (item == NULL) return NULL;
+    data_item_t *ditem = (data_item_t*)item;
+    return ditem->data_ptr;
+}
+
+int data_bus_get_item_info(data_bus_item_handle_t item,
+                           data_bus_item_info_t *out_info)
+{
+    if (item == NULL || out_info == NULL) {
         return -1;
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
-
-    internal_frame_t *int_frame = (internal_frame_t*)((uint8_t*)frame - offsetof(internal_frame_t, public_frame));
-
-    pthread_mutex_lock(&ctx->lock);
-    int_frame->free_cb = cb;
-    int_frame->free_user_data = user_data;
-    pthread_mutex_unlock(&ctx->lock);
-
+    data_item_t *ditem = (data_item_t*)item;
+    
+    pthread_mutex_lock(&ditem->ref_lock);
+    *out_info = ditem->info;
+    pthread_mutex_unlock(&ditem->ref_lock);
+    
     return 0;
 }
 
-int data_bus_get_stats(data_bus_handle_t handle, data_bus_stats_t *stats)
+int data_bus_release(data_bus_item_handle_t item)
 {
-    if (handle == NULL || stats == NULL) {
+    if (item == NULL) {
         return -1;
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
+    data_item_t *ditem = (data_item_t*)item;
 
-    pthread_mutex_lock(&ctx->lock);
-    memcpy(stats, &ctx->stats, sizeof(data_bus_stats_t));
-    pthread_mutex_unlock(&ctx->lock);
+    pthread_mutex_lock(&ditem->ref_lock);
 
-    return 0;
-}
-
-int data_bus_reset_stats(data_bus_handle_t handle)
-{
-    if (handle == NULL) {
+    if (ditem->info.ref_count == 0) {
+        pthread_mutex_unlock(&ditem->ref_lock);
         return -1;
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
-    pthread_mutex_lock(&ctx->lock);
-    memset(&ctx->stats, 0, sizeof(ctx->stats));
-    pthread_mutex_unlock(&ctx->lock);
+    ditem->info.ref_count--;
+    uint32_t new_count = ditem->info.ref_count;
+
+    pthread_mutex_unlock(&ditem->ref_lock);
+
+    // 如果引用计数为0，回收
+    if (new_count == 0) {
+        // 注意：这里我们不需要加总线的大锁，因为 item 已经没人用了
+        _data_bus_reset_item(ditem);
+        LOG_D("Data Bus: Item released and recycled");
+    } else {
+        LOG_D("Data Bus: Item released (ref_count=%u)", new_count);
+    }
 
     return 0;
 }
+
+// -------------------------------------------------------------------------
+// 管理接口
+// -------------------------------------------------------------------------
 
 int data_bus_deinit(data_bus_handle_t handle)
 {
@@ -2023,28 +2092,73 @@ int data_bus_deinit(data_bus_handle_t handle)
     }
     data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
-    pthread_mutex_lock(&ctx->lock);
-    // 释放所有帧
-    for (uint32_t i = 0; i < ctx->frame_count; i++) {
-        if (ctx->frames[i].in_use) {
-            if (ctx->frames[i].free_cb) {
-                ctx->frames[i].free_cb((void*)ctx->frames[i].public_frame.data, ctx->frames[i].free_user_data);
-            } else {
-                free((void*)ctx->frames[i].public_frame.data);
-            }
-            ctx->frames[i].in_use = false;
-        }
-    }
-    pthread_mutex_unlock(&ctx->lock);
+    pthread_rwlock_wrlock(&ctx->rwlock);
 
-    for (int i = 0; i < DATA_TYPE_MAX; i++) {
-        pthread_cond_destroy(&ctx->not_empty[i]);
+    // 销毁所有 item 的锁
+    for (uint32_t i = 0; i < ctx->max_items; i++) {
+        pthread_mutex_destroy(&ctx->items[i].ref_lock);
     }
+
+    // 释放内存
+    free(ctx->memory_pool);
+    free(ctx->items);
+    
+    ctx->memory_pool = NULL;
+    ctx->items = NULL;
+    ctx->latest_item_index = -1;
+
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    pthread_rwlock_destroy(&ctx->rwlock);
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
+
+    LOG_I("Data Bus: Deinitialized");
     return 0;
 }
 
+const char* data_type_to_str(data_type_t type)
+{
+    if (type >= DATA_TYPE_CUSTOM_BASE) return "CUSTOM";
+    if (type < DATA_TYPE_MAX) return g_data_type_str[type];
+    return "UNKNOWN";
+}
+
+// ==========================================================================
+// 内部辅助函数实现
+// ==========================================================================
+
+static uint64_t _data_bus_get_timestamp_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx)
+{
+    for (uint32_t i = 0; i < ctx->max_items; i++) {
+        if (!ctx->items[i].in_use) {
+            return &ctx->items[i];
+        }
+    }
+    return NULL;
+}
+
+static void _data_bus_reset_item(data_item_t *item)
+{
+    if (item == NULL) return;
+    
+    pthread_mutex_lock(&item->ref_lock);
+    memset(&item->info, 0, sizeof(item->info));
+    // 注意：不重置 data_ptr 指向，只清空内容
+    if (item->data_ptr != NULL) {
+        memset(item->data_ptr, 0, 128); // 只清空前128字节，避免大内存操作
+    }
+    item->in_use = false;
+    item->published = false;
+    pthread_mutex_unlock(&item->ref_lock);
+}
 
 
 =============================================
@@ -2059,107 +2173,116 @@ int data_bus_deinit(data_bus_handle_t handle)
 #include <pthread.h>
 
 // ==========================================================================
-// 【模块状态机铁律】
-// 1. 通用状态抽象到基类，子模块仅实现差异化规则
-// 2. 必须服从全局状态机调度，禁止私自非法跳转
-// 3. 只做状态决策，不执行具体业务操作
-// 4. 状态迁移必须原子性，全程加锁保护
+// 【Module FSM 铁律】
+// 1. 纯基类，不包含任何具体业务逻辑
+// 2. 具体业务逻辑（迁移表、事件处理）由上层通过配置传入
+// 3. 状态迁移全程原子性，线程安全
 // ==========================================================================
 
 // ==========================================================================
-// 1. 模块通用状态枚举（所有子模块统一）
-// ==========================================================================
-typedef enum {
-    MODULE_STATE_INVALID = 0,    // 无效状态
-    MODULE_STATE_IDLE,           // 空闲（已初始化，未启动）
-    MODULE_STATE_READY,          // 就绪（等待全局调度启动）
-    MODULE_STATE_RUNNING,        // 运行中
-    MODULE_STATE_PAUSED,         // 暂停
-    MODULE_STATE_ERROR,          // 异常
-    MODULE_STATE_DEINIT,         // 已释放
-    MODULE_STATE_MAX
-} module_state_t;
-
-// ==========================================================================
-// 2. 模块事件枚举（驱动状态流转）
-// ==========================================================================
-typedef enum {
-    MODULE_EVENT_INVALID = 0,
-    MODULE_EVENT_INIT_OK,        // 初始化完成
-    MODULE_EVENT_START,          // 启动指令（来自全局状态机）
-    MODULE_EVENT_START_OK,       // 启动成功
-    MODULE_EVENT_PAUSE,          // 暂停指令
-    MODULE_EVENT_PAUSE_OK,       // 暂停成功
-    MODULE_EVENT_RESUME,         // 恢复指令
-    MODULE_EVENT_RESUME_OK,      // 恢复成功
-    MODULE_EVENT_STOP,           // 停止指令
-    MODULE_EVENT_STOP_OK,        // 停止成功
-    MODULE_EVENT_ERROR,          // 异常上报
-    MODULE_EVENT_DEINIT,         // 释放指令
-    MODULE_EVENT_MAX
-} module_event_t;
-
-// ==========================================================================
-// 3. 状态迁移规则结构体（子模块自定义）
-// ==========================================================================
-typedef struct {
-    module_state_t current_state;    // 当前状态
-    module_event_t event;            // 触发事件
-    module_state_t next_state;       // 目标状态
-} module_state_trans_t;
-
-// ==========================================================================
-// 4. 通用回调接口（总线适配用，不绑定具体实现）
-// ==========================================================================
-// 状态变更回调：通知总线/全局状态机
-typedef void (*module_state_change_cb_t)(const char *module_name,
-                                          module_state_t old_state,
-                                          module_state_t new_state,
-                                          void *user_data);
-// 事件执行回调：子模块自定义事件处理逻辑（仅决策，不执行业务）
-typedef int (*module_event_handler_t)(module_event_t event, void *user_data);
-
-// ==========================================================================
-// 5. 模块状态机基类（不透明句柄）
+// 1. 不透明句柄（内部实现完全封装）
 // ==========================================================================
 typedef void* module_fsm_handle_t;
 
 // ==========================================================================
-// 6. 模块状态机配置
+// 2. 通用模块状态枚举（所有子模块共用）
+// ==========================================================================
+typedef enum {
+    MODULE_STATE_INVALID = 0,
+    MODULE_STATE_IDLE,           // 空闲（已创建，未初始化）
+    MODULE_STATE_INITIALIZING,   // 初始化中
+    MODULE_STATE_READY,          // 就绪（等待启动指令）
+    MODULE_STATE_STARTING,       // 启动中
+    MODULE_STATE_RUNNING,        // 运行中
+    MODULE_STATE_PAUSING,        // 暂停中
+    MODULE_STATE_PAUSED,         // 已暂停
+    MODULE_STATE_STOPPING,       // 停止中
+    MODULE_STATE_ERROR,          // 异常
+    MODULE_STATE_DEINITIALIZING, // 销毁中
+    MODULE_STATE_DEINIT,         // 已销毁
+    MODULE_STATE_MAX
+} module_state_t;
+
+// ==========================================================================
+// 3. 通用模块事件枚举（驱动状态流转）
+// ==========================================================================
+typedef enum {
+    MODULE_EVENT_INVALID = 0,
+    MODULE_EVENT_INIT,           // 初始化指令
+    MODULE_EVENT_INIT_OK,        // 初始化完成
+    MODULE_EVENT_INIT_FAIL,      // 初始化失败
+    MODULE_EVENT_START,          // 启动指令
+    MODULE_EVENT_START_OK,       // 启动完成
+    MODULE_EVENT_START_FAIL,     // 启动失败
+    MODULE_EVENT_PAUSE,          // 暂停指令
+    MODULE_EVENT_PAUSE_OK,       // 暂停完成
+    MODULE_EVENT_RESUME,         // 恢复指令
+    MODULE_EVENT_RESUME_OK,      // 恢复完成
+    MODULE_EVENT_STOP,           // 停止指令
+    MODULE_EVENT_STOP_OK,        // 停止完成
+    MODULE_EVENT_ERROR,          // 异常上报
+    MODULE_EVENT_ERROR_CLEAR,    // 异常清除
+    MODULE_EVENT_DEINIT,         // 销毁指令
+    MODULE_EVENT_DEINIT_OK,      // 销毁完成
+    MODULE_EVENT_MAX
+} module_event_t;
+
+// ==========================================================================
+// 4. 状态迁移规则结构体（由具体业务层定义）
+// ==========================================================================
+typedef struct {
+    module_state_t current_state; // 当前状态
+    module_event_t event;          // 触发事件
+    module_state_t next_state;     // 目标状态
+} module_state_trans_t;
+
+// ==========================================================================
+// 5. 事件处理回调（由具体业务层实现，执行业务逻辑）
+// 
+// 返回值：
+//   0  - 允许状态迁移
+//   非0 - 禁止状态迁移（业务逻辑执行失败）
+// ==========================================================================
+typedef int (*module_event_handler_t)(module_event_t event, void *user_data);
+
+// ==========================================================================
+// 6. 状态变化通知回调（由上层绑定，用于通知 Global FSM 或 Event Bus）
+// ==========================================================================
+typedef void (*module_state_change_cb_t)(const char *module_name,
+                                          module_state_t old_state,
+                                          module_state_t new_state,
+                                          void *user_data);
+
+// ==========================================================================
+// 7. Module FSM 配置结构体
 // ==========================================================================
 typedef struct {
     const char *module_name;                // 模块名称（唯一标识）
-    module_state_trans_t *trans_table;      // 状态迁移表
-    uint32_t trans_table_len;               // 迁移表长度
-    module_state_change_cb_t state_cb;      // 状态变更回调
-    module_event_handler_t event_handler;   // 事件处理回调
-    void *user_data;                        // 用户数据
+    const module_state_trans_t *trans_table; // 状态迁移表（由业务层提供）
+    uint32_t trans_table_len;                // 迁移表长度
+    module_event_handler_t event_handler;    // 事件处理回调（业务逻辑）
+    module_state_change_cb_t state_cb;       // 状态变化通知回调（上层）
+    void *user_data;                          // 用户数据（透传）
 } module_fsm_config_t;
 
 // ==========================================================================
-// 7. 通用接口
+// 8. 【核心】通用接口
 // ==========================================================================
 
 /**
  * @brief 创建模块状态机
- * @param config 配置
+ * @param config 配置（包含业务层提供的迁移表和回调）
  * @param out_handle 输出句柄
  * @return 0成功，非0失败
  */
-int module_fsm_create(const module_fsm_config_t *config, module_fsm_handle_t *out_handle);
+int module_fsm_create(const module_fsm_config_t *config,
+                      module_fsm_handle_t *out_handle);
 
 /**
- * @brief 销毁模块状态机
- * @param handle 句柄
- * @return 0成功
- */
-int module_fsm_destroy(module_fsm_handle_t handle);
-
-/**
- * @brief 投递事件，驱动状态流转（核心入口，仅总线/全局状态机可调用）
+ * @brief 投递事件（驱动状态流转的唯一入口）
  * @param handle 句柄
  * @param event 事件
- * @return 0成功，非0非法跳转
+ * @return 0成功（允许迁移），非0失败（禁止迁移或参数错误）
  */
 int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event);
 
@@ -2178,21 +2301,27 @@ module_state_t module_fsm_get_state(module_fsm_handle_t handle);
 const char* module_fsm_get_name(module_fsm_handle_t handle);
 
 /**
- * @brief 状态转字符串（可视化调试用）
+ * @brief 销毁模块状态机
+ * @param handle 句柄
+ * @return 0成功，非0失败
+ */
+int module_fsm_destroy(module_fsm_handle_t handle);
+
+/**
+ * @brief 【辅助】状态转字符串
  * @param state 状态
- * @return 状态名称字符串
+ * @return 字符串
  */
 const char* module_state_to_str(module_state_t state);
 
 /**
- * @brief 事件转字符串（可视化调试用）
+ * @brief 【辅助】事件转字符串
  * @param event 事件
- * @return 事件名称字符串
+ * @return 字符串
  */
 const char* module_event_to_str(module_event_t event);
 
 #endif /* MODULE_FSM_H */
-
 
 
 =============================================
@@ -2200,41 +2329,51 @@ const char* module_event_to_str(module_event_t event);
 =============================================
 // src/fsm/module_fsm/src/module_fsm.c
 #include "module_fsm.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 // ==========================================================================
-// 内部状态结构体（完全封装）
+// 内部上下文结构体
 // ==========================================================================
 typedef struct {
     char module_name[32];
     module_state_t current_state;
-    module_state_trans_t *trans_table;
+    const module_state_trans_t *trans_table;
     uint32_t trans_table_len;
-    module_state_change_cb_t state_cb;
     module_event_handler_t event_handler;
+    module_state_change_cb_t state_cb;
     void *user_data;
-    pthread_mutex_t lock; // 状态迁移锁，保证原子性
+    pthread_mutex_t lock;
 } module_fsm_context_t;
 
 // ==========================================================================
-// 状态/事件字符串映射表（可视化用）
+// 字符串映射表
 // ==========================================================================
 static const char* g_module_state_str[] = {
     [MODULE_STATE_INVALID] = "INVALID",
     [MODULE_STATE_IDLE] = "IDLE",
+    [MODULE_STATE_INITIALIZING] = "INITIALIZING",
     [MODULE_STATE_READY] = "READY",
+    [MODULE_STATE_STARTING] = "STARTING",
     [MODULE_STATE_RUNNING] = "RUNNING",
+    [MODULE_STATE_PAUSING] = "PAUSING",
     [MODULE_STATE_PAUSED] = "PAUSED",
+    [MODULE_STATE_STOPPING] = "STOPPING",
     [MODULE_STATE_ERROR] = "ERROR",
+    [MODULE_STATE_DEINITIALIZING] = "DEINITIALIZING",
     [MODULE_STATE_DEINIT] = "DEINIT",
 };
 
 static const char* g_module_event_str[] = {
     [MODULE_EVENT_INVALID] = "INVALID",
+    [MODULE_EVENT_INIT] = "INIT",
     [MODULE_EVENT_INIT_OK] = "INIT_OK",
+    [MODULE_EVENT_INIT_FAIL] = "INIT_FAIL",
     [MODULE_EVENT_START] = "START",
     [MODULE_EVENT_START_OK] = "START_OK",
+    [MODULE_EVENT_START_FAIL] = "START_FAIL",
     [MODULE_EVENT_PAUSE] = "PAUSE",
     [MODULE_EVENT_PAUSE_OK] = "PAUSE_OK",
     [MODULE_EVENT_RESUME] = "RESUME",
@@ -2242,47 +2381,24 @@ static const char* g_module_event_str[] = {
     [MODULE_EVENT_STOP] = "STOP",
     [MODULE_EVENT_STOP_OK] = "STOP_OK",
     [MODULE_EVENT_ERROR] = "ERROR",
+    [MODULE_EVENT_ERROR_CLEAR] = "ERROR_CLEAR",
     [MODULE_EVENT_DEINIT] = "DEINIT",
+    [MODULE_EVENT_DEINIT_OK] = "DEINIT_OK",
 };
 
 // ==========================================================================
-// 内部辅助函数
+// 内部辅助函数声明
 // ==========================================================================
 static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
                                      module_event_t event,
-                                     module_state_t *out_next_state)
-{
-    for (uint32_t i = 0; i < ctx->trans_table_len; i++) {
-        if (ctx->trans_table[i].current_state == ctx->current_state
-            && ctx->trans_table[i].event == event) {
-            *out_next_state = ctx->trans_table[i].next_state;
-            return true;
-        }
-    }
-    return false;
-}
+                                     module_state_t *out_next_state);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
 
-const char* module_state_to_str(module_state_t state)
-{
-    if (state < 0 || state >= MODULE_STATE_MAX) {
-        return g_module_state_str[MODULE_STATE_INVALID];
-    }
-    return g_module_state_str[state];
-}
-
-const char* module_event_to_str(module_event_t event)
-{
-    if (event < 0 || event >= MODULE_EVENT_MAX) {
-        return g_module_event_str[MODULE_EVENT_INVALID];
-    }
-    return g_module_event_str[event];
-}
-
-int module_fsm_create(const module_fsm_config_t *config, module_fsm_handle_t *out_handle)
+int module_fsm_create(const module_fsm_config_t *config,
+                      module_fsm_handle_t *out_handle)
 {
     if (config == NULL || out_handle == NULL || config->module_name == NULL) {
         return -1;
@@ -2299,66 +2415,72 @@ int module_fsm_create(const module_fsm_config_t *config, module_fsm_handle_t *ou
     strncpy(ctx->module_name, config->module_name, sizeof(ctx->module_name) - 1);
     ctx->trans_table = config->trans_table;
     ctx->trans_table_len = config->trans_table_len;
-    ctx->state_cb = config->state_cb;
     ctx->event_handler = config->event_handler;
+    ctx->state_cb = config->state_cb;
     ctx->user_data = config->user_data;
-    ctx->current_state = MODULE_STATE_IDLE; // 初始状态
 
-    // 初始化锁（保证状态迁移原子性）
+    // 初始状态
+    ctx->current_state = MODULE_STATE_IDLE;
+
+    // 初始化锁
     pthread_mutex_init(&ctx->lock, NULL);
 
     *out_handle = (module_fsm_handle_t)ctx;
-    return 0;
-}
-
-int module_fsm_destroy(module_fsm_handle_t handle)
-{
-    if (handle == NULL) {
-        return -1;
-    }
-    module_fsm_context_t *ctx = (module_fsm_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    ctx->current_state = MODULE_STATE_DEINIT;
-    pthread_mutex_unlock(&ctx->lock);
-
-    pthread_mutex_destroy(&ctx->lock);
-    free(ctx);
+    LOG_I("Module FSM: [%s] created, initial state: %s", 
+          ctx->module_name, module_state_to_str(ctx->current_state));
     return 0;
 }
 
 int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
 {
-    if (handle == NULL || event == MODULE_EVENT_INVALID) {
+    if (handle == NULL || event == MODULE_EVENT_INVALID || event >= MODULE_EVENT_MAX) {
         return -1;
     }
     module_fsm_context_t *ctx = (module_fsm_context_t*)handle;
 
-    // 全程加锁，保证状态迁移原子性
     pthread_mutex_lock(&ctx->lock);
 
-    // 1. 执行事件处理回调（仅决策，不执行业务）
+    LOG_I("Module FSM: [%s] received event: %s (current state: %s)", 
+          ctx->module_name, 
+          module_event_to_str(event), 
+          module_state_to_str(ctx->current_state));
+
+    // 1. 检查状态迁移规则
+    module_state_t next_state = MODULE_STATE_INVALID;
+    if (!_module_fsm_check_trans(ctx, event, &next_state)) {
+        LOG_W("Module FSM: [%s] invalid transition: %s + %s", 
+              ctx->module_name, 
+              module_state_to_str(ctx->current_state), 
+              module_event_to_str(event));
+        pthread_mutex_unlock(&ctx->lock);
+        return -1;
+    }
+
+    // 2. 调用业务层的事件处理回调（如果有）
+    // 注意：这里在锁里调用回调，业务层回调应尽量快，只做决策，不做耗时操作
+    int ret = 0;
     if (ctx->event_handler != NULL) {
-        int ret = ctx->event_handler(event, ctx->user_data);
+        ret = ctx->event_handler(event, ctx->user_data);
         if (ret != 0) {
+            LOG_E("Module FSM: [%s] event handler failed for event %s, ret=%d", 
+                  ctx->module_name, module_event_to_str(event), ret);
             pthread_mutex_unlock(&ctx->lock);
-            return ret; // 事件处理不通过，禁止跳转
+            return ret; // 业务层禁止迁移
         }
     }
 
-    // 2. 校验状态迁移规则
-    module_state_t next_state = MODULE_STATE_INVALID;
-    if (!_module_fsm_check_trans(ctx, event, &next_state)) {
-        pthread_mutex_unlock(&ctx->lock);
-        return -1; // 非法状态跳转
-    }
-
-    // 3. 执行状态变更
+    // 3. 执行状态迁移
     module_state_t old_state = ctx->current_state;
     ctx->current_state = next_state;
+
+    LOG_I("Module FSM: [%s] state changed: %s -> %s", 
+          ctx->module_name, 
+          module_state_to_str(old_state), 
+          module_state_to_str(next_state));
+
     pthread_mutex_unlock(&ctx->lock);
 
-    // 4. 通知状态变更（回调总线/全局状态机）
+    // 4. 调用上层的状态变化通知回调（在锁外调用，避免死锁）
     if (ctx->state_cb != NULL) {
         ctx->state_cb(ctx->module_name, old_state, next_state, ctx->user_data);
     }
@@ -2389,6 +2511,63 @@ const char* module_fsm_get_name(module_fsm_handle_t handle)
     return ctx->module_name;
 }
 
+int module_fsm_destroy(module_fsm_handle_t handle)
+{
+    if (handle == NULL) {
+        return -1;
+    }
+    module_fsm_context_t *ctx = (module_fsm_context_t*)handle;
+
+    pthread_mutex_lock(&ctx->lock);
+    ctx->current_state = MODULE_STATE_DEINIT;
+    pthread_mutex_unlock(&ctx->lock);
+
+    pthread_mutex_destroy(&ctx->lock);
+    free(ctx);
+    
+    LOG_I("Module FSM: Destroyed");
+    return 0;
+}
+
+const char* module_state_to_str(module_state_t state)
+{
+    if (state < 0 || state >= MODULE_STATE_MAX) {
+        return "UNKNOWN";
+    }
+    return g_module_state_str[state];
+}
+
+const char* module_event_to_str(module_event_t event)
+{
+    if (event < 0 || event >= MODULE_EVENT_MAX) {
+        return "UNKNOWN";
+    }
+    return g_module_event_str[event];
+}
+
+// ==========================================================================
+// 内部辅助函数实现
+// ==========================================================================
+
+static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
+                                     module_event_t event,
+                                     module_state_t *out_next_state)
+{
+    if (ctx == NULL || out_next_state == NULL) {
+        return false;
+    }
+
+    // 遍历迁移表，查找匹配的规则
+    for (uint32_t i = 0; i < ctx->trans_table_len; i++) {
+        if (ctx->trans_table[i].current_state == ctx->current_state &&
+            ctx->trans_table[i].event == event) {
+            *out_next_state = ctx->trans_table[i].next_state;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 
 =============================================
@@ -2403,135 +2582,148 @@ const char* module_fsm_get_name(module_fsm_handle_t handle)
 #include <stdbool.h>
 
 // ==========================================================================
-// 【全局状态机铁律】
-// 1. 系统生命周期唯一管控入口，定义核心状态
-// 2. 绝对管控所有子模块状态机，子模块必须服从全局调度
-// 3. 异常处理总入口，决策降级/重试/重启/停机策略
-// 4. 只做状态决策和调度，不执行具体业务操作
-// 5. 所有状态流转有明确规则，杜绝非法跳转
+// 【Global FSM 铁律】
+// 1. 只做全局状态汇总与决策，不干涉子模块内部业务逻辑
+// 2. 只依赖 module_fsm 基类，不依赖具体 Service 或总线
+// 3. 所有状态变化通过回调通知上层，为总线接入预留接口
 // ==========================================================================
 
 // ==========================================================================
-// 1. 系统全局状态枚举（核心生命周期）
-// ==========================================================================
-typedef enum {
-    GLOBAL_STATE_INVALID = 0,
-    GLOBAL_STATE_INIT,         // 初始化中
-    GLOBAL_STATE_READY,        // 就绪（所有模块初始化完成）
-    GLOBAL_STATE_RUNNING,      // 正常运行
-    GLOBAL_STATE_DEGRADED,     // 降级运行（部分模块异常）
-    GLOBAL_STATE_ERROR,        // 系统异常
-    GLOBAL_STATE_SHUTDOWN,     // 关机中
-    GLOBAL_STATE_OFF,          // 已关机
-    GLOBAL_STATE_MAX
-} global_state_t;
-
-// ==========================================================================
-// 2. 全局事件枚举（驱动系统生命周期）
-// ==========================================================================
-typedef enum {
-    GLOBAL_EVENT_INVALID = 0,
-    GLOBAL_EVENT_INIT_OK,          // 所有模块初始化完成
-    GLOBAL_EVENT_SYSTEM_START,     // 系统启动指令
-    GLOBAL_EVENT_ALL_MODULE_RUNNING, // 所有模块启动完成
-    GLOBAL_EVENT_MODULE_ERROR,     // 子模块异常上报
-    GLOBAL_EVENT_MODULE_RECOVERY,  // 子模块恢复
-    GLOBAL_EVENT_SYSTEM_STOP,      // 系统停止指令
-    GLOBAL_EVENT_ALL_MODULE_STOPPED, // 所有模块停止完成
-    GLOBAL_EVENT_SHUTDOWN,         // 系统关机指令
-    GLOBAL_EVENT_FATAL_ERROR,      // 致命异常
-    GLOBAL_EVENT_MAX
-} global_event_t;
-
-// ==========================================================================
-// 3. 不透明句柄
+// 1. 不透明句柄（内部实现完全封装）
 // ==========================================================================
 typedef void* global_fsm_handle_t;
 
 // ==========================================================================
-// 4. 通用回调接口（总线适配）
+// 2. 全局状态枚举（系统级生命周期）
+// ==========================================================================
+typedef enum {
+    GLOBAL_STATE_INVALID = 0,
+    GLOBAL_STATE_INIT,           // 初始化中
+    GLOBAL_STATE_READY,          // 系统就绪（所有子模块 READY）
+    GLOBAL_STATE_RUNNING,        // 系统运行中（所有子模块 RUNNING）
+    GLOBAL_STATE_DEGRADED,       // 系统降级（部分子模块 ERROR）
+    GLOBAL_STATE_ERROR,          // 系统错误（关键子模块 ERROR）
+    GLOBAL_STATE_SHUTTING_DOWN,  // 关机中
+    GLOBAL_STATE_OFF,            // 已关机
+    GLOBAL_STATE_MAX
+} global_state_t;
+
+// ==========================================================================
+// 3. 全局事件枚举（驱动全局状态流转）
+// ==========================================================================
+typedef enum {
+    GLOBAL_EVENT_INVALID = 0,
+    GLOBAL_EVENT_MODULE_READY,       // 子模块就绪
+    GLOBAL_EVENT_MODULE_RUNNING,      // 子模块运行
+    GLOBAL_EVENT_MODULE_ERROR,        // 子模块异常
+    GLOBAL_EVENT_MODULE_STOPPED,      // 子模块停止
+    GLOBAL_EVENT_SYSTEM_START,        // 系统启动指令
+    GLOBAL_EVENT_SYSTEM_STOP,         // 系统停止指令
+    GLOBAL_EVENT_SYSTEM_SHUTDOWN,     // 系统关机指令
+    GLOBAL_EVENT_MAX
+} global_event_t;
+
+// ==========================================================================
+// 4. 全局状态变化回调（为 Event Bus 接入预留）
 // ==========================================================================
 typedef void (*global_state_change_cb_t)(global_state_t old_state,
                                           global_state_t new_state,
                                           void *user_data);
-typedef void (*global_exception_handler_t)(global_event_t event,
-                                            const char *module_name,
-                                            void *user_data);
 
 // ==========================================================================
-// 5. 全局状态机配置
+// 5. 全局事件通知回调（为 Event Bus 接入预留）
+// ==========================================================================
+typedef void (*global_event_notify_cb_t)(global_event_t event,
+                                          const char *module_name,
+                                          void *user_data);
+
+// ==========================================================================
+// 6. Global FSM 配置
 // ==========================================================================
 typedef struct {
-    uint32_t max_module_count;               // 最大支持子模块数量
-    global_state_change_cb_t state_cb;       // 全局状态变更回调
-    global_exception_handler_t exception_cb; // 异常处理回调
-    void *user_data;
+    uint32_t max_modules;               // 最大支持的子模块数量
+    global_state_change_cb_t state_cb;  // 全局状态变化回调
+    global_event_notify_cb_t event_cb;  // 全局事件通知回调
+    void *user_data;                     // 用户数据
 } global_fsm_config_t;
 
 // ==========================================================================
-// 6. 核心接口
+// 7. 【核心】Global FSM 对外接口
 // ==========================================================================
 
 /**
- * @brief 初始化全局状态机（单例）
+ * @brief 初始化全局主状态机
  * @param config 配置
  * @param out_handle 输出句柄
- * @return 0成功
+ * @return 0成功，非0失败
  */
-int global_fsm_init(const global_fsm_config_t *config, global_fsm_handle_t *out_handle);
+int global_fsm_init(const global_fsm_config_t *config,
+                    global_fsm_handle_t *out_handle);
 
 /**
- * @brief 注册子模块状态机（全局管控）
- * @param handle 全局句柄
- * @param module_handle 子模块句柄
- * @return 0成功
+ * @brief 注册子模块（子模块的 state_cb 会绑定到 Global FSM）
+ * @param handle Global FSM 句柄
+ * @param module_name 子模块名称（唯一标识）
+ * @param module_fsm 子模块状态机句柄
+ * @param is_critical 是否为关键模块（关键模块 ERROR 会导致全局 ERROR）
+ * @return 0成功，非0失败
  */
-int global_fsm_register_module(global_fsm_handle_t handle, module_fsm_handle_t module_handle);
+int global_fsm_register_module(global_fsm_handle_t handle,
+                               const char *module_name,
+                               module_fsm_handle_t module_fsm,
+                               bool is_critical);
 
 /**
- * @brief 注销子模块状态机
- * @param handle 全局句柄
- * @param module_handle 子模块句柄
- * @return 0成功
+ * @brief 投递全局事件（驱动全局状态流转）
+ * @param handle Global FSM 句柄
+ * @param event 全局事件
+ * @return 0成功，非0失败
  */
-int global_fsm_unregister_module(global_fsm_handle_t handle, module_fsm_handle_t module_handle);
-
-/**
- * @brief 投递全局事件，驱动系统状态流转
- * @param handle 全局句柄
- * @param event 事件
- * @param module_name 触发事件的模块名（异常事件用）
- * @return 0成功
- */
-int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event, const char *module_name);
+int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event);
 
 /**
  * @brief 获取当前全局状态
- * @param handle 全局句柄
- * @return 全局状态
+ * @param handle Global FSM 句柄
+ * @return 当前全局状态
  */
 global_state_t global_fsm_get_state(global_fsm_handle_t handle);
 
 /**
- * @brief 全局状态转字符串（可视化用）
+ * @brief 销毁全局主状态机
+ * @param handle Global FSM 句柄
+ * @return 0成功，非0失败
+ */
+int global_fsm_deinit(global_fsm_handle_t handle);
+
+/**
+ * @brief 【辅助】全局状态转字符串
  * @param state 状态
- * @return 状态名称
+ * @return 字符串
  */
 const char* global_state_to_str(global_state_t state);
 
 /**
- * @brief 全局事件转字符串
+ * @brief 【辅助】全局事件转字符串
  * @param event 事件
- * @return 事件名称
+ * @return 字符串
  */
 const char* global_event_to_str(global_event_t event);
 
 /**
- * @brief 销毁全局状态机
- * @param handle 全局句柄
- * @return 0成功
+ * @brief 【标准回调】子模块状态变化回调（用于注册到具体 Service）
+ * 
+ * 这是 Global FSM 暴露给上层的标准回调函数指针类型。
+ * 具体 Service（如 capture_srv）应在初始化时，将此回调设为其 state_change_cb。
+ * 
+ * @param module_name 子模块名称
+ * @param old_state 旧状态
+ * @param new_state 新状态
+ * @param user_data 必须是 global_fsm_handle_t
  */
-int global_fsm_deinit(global_fsm_handle_t handle);
+void global_fsm_on_module_state_change(const char *module_name,
+                                        module_state_t old_state,
+                                        module_state_t new_state,
+                                        void *user_data);
 
 #endif /* GLOBAL_FSM_H */
 
@@ -2542,27 +2734,41 @@ int global_fsm_deinit(global_fsm_handle_t handle);
 =============================================
 // src/fsm/global_fsm/src/global_fsm.c
 #include "global_fsm.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 
 // ==========================================================================
+// 内部宏定义
+// ==========================================================================
+#define GLOBAL_FSM_MAX_MODULES_DEFAULT 16
+
+// ==========================================================================
+// 内部子模块信息结构体
+// ==========================================================================
+typedef struct {
+    char name[32];                  // 子模块名称
+    module_fsm_handle_t fsm;        // 子模块状态机句柄
+    module_state_t current_state;   // 子模块当前状态（缓存）
+    bool is_critical;               // 是否为关键模块
+    bool registered;                // 是否已注册
+} module_info_t;
+
+// ==========================================================================
 // 内部上下文结构体
 // ==========================================================================
-#define MAX_MODULE_COUNT 32
 typedef struct {
+    global_fsm_config_t config;
     global_state_t current_state;
-    module_fsm_handle_t modules[MAX_MODULE_COUNT];
+    module_info_t *modules;
     uint32_t module_count;
-    uint32_t max_module_count;
-    global_state_change_cb_t state_cb;
-    global_exception_handler_t exception_cb;
-    void *user_data;
-    pthread_mutex_t lock; // 全局状态锁
+    uint32_t max_modules;
+    pthread_mutex_t lock;
 } global_fsm_context_t;
 
 // ==========================================================================
-// 状态/事件字符串映射表
+// 字符串映射表
 // ==========================================================================
 static const char* g_global_state_str[] = {
     [GLOBAL_STATE_INVALID] = "INVALID",
@@ -2571,109 +2777,43 @@ static const char* g_global_state_str[] = {
     [GLOBAL_STATE_RUNNING] = "RUNNING",
     [GLOBAL_STATE_DEGRADED] = "DEGRADED",
     [GLOBAL_STATE_ERROR] = "ERROR",
-    [GLOBAL_STATE_SHUTDOWN] = "SHUTDOWN",
+    [GLOBAL_STATE_SHUTTING_DOWN] = "SHUTTING_DOWN",
     [GLOBAL_STATE_OFF] = "OFF",
 };
 
 static const char* g_global_event_str[] = {
     [GLOBAL_EVENT_INVALID] = "INVALID",
-    [GLOBAL_EVENT_INIT_OK] = "INIT_OK",
-    [GLOBAL_EVENT_SYSTEM_START] = "SYSTEM_START",
-    [GLOBAL_EVENT_ALL_MODULE_RUNNING] = "ALL_MODULE_RUNNING",
+    [GLOBAL_EVENT_MODULE_READY] = "MODULE_READY",
+    [GLOBAL_EVENT_MODULE_RUNNING] = "MODULE_RUNNING",
     [GLOBAL_EVENT_MODULE_ERROR] = "MODULE_ERROR",
-    [GLOBAL_EVENT_MODULE_RECOVERY] = "MODULE_RECOVERY",
+    [GLOBAL_EVENT_MODULE_STOPPED] = "MODULE_STOPPED",
+    [GLOBAL_EVENT_SYSTEM_START] = "SYSTEM_START",
     [GLOBAL_EVENT_SYSTEM_STOP] = "SYSTEM_STOP",
-    [GLOBAL_EVENT_ALL_MODULE_STOPPED] = "ALL_MODULE_STOPPED",
-    [GLOBAL_EVENT_SHUTDOWN] = "SHUTDOWN",
-    [GLOBAL_EVENT_FATAL_ERROR] = "FATAL_ERROR",
+    [GLOBAL_EVENT_SYSTEM_SHUTDOWN] = "SYSTEM_SHUTDOWN",
 };
 
 // ==========================================================================
-// 全局状态迁移规则表（内置，禁止私自修改）
+// 内部辅助函数声明
 // ==========================================================================
-typedef struct {
-    global_state_t current_state;
-    global_event_t event;
-    global_state_t next_state;
-} global_state_trans_t;
-
-static const global_state_trans_t g_global_trans_table[] = {
-    // 初始化流程
-    {GLOBAL_STATE_INIT, GLOBAL_EVENT_INIT_OK, GLOBAL_STATE_READY},
-    // 启动流程
-    {GLOBAL_STATE_READY, GLOBAL_EVENT_SYSTEM_START, GLOBAL_STATE_RUNNING},
-    {GLOBAL_STATE_RUNNING, GLOBAL_EVENT_ALL_MODULE_RUNNING, GLOBAL_STATE_RUNNING},
-    // 异常降级流程
-    {GLOBAL_STATE_RUNNING, GLOBAL_EVENT_MODULE_ERROR, GLOBAL_STATE_DEGRADED},
-    {GLOBAL_STATE_DEGRADED, GLOBAL_EVENT_MODULE_RECOVERY, GLOBAL_STATE_RUNNING},
-    {GLOBAL_STATE_DEGRADED, GLOBAL_EVENT_MODULE_ERROR, GLOBAL_STATE_ERROR},
-    {GLOBAL_STATE_RUNNING, GLOBAL_EVENT_FATAL_ERROR, GLOBAL_STATE_ERROR},
-    {GLOBAL_STATE_DEGRADED, GLOBAL_EVENT_FATAL_ERROR, GLOBAL_STATE_ERROR},
-    // 停止流程
-    {GLOBAL_STATE_RUNNING, GLOBAL_EVENT_SYSTEM_STOP, GLOBAL_STATE_READY},
-    {GLOBAL_STATE_DEGRADED, GLOBAL_EVENT_SYSTEM_STOP, GLOBAL_STATE_READY},
-    {GLOBAL_STATE_READY, GLOBAL_EVENT_ALL_MODULE_STOPPED, GLOBAL_STATE_READY},
-    // 关机流程
-    {GLOBAL_STATE_READY, GLOBAL_EVENT_SHUTDOWN, GLOBAL_STATE_SHUTDOWN},
-    {GLOBAL_STATE_ERROR, GLOBAL_EVENT_SHUTDOWN, GLOBAL_STATE_SHUTDOWN},
-    {GLOBAL_STATE_SHUTDOWN, GLOBAL_EVENT_ALL_MODULE_STOPPED, GLOBAL_STATE_OFF},
-};
-static const uint32_t g_global_trans_len = sizeof(g_global_trans_table) / sizeof(g_global_trans_table[0]);
-
-// ==========================================================================
-// 内部辅助函数
-// ==========================================================================
-static bool _global_fsm_check_trans(global_fsm_context_t *ctx,
-                                    global_event_t event,
-                                    global_state_t *out_next_state)
-{
-    for (uint32_t i = 0; i < g_global_trans_len; i++) {
-        if (g_global_trans_table[i].current_state == ctx->current_state
-            && g_global_trans_table[i].event == event) {
-            *out_next_state = g_global_trans_table[i].next_state;
-            return true;
-        }
-    }
-    return false;
-}
-
-// 检查所有模块是否处于指定状态
-static bool _global_fsm_check_all_module_state(global_fsm_context_t *ctx, module_state_t target_state)
-{
-    for (uint32_t i = 0; i < ctx->module_count; i++) {
-        if (module_fsm_get_state(ctx->modules[i]) != target_state) {
-            return false;
-        }
-    }
-    return true;
-}
+static void _global_fsm_update_global_state(global_fsm_context_t *ctx);
+static void _global_fsm_notify_event(global_fsm_context_t *ctx,
+                                      global_event_t event,
+                                      const char *module_name);
+static void _global_fsm_change_state(global_fsm_context_t *ctx,
+                                      global_state_t new_state);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
 
-const char* global_state_to_str(global_state_t state)
-{
-    if (state < 0 || state >= GLOBAL_STATE_MAX) {
-        return g_global_state_str[GLOBAL_STATE_INVALID];
-    }
-    return g_global_state_str[state];
-}
-
-const char* global_event_to_str(global_event_t event)
-{
-    if (event < 0 || event >= GLOBAL_EVENT_MAX) {
-        return g_global_event_str[GLOBAL_EVENT_INVALID];
-    }
-    return g_global_event_str[event];
-}
-
-int global_fsm_init(const global_fsm_config_t *config, global_fsm_handle_t *out_handle)
+int global_fsm_init(const global_fsm_config_t *config,
+                    global_fsm_handle_t *out_handle)
 {
     if (config == NULL || out_handle == NULL) {
         return -1;
     }
 
+    // 分配上下文
     global_fsm_context_t *ctx = (global_fsm_context_t*)malloc(sizeof(global_fsm_context_t));
     if (ctx == NULL) {
         return -1;
@@ -2681,93 +2821,151 @@ int global_fsm_init(const global_fsm_config_t *config, global_fsm_handle_t *out_
     memset(ctx, 0, sizeof(global_fsm_context_t));
 
     // 拷贝配置
-    ctx->max_module_count = config->max_module_count > 0 ? config->max_module_count : MAX_MODULE_COUNT;
-    ctx->state_cb = config->state_cb;
-    ctx->exception_cb = config->exception_cb;
-    ctx->user_data = config->user_data;
-    ctx->current_state = GLOBAL_STATE_INIT; // 初始状态
-    ctx->module_count = 0;
+    memcpy(&ctx->config, config, sizeof(global_fsm_config_t));
+    ctx->max_modules = (config->max_modules > 0) ? config->max_modules : GLOBAL_FSM_MAX_MODULES_DEFAULT;
 
+    // 分配子模块数组
+    ctx->modules = (module_info_t*)malloc(ctx->max_modules * sizeof(module_info_t));
+    if (ctx->modules == NULL) {
+        free(ctx);
+        return -1;
+    }
+    memset(ctx->modules, 0, ctx->max_modules * sizeof(module_info_t));
+
+    // 初始化锁
     pthread_mutex_init(&ctx->lock, NULL);
 
+    // 初始状态
+    ctx->current_state = GLOBAL_STATE_INIT;
+    ctx->module_count = 0;
+
     *out_handle = (global_fsm_handle_t)ctx;
+    LOG_I("Global FSM: Initialized, max modules=%u", ctx->max_modules);
     return 0;
 }
 
-int global_fsm_register_module(global_fsm_handle_t handle, module_fsm_handle_t module_handle)
+int global_fsm_register_module(global_fsm_handle_t handle,
+                               const char *module_name,
+                               module_fsm_handle_t module_fsm,
+                               bool is_critical)
 {
-    if (handle == NULL || module_handle == NULL) {
+    if (handle == NULL || module_name == NULL || module_fsm == NULL) {
         return -1;
     }
     global_fsm_context_t *ctx = (global_fsm_context_t*)handle;
 
     pthread_mutex_lock(&ctx->lock);
-    if (ctx->module_count >= ctx->max_module_count) {
+
+    // 检查是否已满
+    if (ctx->module_count >= ctx->max_modules) {
+        LOG_E("Global FSM: Max modules reached");
         pthread_mutex_unlock(&ctx->lock);
         return -1;
     }
-    ctx->modules[ctx->module_count++] = module_handle;
-    pthread_mutex_unlock(&ctx->lock);
 
+    // 检查是否重名
+    for (uint32_t i = 0; i < ctx->module_count; i++) {
+        if (strcmp(ctx->modules[i].name, module_name) == 0) {
+            LOG_E("Global FSM: Module %s already registered", module_name);
+            pthread_mutex_unlock(&ctx->lock);
+            return -1;
+        }
+    }
+
+    // 注册子模块
+    module_info_t *info = &ctx->modules[ctx->module_count];
+    strncpy(info->name, module_name, sizeof(info->name) - 1);
+    info->fsm = module_fsm;
+    info->current_state = module_fsm_get_state(module_fsm);
+    info->is_critical = is_critical;
+    info->registered = true;
+    ctx->module_count++;
+
+    // 【关键】这里我们暂时不修改子模块的 state_cb
+    // 上层（main.c）应该在创建子模块时，把 Global FSM 的内部回调设为子模块的 state_cb
+    // 这样就形成了：子模块 state change -> Global FSM 内部回调 -> 全局决策
+
+    LOG_I("Global FSM: Module %s registered (critical=%d)", module_name, is_critical);
+    
+    // 注册后立即更新一次全局状态
+    pthread_mutex_unlock(&ctx->lock);
+    _global_fsm_update_global_state(ctx);
+    
     return 0;
 }
 
-int global_fsm_unregister_module(global_fsm_handle_t handle, module_fsm_handle_t module_handle)
+int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
 {
-    if (handle == NULL || module_handle == NULL) {
+    if (handle == NULL || event == GLOBAL_EVENT_INVALID || event >= GLOBAL_EVENT_MAX) {
         return -1;
     }
     global_fsm_context_t *ctx = (global_fsm_context_t*)handle;
 
+    LOG_I("Global FSM: Received global event %s", global_event_to_str(event));
+
     pthread_mutex_lock(&ctx->lock);
-    for (uint32_t i = 0; i < ctx->module_count; i++) {
-        if (ctx->modules[i] == module_handle) {
-            // 前移覆盖
-            for (uint32_t j = i; j < ctx->module_count - 1; j++) {
-                ctx->modules[j] = ctx->modules[j + 1];
+    global_state_t current = ctx->current_state;
+    pthread_mutex_unlock(&ctx->lock);
+
+    // 根据当前状态和事件，执行动作
+    switch (event) {
+        case GLOBAL_EVENT_SYSTEM_START: {
+            if (current != GLOBAL_STATE_READY) {
+                LOG_W("Global FSM: Cannot start, current state %s", global_state_to_str(current));
+                return -1;
             }
-            ctx->module_count--;
+            // 给所有子模块投 START 事件
+            pthread_mutex_lock(&ctx->lock);
+            for (uint32_t i = 0; i < ctx->module_count; i++) {
+                if (ctx->modules[i].registered) {
+                    LOG_I("Global FSM: Sending START to module %s", ctx->modules[i].name);
+                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_START);
+                }
+            }
+            pthread_mutex_unlock(&ctx->lock);
             break;
         }
-    }
-    pthread_mutex_unlock(&ctx->lock);
-
-    return 0;
-}
-
-int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event, const char *module_name)
-{
-    if (handle == NULL || event == GLOBAL_EVENT_INVALID) {
-        return -1;
-    }
-    global_fsm_context_t *ctx = (global_fsm_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-
-    // 1. 异常事件处理（总入口）
-    if (event == GLOBAL_EVENT_MODULE_ERROR || event == GLOBAL_EVENT_FATAL_ERROR) {
-        if (ctx->exception_cb != NULL) {
-            ctx->exception_cb(event, module_name, ctx->user_data);
+        
+        case GLOBAL_EVENT_SYSTEM_STOP: {
+            if (current != GLOBAL_STATE_RUNNING && current != GLOBAL_STATE_DEGRADED) {
+                LOG_W("Global FSM: Cannot stop, current state %s", global_state_to_str(current));
+                return -1;
+            }
+            // 给所有子模块投 STOP 事件
+            pthread_mutex_lock(&ctx->lock);
+            for (uint32_t i = 0; i < ctx->module_count; i++) {
+                if (ctx->modules[i].registered) {
+                    LOG_I("Global FSM: Sending STOP to module %s", ctx->modules[i].name);
+                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_STOP);
+                }
+            }
+            pthread_mutex_unlock(&ctx->lock);
+            break;
         }
+        
+        case GLOBAL_EVENT_SYSTEM_SHUTDOWN: {
+            _global_fsm_change_state(ctx, GLOBAL_STATE_SHUTTING_DOWN);
+            // 给所有子模块投 DEINIT 事件
+            pthread_mutex_lock(&ctx->lock);
+            for (uint32_t i = 0; i < ctx->module_count; i++) {
+                if (ctx->modules[i].registered) {
+                    LOG_I("Global FSM: Sending DEINIT to module %s", ctx->modules[i].name);
+                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_DEINIT);
+                }
+            }
+            pthread_mutex_unlock(&ctx->lock);
+            // 延迟一会后设为 OFF（实际项目中应等所有子模块 DEINIT 回调）
+            _global_fsm_change_state(ctx, GLOBAL_STATE_OFF);
+            break;
+        }
+        
+        default:
+            break;
     }
 
-    // 2. 校验状态迁移规则
-    global_state_t next_state = GLOBAL_STATE_INVALID;
-    if (!_global_fsm_check_trans(ctx, event, &next_state)) {
-        pthread_mutex_unlock(&ctx->lock);
-        return -1; // 非法跳转
-    }
-
-    // 3. 执行状态变更
-    global_state_t old_state = ctx->current_state;
-    ctx->current_state = next_state;
-    pthread_mutex_unlock(&ctx->lock);
-
-    // 4. 通知状态变更（总线适配）
-    if (ctx->state_cb != NULL) {
-        ctx->state_cb(old_state, next_state, ctx->user_data);
-    }
-
+    // 通知事件（为 Event Bus 预留）
+    _global_fsm_notify_event(ctx, event, NULL);
+    
     return 0;
 }
 
@@ -2793,14 +2991,185 @@ int global_fsm_deinit(global_fsm_handle_t handle)
     global_fsm_context_t *ctx = (global_fsm_context_t*)handle;
 
     pthread_mutex_lock(&ctx->lock);
-    ctx->current_state = GLOBAL_STATE_OFF;
+    
+    // 释放子模块数组
+    free(ctx->modules);
+    ctx->modules = NULL;
+    ctx->module_count = 0;
+    
     pthread_mutex_unlock(&ctx->lock);
-
+    
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
+    
+    LOG_I("Global FSM: Deinitialized");
     return 0;
 }
 
+const char* global_state_to_str(global_state_t state)
+{
+    if (state < 0 || state >= GLOBAL_STATE_MAX) {
+        return "UNKNOWN";
+    }
+    return g_global_state_str[state];
+}
+
+const char* global_event_to_str(global_event_t event)
+{
+    if (event < 0 || event >= GLOBAL_EVENT_MAX) {
+        return "UNKNOWN";
+    }
+    return g_global_event_str[event];
+}
+
+// ==========================================================================
+// 【核心】内部辅助函数实现
+// ==========================================================================
+
+/**
+ * @brief 【关键】子模块状态变化回调（由上层绑定到子模块的 state_cb）
+ * 
+ * 这是子模块与 Global FSM 交互的核心桥梁：
+ * 子模块 state change -> 此回调 -> 更新缓存 -> 重新计算全局状态
+ */
+void global_fsm_on_module_state_change(const char *module_name,
+                                        module_state_t old_state,
+                                        module_state_t new_state,
+                                        void *user_data)
+{
+    global_fsm_context_t *ctx = (global_fsm_context_t*)user_data;
+    if (ctx == NULL || module_name == NULL) return;
+
+    LOG_I("Global FSM: Module %s state changed: %s -> %s", 
+          module_name, 
+          module_state_to_str(old_state), 
+          module_state_to_str(new_state));
+
+    pthread_mutex_lock(&ctx->lock);
+
+    // 找到对应的子模块，更新缓存状态
+    for (uint32_t i = 0; i < ctx->module_count; i++) {
+        if (strcmp(ctx->modules[i].name, module_name) == 0) {
+            ctx->modules[i].current_state = new_state;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&ctx->lock);
+
+    // 【核心】重新计算全局状态
+    _global_fsm_update_global_state(ctx);
+
+    // 【为 Event Bus 预留】根据子模块的新状态，生成对应的全局事件
+    global_event_t evt = GLOBAL_EVENT_INVALID;
+    switch (new_state) {
+        case MODULE_STATE_READY:   evt = GLOBAL_EVENT_MODULE_READY; break;
+        case MODULE_STATE_RUNNING: evt = GLOBAL_EVENT_MODULE_RUNNING; break;
+        case MODULE_STATE_ERROR:   evt = GLOBAL_EVENT_MODULE_ERROR; break;
+        case MODULE_STATE_IDLE:    evt = GLOBAL_EVENT_MODULE_STOPPED; break;
+        default: break;
+    }
+    if (evt != GLOBAL_EVENT_INVALID) {
+        _global_fsm_notify_event(ctx, evt, module_name);
+    }
+}
+
+/**
+ * @brief 【核心】全局状态决策算法
+ * 
+ * 遍历所有子模块的缓存状态，根据规则计算当前全局状态：
+ * 1. 有关键模块 ERROR -> GLOBAL_STATE_ERROR
+ * 2. 有非关键模块 ERROR -> GLOBAL_STATE_DEGRADED
+ * 3. 所有子模块 RUNNING -> GLOBAL_STATE_RUNNING
+ * 4. 所有子模块 READY -> GLOBAL_STATE_READY
+ */
+static void _global_fsm_update_global_state(global_fsm_context_t *ctx)
+{
+    if (ctx == NULL) return;
+
+    pthread_mutex_lock(&ctx->lock);
+
+    bool all_ready = true;
+    bool all_running = true;
+    bool has_non_critical_error = false;
+    bool has_critical_error = false;
+
+    for (uint32_t i = 0; i < ctx->module_count; i++) {
+        if (!ctx->modules[i].registered) continue;
+
+        module_state_t state = ctx->modules[i].current_state;
+        
+        if (state == MODULE_STATE_ERROR) {
+            if (ctx->modules[i].is_critical) {
+                has_critical_error = true;
+            } else {
+                has_non_critical_error = true;
+            }
+        }
+        
+        if (state != MODULE_STATE_READY) all_ready = false;
+        if (state != MODULE_STATE_RUNNING) all_running = false;
+    }
+
+    global_state_t new_state = ctx->current_state;
+
+    // 决策逻辑
+    if (has_critical_error) {
+        new_state = GLOBAL_STATE_ERROR;
+    } else if (has_non_critical_error) {
+        new_state = GLOBAL_STATE_DEGRADED;
+    } else if (all_running) {
+        new_state = GLOBAL_STATE_RUNNING;
+    } else if (all_ready) {
+        new_state = GLOBAL_STATE_READY;
+    }
+    // 其他情况保持原状态
+
+    pthread_mutex_unlock(&ctx->lock);
+
+    // 执行状态变化
+    if (new_state != ctx->current_state) {
+        _global_fsm_change_state(ctx, new_state);
+    }
+}
+
+static void _global_fsm_notify_event(global_fsm_context_t *ctx,
+                                      global_event_t event,
+                                      const char *module_name)
+{
+    if (ctx == NULL) return;
+
+    // 【为 Event Bus 预留】调用上层传入的 event_cb
+    // 上层（main.c）可以在这里把 global_event 转换成 event_bus 的 event 发布出去
+    if (ctx->config.event_cb != NULL) {
+        ctx->config.event_cb(event, module_name, ctx->config.user_data);
+    }
+}
+
+static void _global_fsm_change_state(global_fsm_context_t *ctx,
+                                      global_state_t new_state)
+{
+    if (ctx == NULL) return;
+
+    pthread_mutex_lock(&ctx->lock);
+    global_state_t old_state = ctx->current_state;
+    
+    if (old_state == new_state) {
+        pthread_mutex_unlock(&ctx->lock);
+        return;
+    }
+
+    ctx->current_state = new_state;
+    LOG_I("Global FSM: Global state changed: %s -> %s", 
+          global_state_to_str(old_state), 
+          global_state_to_str(new_state));
+    pthread_mutex_unlock(&ctx->lock);
+
+    // 【为 Event Bus 预留】调用上层传入的 state_cb
+    if (ctx->config.state_cb != NULL) {
+        ctx->config.state_cb(old_state, new_state, ctx->config.user_data);
+    }
+}
 
 
 =============================================
@@ -3340,90 +3709,74 @@ static void* _frame_link_capture_thread(void *arg)
 #define CAPTURE_SRV_H
 
 #include "frame_link.h"
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
 #include <stdint.h>
 #include <stdbool.h>
 
 // ==========================================================================
-// 【Service层铁律】
-// 1. 绝对不碰硬件驱动，只通过链路层获取数据
-// 2. 服务间绝对不直接调用，只通过回调/总线通信
-// 3. 不实现具体业务逻辑，只提供原子能力
-// 4. 【核心】严格单向依赖：只依赖Link层，不依赖总线层
+// 【Capture Service 铁律】
+// 1. 只依赖 Link层、Module FSM基类、双总线基类
+// 2. 所有外部依赖通过 config 注入（无全局变量）
+// 3. 所有硬件动作由 FSM 状态迁移触发
+// 4. 所有数据通过 Data Bus 流出，所有通知通过 Event Bus 发出
 // ==========================================================================
 
 // ==========================================================================
-// 1. 不透明句柄（内部实现完全封装）
+// 1. 不透明句柄
 // ==========================================================================
 typedef void* capture_srv_handle_t;
 
 // ==========================================================================
-// 2. 通用事件类型（不绑定总线，独立定义）
-// ==========================================================================
-typedef enum {
-    CAPTURE_SRV_EVENT_INVALID = 0,
-    CAPTURE_SRV_EVENT_STARTED,
-    CAPTURE_SRV_EVENT_STOPPED,
-    CAPTURE_SRV_EVENT_FRAME_READY,
-    CAPTURE_SRV_EVENT_ERROR,
-} capture_srv_event_type_t;
-
-// ==========================================================================
-// 3. 通用事件结构体（不绑定总线）
+// 2. 上层回调接口（由 Global FSM 或 App 实现）
 // ==========================================================================
 typedef struct {
-    capture_srv_event_type_t type;
-    uint64_t timestamp;
-    void *data;
-    uint32_t data_len;
-} capture_srv_event_t;
+    module_state_change_cb_t state_change_cb; // 状态变化通知给上层
+    void *user_data;
+} capture_srv_callbacks_t;
 
 // ==========================================================================
-// 4. 通用回调接口（总线层后续适配）
-// ==========================================================================
-typedef void (*capture_srv_event_cb_t)(const capture_srv_event_t *event, void *user_data);
-
-// ==========================================================================
-// 5. 采集服务配置
+// 3. 完整配置结构体（依赖注入容器）
 // ==========================================================================
 typedef struct {
-    frame_link_config_t link_config;  // 链路层配置（透传）
-    bool auto_start;                   // 是否自动启动
+    // Link层 配置
+    frame_link_config_t link_cfg;
+    
+    // 双总线 句柄注入
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    
+    // 上层回调注入
+    capture_srv_callbacks_t callbacks;
+    
+    // 运行时配置
+    bool auto_start;
 } capture_srv_config_t;
 
 // ==========================================================================
-// 6. 【核心】采集服务对外接口
+// 4. 【核心】标准 Service 接口
 // ==========================================================================
 
 /**
- * @brief 初始化采集服务
- * @param config 服务配置
- * @param out_handle 输出：不透明句柄
- * @return 错误码（0表示成功）
+ * @brief 创建并初始化采集服务
+ * @param config 配置（包含所有依赖注入）
+ * @param out_handle 输出句柄
+ * @return 0成功
  */
-int capture_srv_init(const capture_srv_config_t *config,
-                     capture_srv_handle_t *out_handle);
+int capture_srv_create(const capture_srv_config_t *config,
+                       capture_srv_handle_t *out_handle);
 
 /**
- * @brief 启动采集（原子能力）
- * @param handle 句柄
- * @return 错误码
+ * @brief 获取子状态机句柄（供上层投递事件）
+ * @param handle 服务句柄
+ * @return 子状态机句柄
  */
-int capture_srv_start(capture_srv_handle_t handle);
+module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle);
 
 /**
- * @brief 停止采集（原子能力）
- * @param handle 句柄
- * @return 错误码
- */
-int capture_srv_stop(capture_srv_handle_t handle);
-
-/**
- * @brief 从服务获取一帧（原子能力）
- * @param handle 句柄
- * @param frame 输出帧
- * @param timeout_ms 超时时间（毫秒，0表示无限等待）
- * @return 错误码
- * @note 必须调用 capture_srv_put_frame() 归还！
+ * @brief 【可选】直接获取帧（绕过总线，用于低延迟场景）
+ * @note 推荐通过 Event/Data Bus 获取
  */
 int capture_srv_get_frame(capture_srv_handle_t handle,
                           video_frame_t *frame,
@@ -3431,30 +3784,16 @@ int capture_srv_get_frame(capture_srv_handle_t handle,
 
 /**
  * @brief 归还帧
- * @param handle 句柄
- * @param frame 帧
- * @return 错误码
  */
 int capture_srv_put_frame(capture_srv_handle_t handle,
                           const video_frame_t *frame);
 
 /**
- * @brief 注册事件回调（总线层后续通过此接口适配）
- * @param handle 句柄
- * @param cb 回调函数
- * @param user_data 用户数据
- * @return 错误码
+ * @brief 销毁服务
+ * @param handle 服务句柄
+ * @return 0成功
  */
-int capture_srv_register_event_cb(capture_srv_handle_t handle,
-                                    capture_srv_event_cb_t cb,
-                                    void *user_data);
-
-/**
- * @brief 反初始化采集服务
- * @param handle 句柄
- * @return 错误码
- */
-int capture_srv_deinit(capture_srv_handle_t handle);
+int capture_srv_destroy(capture_srv_handle_t handle);
 
 #endif /* CAPTURE_SRV_H */
 
@@ -3465,249 +3804,337 @@ int capture_srv_deinit(capture_srv_handle_t handle);
 // src/service/capture_srv/src/capture_srv.c
 #include "capture_srv.h"
 #include "frame_link.h"
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
+#include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
 
 // ==========================================================================
-// 内部状态结构体（完全封装）
+// 【核心】采集服务专属：状态迁移规则表
+// ==========================================================================
+static module_state_trans_t g_capture_srv_trans_table[] = {
+    // 初始化流程
+    {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
+    
+    // 启动流程
+    {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
+    
+    // 停止流程
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
+    {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
+    
+    // 异常流程
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
+    
+    // 销毁流程
+    {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_DEINITIALIZING, MODULE_EVENT_DEINIT_OK, MODULE_STATE_DEINIT},
+};
+static const uint32_t g_capture_srv_trans_len = sizeof(g_capture_srv_trans_table) / sizeof(g_capture_srv_trans_table[0]);
+
+// ==========================================================================
+// 内部上下文结构体（完美封装）
 // ==========================================================================
 typedef struct {
-    // 链路层句柄（唯一依赖）
-    frame_link_handle_t link_handle;
+    // 配置与回调
     capture_srv_config_t config;
-
-    // 状态
-    bool initialized;
-    bool running;
-
-    // 通用回调（总线层后续适配）
-    capture_srv_event_cb_t event_cb;
-    void *cb_user_data;
-
-    // 锁
+    capture_srv_callbacks_t callbacks;
+    
+    // 下层依赖
+    frame_link_handle_t link_handle;
+    module_fsm_handle_t fsm_handle;
+    
+    // 总线句柄（缓存）
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    
+    // 运行时状态
+    bool is_created;
     pthread_mutex_t lock;
-} capture_srv_context_t;
+} capture_srv_ctx_t;
 
 // ==========================================================================
 // 内部辅助函数声明
 // ==========================================================================
-static void _capture_srv_notify_event(capture_srv_context_t *ctx,
-                                        capture_srv_event_type_t type,
-                                        void *data,
-                                        uint32_t data_len);
-static uint64_t _capture_srv_get_timestamp_us(void);
+static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data);
+static void _capture_srv_fsm_state_relay(const char *module_name,
+                                          module_state_t old_state,
+                                          module_state_t new_state,
+                                          void *user_data);
+static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
+static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
 
-int capture_srv_init(const capture_srv_config_t *config,
-                     capture_srv_handle_t *out_handle)
+int capture_srv_create(const capture_srv_config_t *config,
+                       capture_srv_handle_t *out_handle)
 {
     if (config == NULL || out_handle == NULL) {
         return -1;
     }
 
-    // 分配上下文
-    capture_srv_context_t *ctx = (capture_srv_context_t*)malloc(sizeof(capture_srv_context_t));
+    // 1. 分配并清零上下文
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)malloc(sizeof(capture_srv_ctx_t));
     if (ctx == NULL) {
         return -1;
     }
-    memset(ctx, 0, sizeof(capture_srv_context_t));
+    memset(ctx, 0, sizeof(capture_srv_ctx_t));
 
-    // 拷贝配置
+    // 2. 拷贝配置与回调
     memcpy(&ctx->config, config, sizeof(capture_srv_config_t));
-
-    // 初始化锁
+    memcpy(&ctx->callbacks, &config->callbacks, sizeof(capture_srv_callbacks_t));
+    ctx->evt_bus = config->evt_bus;
+    ctx->data_bus = config->data_bus;
     pthread_mutex_init(&ctx->lock, NULL);
 
-    // 初始化链路层（唯一依赖）
-    video_err_t err = frame_link_init(&ctx->config.link_config, &ctx->link_handle);
+    // 3. 初始化 Link层
+    LOG_I("Capture Srv: Initializing Link layer...");
+    video_err_t err = frame_link_init(&ctx->config.link_cfg, &ctx->link_handle);
     if (err != VIDEO_OK) {
+        LOG_E("Capture Srv: Failed to init link layer (err=%d)", err);
         pthread_mutex_destroy(&ctx->lock);
         free(ctx);
         return -1;
     }
 
-    ctx->initialized = true;
-    ctx->running = false;
-    ctx->event_cb = NULL;
-    ctx->cb_user_data = NULL;
+    // 4. 注册 Link层 回调
+    frame_link_register_frame_ready_cb(ctx->link_handle, _capture_srv_on_link_frame, ctx);
 
-    // 自动启动（如果配置了）
+    // 5. 初始化 Module FSM
+    LOG_I("Capture Srv: Creating Module FSM...");
+    module_fsm_config_t fsm_cfg = {0};
+    fsm_cfg.module_name = "capture_srv";
+    fsm_cfg.trans_table = g_capture_srv_trans_table;
+    fsm_cfg.trans_table_len = g_capture_srv_trans_len;
+    fsm_cfg.event_handler = _capture_srv_fsm_event_handler;
+    fsm_cfg.state_cb = _capture_srv_fsm_state_relay; // 【关键】先中继到自己
+    fsm_cfg.user_data = ctx; // 【关键】user_data 传自己的 ctx
+
+    int ret = module_fsm_create(&fsm_cfg, &ctx->fsm_handle);
+    if (ret != 0) {
+        LOG_E("Capture Srv: Failed to create Module FSM");
+        frame_link_deinit(ctx->link_handle);
+        pthread_mutex_destroy(&ctx->lock);
+        free(ctx);
+        return -1;
+    }
+
+    // 6. 启动初始化流程
+    ctx->is_created = true;
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK); // Link init 同步完成
+
+    // 7. 自动启动（如果配置了）
     if (ctx->config.auto_start) {
-        capture_srv_start((capture_srv_handle_t)ctx);
+        LOG_I("Capture Srv: Auto start enabled");
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
     }
 
     *out_handle = (capture_srv_handle_t)ctx;
+    LOG_I("Capture Srv: Created successfully");
     return 0;
 }
 
-int capture_srv_start(capture_srv_handle_t handle)
+module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle)
 {
-    if (handle == NULL) {
-        return -1;
-    }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    if (!ctx->initialized || ctx->running) {
-        pthread_mutex_unlock(&ctx->lock);
-        return 0;
-    }
-
-    // 启动链路层
-    video_err_t err = frame_link_start(ctx->link_handle);
-    if (err != VIDEO_OK) {
-        pthread_mutex_unlock(&ctx->lock);
-        return -1;
-    }
-
-    ctx->running = true;
-    pthread_mutex_unlock(&ctx->lock);
-
-    // 通知事件（通过通用回调）
-    _capture_srv_notify_event(ctx, CAPTURE_SRV_EVENT_STARTED, NULL, 0);
-
-    return 0;
-}
-
-int capture_srv_stop(capture_srv_handle_t handle)
-{
-    if (handle == NULL) {
-        return -1;
-    }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    if (!ctx->initialized || !ctx->running) {
-        pthread_mutex_unlock(&ctx->lock);
-        return 0;
-    }
-
-    // 停止链路层
-    frame_link_stop(ctx->link_handle);
-    ctx->running = false;
-    pthread_mutex_unlock(&ctx->lock);
-
-    // 通知事件
-    _capture_srv_notify_event(ctx, CAPTURE_SRV_EVENT_STOPPED, NULL, 0);
-
-    return 0;
+    if (handle == NULL) return NULL;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+    return ctx->fsm_handle;
 }
 
 int capture_srv_get_frame(capture_srv_handle_t handle,
                           video_frame_t *frame,
                           uint32_t timeout_ms)
 {
-    if (handle == NULL || frame == NULL) {
+    if (handle == NULL || frame == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+
+    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
+    if (state != MODULE_STATE_RUNNING) {
+        LOG_W("Capture Srv: Get frame called in state %s", module_state_to_str(state));
         return -1;
     }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
 
-    if (!ctx->initialized || !ctx->running) {
-        return -1;
-    }
-
-    // 只通过链路层获取数据
     return frame_link_get_frame(ctx->link_handle, frame, timeout_ms);
 }
 
 int capture_srv_put_frame(capture_srv_handle_t handle,
                           const video_frame_t *frame)
 {
-    if (handle == NULL || frame == NULL) {
-        return -1;
-    }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
-
-    if (!ctx->initialized) {
-        return -1;
-    }
-
-    // 只通过链路层归还数据
+    if (handle == NULL || frame == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
     return frame_link_put_frame(ctx->link_handle, frame);
 }
 
-int capture_srv_register_event_cb(capture_srv_handle_t handle,
-                                    capture_srv_event_cb_t cb,
-                                    void *user_data)
+int capture_srv_destroy(capture_srv_handle_t handle)
 {
-    if (handle == NULL) {
-        return -1;
-    }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
+    if (handle == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
 
     pthread_mutex_lock(&ctx->lock);
-    ctx->event_cb = cb;
-    ctx->cb_user_data = user_data;
-    pthread_mutex_unlock(&ctx->lock);
 
-    return 0;
-}
-
-int capture_srv_deinit(capture_srv_handle_t handle)
-{
-    if (handle == NULL) {
-        return -1;
-    }
-    capture_srv_context_t *ctx = (capture_srv_context_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-    if (!ctx->initialized) {
+    if (!ctx->is_created) {
         pthread_mutex_unlock(&ctx->lock);
         return 0;
     }
 
-    // 先停止
-    capture_srv_stop(handle);
+    // 1. 投 DEINIT 事件
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
 
-    // 反初始化链路层
+    // 2. 停止并销毁 Link层
+    frame_link_stop(ctx->link_handle);
     frame_link_deinit(ctx->link_handle);
 
-    ctx->initialized = false;
+    // 3. 投 DEINIT_OK
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
+
+    // 4. 销毁 FSM
+    module_fsm_destroy(ctx->fsm_handle);
+
+    ctx->is_created = false;
     pthread_mutex_unlock(&ctx->lock);
 
-    // 释放资源
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
-
+    
+    LOG_I("Capture Srv: Destroyed");
     return 0;
 }
 
 // ==========================================================================
-// 内部辅助函数实现
+// 【核心】内部辅助函数实现
 // ==========================================================================
 
-static void _capture_srv_notify_event(capture_srv_context_t *ctx,
-                                        capture_srv_event_type_t type,
-                                        void *data,
-                                        uint32_t data_len)
+/**
+ * @brief FSM 事件处理器（在锁内调用，只做决策，不做耗时操作）
+ */
+static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data)
 {
-    if (ctx == NULL) return;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL) return -1;
 
-    pthread_mutex_lock(&ctx->lock);
-    if (ctx->event_cb != NULL) {
-        capture_srv_event_t event;
-        memset(&event, 0, sizeof(event));
-        event.type = type;
-        event.timestamp = _capture_srv_get_timestamp_us();
-        event.data = data;
-        event.data_len = data_len;
-
-        // 调用回调（总线层后续在此处接入）
-        ctx->event_cb(&event, ctx->cb_user_data);
-    }
-    pthread_mutex_unlock(&ctx->lock);
+    LOG_I("Capture Srv: FSM Event Handler received: %s", module_event_to_str(event));
+    
+    // 这里只做决策，耗时的硬件操作放在 _capture_srv_fsm_state_relay 里（锁外）
+    return 0; // 允许所有迁移
 }
 
-static uint64_t _capture_srv_get_timestamp_us(void)
+/**
+ * @brief 【关键】FSM 状态中继回调
+ * 
+ * 职责链：
+ * Module FSM -> 此回调 -> 1. 执行硬件动作 (Start/Stop Link)
+ *                        -> 2. 转发给上层回调 (Global FSM)
+ */
+static void _capture_srv_fsm_state_relay(const char *module_name,
+                                          module_state_t old_state,
+                                          module_state_t new_state,
+                                          void *user_data)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL) return;
+
+    LOG_I("Capture Srv: State changed: %s -> %s", 
+          module_state_to_str(old_state), 
+          module_state_to_str(new_state));
+
+    // 1. 执行硬件动作（根据新状态）
+    if (new_state == MODULE_STATE_STARTING) {
+        LOG_I("Capture Srv: Starting Link layer...");
+        video_err_t err = frame_link_start(ctx->link_handle);
+        if (err == VIDEO_OK) {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
+        } else {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
+        }
+    }
+    else if (new_state == MODULE_STATE_STOPPING) {
+        LOG_I("Capture Srv: Stopping Link layer...");
+        frame_link_stop(ctx->link_handle);
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
+    }
+
+    // 2. 【重要】转发给上层回调（Global FSM）
+    if (ctx->callbacks.state_change_cb != NULL) {
+        ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
+    }
+}
+
+/**
+ * @brief Link层 帧就绪回调（数据入口）
+ */
+static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
+{
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL || frame == NULL) return;
+
+    // 检查状态
+    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
+    if (state != MODULE_STATE_RUNNING) {
+        return;
+    }
+
+    // 推送到双总线
+    _capture_srv_feed_bus(ctx, frame);
+}
+
+/**
+ * @brief 【核心】推送到双总线
+ */
+static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame)
+{
+    if (ctx == NULL || frame == NULL) return -1;
+
+    // 检查总线句柄
+    if (ctx->data_bus == NULL || ctx->evt_bus == NULL) {
+        return -1;
+    }
+
+    // 1. 从 Data Bus 申请 Item
+    data_bus_item_handle_t item = NULL;
+    size_t data_size = frame->length;
+    
+    int ret = data_bus_alloc(ctx->data_bus, 
+                              DATA_TYPE_VIDEO_FRAME, 
+                              data_size, 
+                              "capture_srv", 
+                              &item);
+    if (ret != 0 || item == NULL) {
+        return -1;
+    }
+
+    // 2. 拷贝数据
+    void *w_ptr = data_bus_get_writable_ptr(item);
+    if (w_ptr == NULL) {
+        data_bus_release(item);
+        return -1;
+    }
+    memcpy(w_ptr, frame->data, data_size);
+
+    // 3. 发布到 Data Bus
+    ret = data_bus_publish(ctx->data_bus, item);
+    if (ret != 0) {
+        data_bus_release(item);
+        return -1;
+    }
+
+    // 4. 发布事件到 Event Bus
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
+
+    return 0;
 }
 
 
@@ -4072,7 +4499,7 @@ video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath)
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <linux/types.h>
-#include "log.h"
+
 // ==========================================================================
 // 内部辅助函数：格式转换
 // ==========================================================================
@@ -4122,7 +4549,6 @@ int _video_usb_open(const char *dev_path, video_usb_context_t **out_ctx)
     // 打开设备
     ctx->fd = open(dev_path, O_RDWR);
     if (ctx->fd < 0) {
-        LOG_E("Failed to open %s: %s", dev_path, strerror(errno)); // 新增
         free(ctx);
         return -1;
     }
@@ -4229,14 +4655,7 @@ int _video_usb_set_format(video_usb_context_t *ctx)
     ctx->config.width = fmt.fmt.pix.width;
     ctx->config.height = fmt.fmt.pix.height;
     ctx->config.format = _video_usb_fourcc_to_format(fmt.fmt.pix.pixelformat);
-    if (ctx->config.format != VIDEO_PIX_FMT_YUYV) {
-    LOG_W("Format not supported, fallback to YUYV");
-    ctx->config.format = VIDEO_PIX_FMT_YUYV;
-    if (_video_usb_set_format(ctx) != 0) {
-        _video_usb_close(ctx);
-        return VIDEO_ERR_SET_FMT;
-    }
-}
+
     return 0;
 }
 
@@ -4525,18 +4944,35 @@ int _video_usb_dump_yuv(const video_frame_t *frame, const char *filepath)
 =============================================
 【业务插件】plugins/app_plugins/inc/demo_app.h
 =============================================
-// plugins/app_plugins/demo_app/inc/demo_app.h
+// plugins/app_plugins/inc/demo_app.h
 #ifndef DEMO_APP_H
-#define DEMO_APP_H
-
-#include "plugin_loader.h"
+#define DEMO_APP_H   
+#include "global_fsm.h"   
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
+#include "global_fsm.h"
+#include "capture_srv.h"
+#include <stdint.h>
+#include <stdbool.h>
 
 // ==========================================================================
-// 【demo_app插件】实时预览业务
+// Demo App 配置
+// ==========================================================================
+typedef struct {
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    global_fsm_handle_t g_fsm;
+    capture_srv_handle_t cap_srv;
+} demo_app_config_t;
+
+// ==========================================================================
+// 接口
 // ==========================================================================
 
-// 插件描述符声明（供main.c或插件加载器使用）
-extern const plugin_desc_t g_demo_app_desc;
+int demo_app_init(const demo_app_config_t *config);
+int demo_app_run(void); // 主循环
+int demo_app_deinit(void);
 
 #endif /* DEMO_APP_H */
 
@@ -4546,389 +4982,429 @@ extern const plugin_desc_t g_demo_app_desc;
 =============================================
 // plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
-#include "vision_ai_config.h"
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <unistd.h>
 
 // ==========================================================================
-// [修改] 移除本地全局句柄，直接使用vision_ai_config.h里的全局句柄
+// 内部状态
 // ==========================================================================
-static volatile bool g_running = false;
+typedef struct {
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    global_fsm_handle_t g_fsm;
+    capture_srv_handle_t cap_srv;
+    
+    bool running;
+    int cap_sub_id; // 采集事件订阅ID
+} demo_app_ctx_t;
+
+static demo_app_ctx_t g_demo_ctx = {0};
 
 // ==========================================================================
 // 内部辅助函数声明
 // ==========================================================================
-static void _demo_app_signal_handler(int sig);
-static void _demo_app_event_error_cb(const event_t *event, void *user_data);
-static void _demo_app_event_capture_frame_ready_cb(const event_t *event, void *user_data);
+static void _demo_app_on_event(const event_t *event, void *user_data);
+static void _demo_app_process_frame(void);
 static void _demo_app_print_help(void);
-static void _demo_app_command_loop(void);
-capture_srv_handle_t g_capture_srv_handle = NULL;
+
 // ==========================================================================
-// 插件初始化函数
+// 对外API实现
 // ==========================================================================
-static int demo_app_init(void)
+
+int demo_app_init(const demo_app_config_t *config)
 {
-    LOG_I("Demo App: Initializing...");
-
-    // 1. 订阅信号（用户交互隔离）
-    signal(SIGINT, _demo_app_signal_handler);
-    signal(SIGTERM, _demo_app_signal_handler);
-
-    // 2. [修改] 直接使用全局句柄（vision_ai_config.h里声明的）
-    if (g_event_bus == NULL) {
-        LOG_E("Demo App: Event Bus is NULL");
+    if (config == NULL) {
         return -1;
     }
 
-    // 3. 订阅总线事件
-    event_bus_subscribe(g_event_bus, EVENT_TYPE_ERROR, _demo_app_event_error_cb, NULL);
-    event_bus_subscribe(g_event_bus, EVENT_TYPE_CAPTURE_FRAME_READY, _demo_app_event_capture_frame_ready_cb, NULL);
+    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
+    g_demo_ctx.evt_bus = config->evt_bus;
+    g_demo_ctx.data_bus = config->data_bus;
+    g_demo_ctx.g_fsm = config->g_fsm;
+    g_demo_ctx.cap_srv = config->cap_srv;
+    g_demo_ctx.running = false;
 
-    LOG_I("Demo App: Initialized successfully");
+    // 订阅事件
+    event_subscriber_t sub = {0};
+    sub.event_type = EVENT_TYPE_CAP_FRAME_READY; // 订阅帧就绪事件
+    sub.callback = _demo_app_on_event;
+    sub.user_data = NULL;
+
+    g_demo_ctx.cap_sub_id = event_bus_subscribe(g_demo_ctx.evt_bus, &sub);
+    if (g_demo_ctx.cap_sub_id < 0) {
+        LOG_E("Demo App: Failed to subscribe to events");
+        return -1;
+    }
+
+    LOG_I("Demo App: Initialized");
+    _demo_app_print_help();
     return 0;
 }
 
-// ==========================================================================
-// 插件启动函数
-// ==========================================================================
-	static int demo_app_start(void)
-	{
-	    LOG_I("Demo App: Starting...");
-	    g_running = true;
-	    _demo_app_print_help();
-	    // 临时方案：直接启动采集服务验证硬件
-	    extern capture_srv_handle_t g_capture_srv_handle; // 需在main.c中定义
-	    if (g_capture_srv_handle != NULL) {
-	        capture_srv_start(g_capture_srv_handle);
-	    }
-	    // 发布系统初始化事件
-	    event_t event = {
-	        .type = EVENT_TYPE_SYSTEM_INIT,
-	        .priority = EVENT_PRIORITY_HIGH,
-	        .source = "demo_app"
-	    };
-	    event_bus_publish(g_event_bus, &event);
-	    return 0;
-	}
-
-// ==========================================================================
-// 插件停止函数
-// ==========================================================================
-static int demo_app_stop(void)
+int demo_app_run(void)
 {
-    LOG_I("Demo App: Stopping...");
+    g_demo_ctx.running = true;
+    LOG_I("Demo App: Running...");
 
-    g_running = false;
+    // 简单的主循环：处理用户输入 + 检查状态
+    while (g_demo_ctx.running) {
+        // 检查全局状态
+        global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
+        
+        // 非阻塞读取用户输入（简化版）
+        fd_set fds;
+        struct timeval tv;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms 超时
 
-    // 1. 发布系统停止事件
-    event_t event;
-    memset(&event, 0, sizeof(event));
-    event.type = EVENT_TYPE_SYSTEM_STOP;
-    event.priority = EVENT_PRIORITY_HIGH;
-    event.source = "demo_app";
-    event_bus_publish(g_event_bus, &event);
+        int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+        if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
+            char cmd = 0;
+            if (read(STDIN_FILENO, &cmd, 1) > 0) {
+                switch (cmd) {
+                    case 's':
+                    case 'S':
+                        LOG_I("Demo App: User pressed START");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
+                        break;
+                    case 't':
+                    case 'T':
+                        LOG_I("Demo App: User pressed STOP");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
+                        break;
+                    case 'q':
+                    case 'Q':
+                        LOG_I("Demo App: User pressed QUIT");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_SHUTDOWN);
+                        g_demo_ctx.running = false;
+                        break;
+                    case 'h':
+                    case 'H':
+                        _demo_app_print_help();
+                        break;
+                    case '\n':
+                    case '\r':
+                        break; // 忽略回车
+                    default:
+                        LOG_W("Demo App: Unknown command '%c'", cmd);
+                        _demo_app_print_help();
+                        break;
+                }
+            }
+        }
 
-    LOG_I("Demo App: Stopped successfully");
+        // 小睡一会，避免 CPU 100%
+        usleep(10000);
+    }
+
+    LOG_I("Demo App: Main loop exited");
     return 0;
 }
 
-// ==========================================================================
-// 插件销毁函数
-// ==========================================================================
-static int demo_app_deinit(void)
+int demo_app_deinit(void)
 {
-    LOG_I("Demo App: Deinitializing...");
+    // 取消订阅
+    if (g_demo_ctx.cap_sub_id >= 0) {
+        event_bus_unsubscribe(g_demo_ctx.evt_bus, g_demo_ctx.cap_sub_id);
+        g_demo_ctx.cap_sub_id = -1;
+    }
 
-    // 1. 取消订阅事件
-    event_bus_unsubscribe(g_event_bus, EVENT_TYPE_ERROR, _demo_app_event_error_cb);
-    event_bus_unsubscribe(g_event_bus, EVENT_TYPE_CAPTURE_FRAME_READY, _demo_app_event_capture_frame_ready_cb);
-
-    LOG_I("Demo App: Deinitialized successfully");
+    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
+    LOG_I("Demo App: Deinitialized");
     return 0;
 }
-
-// ==========================================================================
-// 插件描述符定义
-// ==========================================================================
-const plugin_desc_t g_demo_app_desc = {
-    .name = "demo_app",
-    .init = demo_app_init,
-    .start = demo_app_start,
-    .stop = demo_app_stop,
-    .deinit = demo_app_deinit,
-};
 
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
 
-static void _demo_app_signal_handler(int sig)
+static void _demo_app_on_event(const event_t *event, void *user_data)
 {
-    (void)sig;
-    LOG_I("Demo App: Received signal %d, stopping...", sig);
-    g_running = false;
+    if (event == NULL) return;
+
+    switch (event->type) {
+        case EVENT_TYPE_CAP_FRAME_READY:
+            // 收到帧就绪事件，去 Data Bus 取帧
+            _demo_app_process_frame();
+            break;
+        default:
+            break;
+    }
 }
 
-static void _demo_app_event_error_cb(const event_t *event, void *user_data)
+static void _demo_app_process_frame(void)
 {
-    (void)user_data;
-    // 错误统一处理
-    LOG_E("Demo App: Received error event from %s: %s",
-          event->source ? event->source : "unknown",
-          (char*)event->data);
-}
+    data_bus_item_handle_t item = NULL;
+    
+    // 获取最新帧
+    int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
+    if (ret != 0 || item == NULL) {
+        return;
+    }
 
-static void _demo_app_event_capture_frame_ready_cb(const event_t *event, void *user_data)
-{
-    (void)event;
-    (void)user_data;
-    // 这里可以从Data Bus获取帧，然后发布显示事件
-    // 简化演示：只打印日志
-    LOG_D("Demo App: Received capture frame ready event");
+    // 获取帧信息
+    data_bus_item_info_t info = {0};
+    data_bus_get_item_info(item, &info);
+
+    // 这里只是演示，实际项目中可以：
+    // 1. 把帧传给显示服务
+    // 2. 把帧传给 AI 服务
+    // 3. 保存 YUV 文件
+    LOG_D("Demo App: Processed frame (index=%d, ts=%lu, size=%u)", 
+          0, // 实际可以从 data_ptr 里解析
+          (unsigned long)info.timestamp, 
+          info.data_size);
+
+    // 释放帧
+    data_bus_release(item);
 }
 
 static void _demo_app_print_help(void)
 {
-    printf("\n========================================\n");
-    printf("  %s\n", CONFIG_APP_NAME);
-    printf("========================================\n");
-    printf("  Commands:\n");
-    printf("    h - Print this help\n");
-    printf("    q - Quit the application\n");
-    printf("========================================\n\n");
+    LOG_I("========================================");
+    LOG_I("  Demo App Control:");
+    LOG_I("    [s] - Start system");
+    LOG_I("    [t] - Stop system");
+    LOG_I("    [q] - Quit application");
+    LOG_I("    [h] - Show this help");
+    LOG_I("========================================");
 }
 
-// [修改] 命令行循环改为非阻塞，供main函数调用
-static void _demo_app_command_loop(void)
-{
-    char cmd;
-    // 非阻塞读取命令
-    cmd = getchar();
-    if (cmd == EOF) {
-        return;
-    }
-
-    switch (cmd) {
-        case 'h':
-        case 'H':
-            _demo_app_print_help();
-            break;
-        case 'q':
-        case 'Q':
-            LOG_I("Demo App: User requested quit");
-            g_running = false;
-            // [新增] 通知main函数退出
-            extern volatile bool g_running;
-            g_running = false;
-            break;
-        case '\n':
-        case '\r':
-            // 忽略换行
-            break;
-        default:
-            LOG_W("Demo App: Unknown command '%c'", cmd);
-            _demo_app_print_help();
-            break;
-    }
-}
 
 
 =============================================
 【应用层】src/app/main.c (系统主入口)
 =============================================
 // src/app/main.c
-#include "vision_ai_config.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <unistd.h>
+#include "log.h"
 #include "event_bus.h"
 #include "data_bus.h"
 #include "global_fsm.h"
-#include "plugin_loader.h"
+#include "module_fsm.h"
+#include "capture_srv.h"
 #include "demo_app.h"
-#include "log.h"
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <signal.h>
+#include "vision_ai_config.h" 
 
 // ==========================================================================
-// [新增] 全局句柄定义（框架初始化后赋值）
+// 全局句柄（简化版，实际项目中建议封装在 main_context_t 里）
 // ==========================================================================
-event_bus_handle_t g_event_bus = NULL;
-data_bus_handle_t g_data_bus = NULL;
-global_fsm_handle_t g_global_fsm = NULL;
-static volatile bool g_running = true;
-capture_srv_handle_t g_capture_srv_handle = NULL;
+static event_bus_handle_t g_evt_bus = NULL;
+static data_bus_handle_t g_data_bus = NULL;
+static global_fsm_handle_t g_g_fsm = NULL;
+static capture_srv_handle_t g_cap_srv = NULL;
+static volatile sig_atomic_t g_quit_flag = 0;
 
 // ==========================================================================
-// [新增] 信号处理函数
+// 信号处理
 // ==========================================================================
-static void _main_signal_handler(int sig)
+static void _sigint_handler(int sig)
 {
     (void)sig;
-    LOG_I("Main: Received signal %d, stopping...", sig);
-    g_running = false;
+    g_quit_flag = 1;
+    LOG_W("Main: Received SIGINT, shutting down...");
+}
+
+// ==========================================================================
+// 【核心】Global FSM 回调 -> Event Bus 适配层
+// ==========================================================================
+static void _main_on_g_fsm_state_change(global_state_t old_state,
+                                          global_state_t new_state,
+                                          void *user_data)
+{
+    (void)user_data;
+    
+    // 全局状态变化，发布到 Event Bus
+    if (g_evt_bus != NULL) {
+        event_t evt = {0};
+        evt.type = EVENT_TYPE_SYS_STATE_CHANGED;
+        evt.source = "global_fsm";
+        evt.data = &new_state;
+        evt.data_len = sizeof(new_state);
+        event_bus_publish(g_evt_bus, &evt);
+    }
+}
+
+static void _main_on_g_fsm_event(global_event_t event,
+                                  const char *module_name,
+                                  void *user_data)
+{
+    (void)user_data;
+    
+    // 全局事件，转换后发布到 Event Bus
+    if (g_evt_bus == NULL) return;
+
+    event_type_t evt_type = EVENT_TYPE_INVALID;
+    switch (event) {
+        case GLOBAL_EVENT_MODULE_READY:   evt_type = EVENT_TYPE_MOD_READY; break;
+        case GLOBAL_EVENT_MODULE_RUNNING: evt_type = EVENT_TYPE_MOD_RUNNING; break;
+        case GLOBAL_EVENT_MODULE_ERROR:   evt_type = EVENT_TYPE_MOD_ERROR; break;
+        default: break;
+    }
+    
+    if (evt_type != EVENT_TYPE_INVALID) {
+        event_bus_publish_simple(g_evt_bus, evt_type, module_name);
+    }
 }
 
 // ==========================================================================
 // 主函数
 // ==========================================================================
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
     int ret = 0;
 
-    LOG_I("========================================");
-    LOG_I("  %s", CONFIG_APP_NAME);
-    LOG_I("========================================");
+    // 1. 初始化日志
+    log_init(LOG_LEVEL_INFO);
+    LOG_I("Main: ========================================");
+    LOG_I("Main: Vision AI Application Starting...");
+    LOG_I("Main: ========================================");
 
-    // ======================================================================
-    // 1. 订阅信号
-    // ======================================================================
-    signal(SIGINT, _main_signal_handler);
-    signal(SIGTERM, _main_signal_handler);
+    // 2. 注册信号
+    signal(SIGINT, _sigint_handler);
 
-    // ======================================================================
-    // 2. [新增] 初始化核心框架（双总线、全局FSM）
-    // ======================================================================
-    LOG_I("Main: Initializing framework...");
-
-    // 初始化Event Bus
-    event_bus_config_t event_bus_cfg = {
-        .max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS,
-        .max_event_queue = CONFIG_EVENT_BUS_MAX_QUEUE,
-        .enable_stats = CONFIG_EVENT_BUS_ENABLE_STATS,
-    };
-    ret = event_bus_init(&event_bus_cfg, &g_event_bus);
+    // -------------------------------------------------------------------------
+    // 3. 初始化双总线
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Initializing Event Bus...");
+    event_bus_config_t evt_bus_cfg = {0};
+    evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
+    ret = event_bus_init(&evt_bus_cfg, &g_evt_bus);
     if (ret != 0) {
-        LOG_E("Main: Failed to initialize Event Bus");
+        LOG_E("Main: Failed to init Event Bus");
         goto error_exit;
     }
 
-    // 初始化Data Bus
-    data_bus_config_t data_bus_cfg = {
-        .max_frames = CONFIG_DATA_BUS_MAX_FRAMES,
-        .enable_stats = CONFIG_DATA_BUS_ENABLE_STATS,
-    };
+    LOG_I("Main: Initializing Data Bus...");
+    data_bus_config_t data_bus_cfg = {0};
+    data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
+    data_bus_cfg.max_item_size = 4 * 1024 * 1024; // 4MB
     ret = data_bus_init(&data_bus_cfg, &g_data_bus);
     if (ret != 0) {
-        LOG_E("Main: Failed to initialize Data Bus");
-        goto error_event_bus;
+        LOG_E("Main: Failed to init Data Bus");
+        goto error_exit;
     }
 
-    // 初始化全局FSM
-    global_fsm_config_t global_fsm_cfg = {
-        .max_module_count = CONFIG_GLOBAL_FSM_MAX_MODULES,
-    };
-    ret = global_fsm_init(&global_fsm_cfg, &g_global_fsm);
+    // -------------------------------------------------------------------------
+    // 4. 初始化 Global FSM
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Initializing Global FSM...");
+    global_fsm_config_t g_fsm_cfg = {0};
+    g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
+    g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
+    g_fsm_cfg.event_cb = _main_on_g_fsm_event;
+    g_fsm_cfg.user_data = NULL;
+    ret = global_fsm_init(&g_fsm_cfg, &g_g_fsm);
     if (ret != 0) {
-        LOG_E("Main: Failed to initialize Global FSM");
-        goto error_data_bus;
+        LOG_E("Main: Failed to init Global FSM");
+        goto error_exit;
     }
 
-    LOG_I("Main: Framework initialized successfully");
-	// 在main()的插件初始化之前增加：
-	capture_srv_config_t capture_cfg = {
-	    .link_config = {
-	        .hal_config = {
-	            .dev_path = CONFIG_CAPTURE_DEV_PATH,
-	            .width = CONFIG_CAPTURE_WIDTH,
-	            .height = CONFIG_CAPTURE_HEIGHT,
-	            .format = CONFIG_CAPTURE_FORMAT,
-	            .fps = CONFIG_CAPTURE_FPS,
-	            .buf_count = CONFIG_CAPTURE_BUF_COUNT,
-	            .lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE,
-	            .lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE,
-	            .lock_gain = CONFIG_CAPTURE_LOCK_GAIN,
-	        },
-	        .frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE,
-	        .queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE,
-	    },
-	    .auto_start = false
-	};
-	if (capture_srv_init(&capture_cfg, &g_capture_srv_handle) != 0) {
-	    LOG_E("Main: Failed to initialize capture service");
-	}
-    // ======================================================================
-    // 3. 加载插件（静态插件注册）
-    // ======================================================================
-    LOG_I("Main: Loading plugins...");
+    // -------------------------------------------------------------------------
+    // 5. 初始化业务服务（Capture Service）
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Initializing Capture Service...");
+    
+    // 【核心】构建 Capture Service 配置
+    capture_srv_config_t cap_srv_cfg = {0};
+    
+    // 5.1 填充 Link层 配置（使用全局配置）
+    cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
+    cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
+    cap_srv_cfg.link_cfg.hal_config.height = CONFIG_CAPTURE_HEIGHT;
+    cap_srv_cfg.link_cfg.hal_config.fps = CONFIG_CAPTURE_FPS;
+    cap_srv_cfg.link_cfg.hal_config.format = CONFIG_CAPTURE_FORMAT;
+    cap_srv_cfg.link_cfg.hal_config.buf_count = CONFIG_CAPTURE_BUF_COUNT;
+    cap_srv_cfg.link_cfg.hal_config.lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE;
+    cap_srv_cfg.link_cfg.hal_config.lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE;
+    cap_srv_cfg.link_cfg.hal_config.lock_gain = CONFIG_CAPTURE_LOCK_GAIN;
+    cap_srv_cfg.link_cfg.frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE;
+    cap_srv_cfg.link_cfg.queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE;
+    
+    // 5.2 注入双总线句柄
+    cap_srv_cfg.evt_bus = g_evt_bus;
+    cap_srv_cfg.data_bus = g_data_bus;
+    
+    cap_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
+    cap_srv_cfg.callbacks.user_data = g_g_fsm; // user_data 传 Global FSM 句柄
+    
+    // 5.3 (续) 这里我们先不设置 callbacks，后面手动处理
+    cap_srv_cfg.callbacks.state_change_cb = NULL; 
+    cap_srv_cfg.callbacks.user_data = NULL;
+    cap_srv_cfg.auto_start = false;
 
-    // 注册demo_app插件
-    ret = plugin_register(&g_demo_app_desc);
+    // 创建 Capture Service
+    ret = capture_srv_create(&cap_srv_cfg, &g_cap_srv);
     if (ret != 0) {
-        LOG_E("Main: Failed to register demo_app plugin");
-        goto error_global_fsm;
+        LOG_E("Main: Failed to create Capture Service");
+        goto error_exit;
     }
 
-    LOG_I("Main: Plugins loaded successfully");
+    // 注册到 Global FSM
+    module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_cap_srv);
+    global_fsm_register_module(g_g_fsm, "capture_srv", cap_fsm, true);
 
-    // ======================================================================
-    // 4. 初始化所有插件
-    // ======================================================================
-    ret = plugin_init_all();
+    // -------------------------------------------------------------------------
+    // 6. 初始化 Demo App
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Initializing Demo App...");
+    demo_app_config_t app_cfg = {0};
+    app_cfg.evt_bus = g_evt_bus;
+    app_cfg.data_bus = g_data_bus;
+    app_cfg.g_fsm = g_g_fsm;
+    app_cfg.cap_srv = g_cap_srv;
+    ret = demo_app_init(&app_cfg);
     if (ret != 0) {
-        LOG_E("Main: Failed to initialize plugins");
-        goto error_plugins;
+        LOG_E("Main: Failed to init Demo App");
+        goto error_exit;
     }
 
-    // ======================================================================
-    // 5. 启动所有插件
-    // ======================================================================
-    LOG_I("Main: Starting plugins...");
-    ret = plugin_start_all();
-    if (ret != 0) {
-        LOG_E("Main: Failed to start plugins");
-        goto error_plugins_stop;
-    }
+    // -------------------------------------------------------------------------
+    // 7. 主循环
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Entering main loop...");
+    demo_app_run();
 
-    LOG_I("Main: System is running...");
+    // -------------------------------------------------------------------------
+    // 8. 优雅退出
+    // -------------------------------------------------------------------------
+    LOG_I("Main: Starting graceful shutdown...");
 
-    // ======================================================================
-    // 6. [新增] 主循环（不阻塞，让出CPU）
-    // ======================================================================
-    while (g_running) {
-        sleep(1); // 让出CPU
-    }
-
-    // ======================================================================
-    // 7. 正常退出流程
-    // ======================================================================
-    LOG_I("Main: Stopping plugins...");
-    plugin_stop_all();
-    plugin_deinit_all();
-    global_fsm_deinit(g_global_fsm);
+    demo_app_deinit();
+    capture_srv_destroy(g_cap_srv);
+    global_fsm_deinit(g_g_fsm);
     data_bus_deinit(g_data_bus);
-    event_bus_deinit(g_event_bus);
-    LOG_I("Main: System exited normally");
+    event_bus_deinit(g_evt_bus);
+
+    LOG_I("Main: ========================================");
+    LOG_I("Main: Application exited successfully");
+    LOG_I("Main: ========================================");
+    log_deinit();
     return 0;
 
-    // ======================================================================
-    // 错误退出流程
-    // ======================================================================
-error_plugins_stop:
-    plugin_stop_all();
-error_plugins:
-    plugin_deinit_all();
-error_global_fsm:
-    global_fsm_deinit(g_global_fsm);
-error_data_bus:
-    data_bus_deinit(g_data_bus);
-error_event_bus:
-    event_bus_deinit(g_event_bus);
 error_exit:
-    LOG_E("Main: System exited with error");
+    LOG_E("Main: ========================================");
+    LOG_E("Main: Application exited with error");
+    LOG_E("Main: ========================================");
+    
+    // 尝试清理
+    if (g_cap_srv) capture_srv_destroy(g_cap_srv);
+    if (g_g_fsm) global_fsm_deinit(g_g_fsm);
+    if (g_data_bus) data_bus_deinit(g_data_bus);
+    if (g_evt_bus) event_bus_deinit(g_evt_bus);
+    log_deinit();
     return -1;
 }
 
 
 =============================================
-  所有源码导出完成！
+  所有源码展示完成！
 =============================================

@@ -1,7 +1,6 @@
 // plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
 #include "log.h"
-#include "module_fsm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,7 +71,7 @@ int demo_app_run(void)
     while (g_demo_ctx.running) {
         // 检查全局状态
         global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
-        
+        (void)g_state; // 告诉编译器这个变量是有意未使用的
         // 非阻塞读取用户输入（简化版）
         fd_set fds;
         struct timeval tv;
