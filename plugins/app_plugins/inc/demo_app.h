@@ -1,12 +1,30 @@
-// plugins/app_plugins/demo_app/inc/demo_app.h
+// plugins/app_plugins/inc/demo_app.h
 #ifndef DEMO_APP_H
 #define DEMO_APP_H
 
-#include "plugin_loader.h"
+#include "event_bus.h"
+#include "data_bus.h"
+#include "global_fsm.h"
+#include "capture_srv.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-extern const plugin_desc_t g_demo_app_desc;
+// ==========================================================================
+// Demo App 配置
+// ==========================================================================
+typedef struct {
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    global_fsm_handle_t g_fsm;
+    capture_srv_handle_t cap_srv;
+} demo_app_config_t;
 
-// 【新增】导出命令循环函数
-void demo_app_command_loop(void);
+// ==========================================================================
+// 接口
+// ==========================================================================
+
+int demo_app_init(const demo_app_config_t *config);
+int demo_app_run(void); // 主循环
+int demo_app_deinit(void);
 
 #endif /* DEMO_APP_H */

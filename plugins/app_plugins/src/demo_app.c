@@ -1,146 +1,195 @@
 // plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
-#include "vision_ai_config.h"
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
 #include "log.h"
+#include "module_fsm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <unistd.h>
 
-static volatile bool g_running = false;
+// ==========================================================================
+// 内部状态
+// ==========================================================================
+typedef struct {
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    global_fsm_handle_t g_fsm;
+    capture_srv_handle_t cap_srv;
+    
+    bool running;
+    int cap_sub_id; // 采集事件订阅ID
+} demo_app_ctx_t;
 
-// 【新增】声明main.c里的控制函数
-extern void demo_app_trigger_capture_start(void);
-extern void demo_app_trigger_capture_stop(void);
+static demo_app_ctx_t g_demo_ctx = {0};
 
+// ==========================================================================
 // 内部辅助函数声明
-static void _demo_app_signal_handler(int sig);
-static void _demo_app_event_error_cb(const event_t *event, void *user_data);
+// ==========================================================================
+static void _demo_app_on_event(const event_t *event, void *user_data);
+static void _demo_app_process_frame(void);
 static void _demo_app_print_help(void);
 
-// 插件初始化函数
-static int demo_app_init(void)
-{
-    LOG_I("Demo App: Initializing...");
-    signal(SIGINT, _demo_app_signal_handler);
-    signal(SIGTERM, _demo_app_signal_handler);
+// ==========================================================================
+// 对外API实现
+// ==========================================================================
 
-    if (g_event_bus == NULL) {
-        LOG_E("Demo App: Event Bus is NULL");
+int demo_app_init(const demo_app_config_t *config)
+{
+    if (config == NULL) {
         return -1;
     }
 
-    event_bus_subscribe(g_event_bus, EVENT_TYPE_ERROR, _demo_app_event_error_cb, NULL);
-    LOG_I("Demo App: Initialized successfully");
-    return 0;
-}
+    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
+    g_demo_ctx.evt_bus = config->evt_bus;
+    g_demo_ctx.data_bus = config->data_bus;
+    g_demo_ctx.g_fsm = config->g_fsm;
+    g_demo_ctx.cap_srv = config->cap_srv;
+    g_demo_ctx.running = false;
 
-// 插件启动函数
-static int demo_app_start(void)
-{
-    LOG_I("Demo App: Starting...");
-    g_running = true;
+    // 订阅事件
+    event_subscriber_t sub = {0};
+    sub.event_type = EVENT_TYPE_CAP_FRAME_READY; // 订阅帧就绪事件
+    sub.callback = _demo_app_on_event;
+    sub.user_data = NULL;
+
+    g_demo_ctx.cap_sub_id = event_bus_subscribe(g_demo_ctx.evt_bus, &sub);
+    if (g_demo_ctx.cap_sub_id < 0) {
+        LOG_E("Demo App: Failed to subscribe to events");
+        return -1;
+    }
+
+    LOG_I("Demo App: Initialized");
     _demo_app_print_help();
-    LOG_I("Demo App: Started successfully");
     return 0;
 }
 
-// 插件停止函数
-static int demo_app_stop(void)
+int demo_app_run(void)
 {
-    LOG_I("Demo App: Stopping...");
-    g_running = false;
-    LOG_I("Demo App: Stopped successfully");
+    g_demo_ctx.running = true;
+    LOG_I("Demo App: Running...");
+
+    // 简单的主循环：处理用户输入 + 检查状态
+    while (g_demo_ctx.running) {
+        // 检查全局状态
+        global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
+        
+        // 非阻塞读取用户输入（简化版）
+        fd_set fds;
+        struct timeval tv;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // 100ms 超时
+
+        int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+        if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
+            char cmd = 0;
+            if (read(STDIN_FILENO, &cmd, 1) > 0) {
+                switch (cmd) {
+                    case 's':
+                    case 'S':
+                        LOG_I("Demo App: User pressed START");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
+                        break;
+                    case 't':
+                    case 'T':
+                        LOG_I("Demo App: User pressed STOP");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
+                        break;
+                    case 'q':
+                    case 'Q':
+                        LOG_I("Demo App: User pressed QUIT");
+                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_SHUTDOWN);
+                        g_demo_ctx.running = false;
+                        break;
+                    case 'h':
+                    case 'H':
+                        _demo_app_print_help();
+                        break;
+                    case '\n':
+                    case '\r':
+                        break; // 忽略回车
+                    default:
+                        LOG_W("Demo App: Unknown command '%c'", cmd);
+                        _demo_app_print_help();
+                        break;
+                }
+            }
+        }
+
+        // 小睡一会，避免 CPU 100%
+        usleep(10000);
+    }
+
+    LOG_I("Demo App: Main loop exited");
     return 0;
 }
 
-// 插件销毁函数
-static int demo_app_deinit(void)
+int demo_app_deinit(void)
 {
-    LOG_I("Demo App: Deinitializing...");
-    event_bus_unsubscribe(g_event_bus, EVENT_TYPE_ERROR, _demo_app_event_error_cb);
-    LOG_I("Demo App: Deinitialized successfully");
+    // 取消订阅
+    if (g_demo_ctx.cap_sub_id >= 0) {
+        event_bus_unsubscribe(g_demo_ctx.evt_bus, g_demo_ctx.cap_sub_id);
+        g_demo_ctx.cap_sub_id = -1;
+    }
+
+    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
+    LOG_I("Demo App: Deinitialized");
     return 0;
 }
 
-// 插件描述符定义
-const plugin_desc_t g_demo_app_desc = {
-    .name = "demo_app",
-    .init = demo_app_init,
-    .start = demo_app_start,
-    .stop = demo_app_stop,
-    .deinit = demo_app_deinit,
-};
+// ==========================================================================
+// 内部辅助函数实现
+// ==========================================================================
 
-// 【修改】命令行循环改为可被main.c调用
-void demo_app_command_loop(void)
+static void _demo_app_on_event(const event_t *event, void *user_data)
 {
-    char cmd;
-    ssize_t n = read(STDIN_FILENO, &cmd, 1); // 非阻塞读
-    if (n <= 0) {
+    if (event == NULL) return;
+
+    switch (event->type) {
+        case EVENT_TYPE_CAP_FRAME_READY:
+            // 收到帧就绪事件，去 Data Bus 取帧
+            _demo_app_process_frame();
+            break;
+        default:
+            break;
+    }
+}
+
+static void _demo_app_process_frame(void)
+{
+    data_bus_item_handle_t item = NULL;
+    
+    // 获取最新帧
+    int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
+    if (ret != 0 || item == NULL) {
         return;
     }
 
-    switch (cmd) {
-        case 'h':
-        case 'H':
-            _demo_app_print_help();
-            break;
-        case 's':
-        case 'S':
-            LOG_I("Demo App: Starting capture...");
-            demo_app_trigger_capture_start(); // 调用main.c的函数
-            break;
-        case 't':
-        case 'T':
-            LOG_I("Demo App: Stopping capture...");
-            demo_app_trigger_capture_stop();
-            break;
-        case 'q':
-        case 'Q':
-            LOG_I("Demo App: User requested quit");
-            g_running = false;
-            extern volatile bool g_running; // 引用main.c的g_running
-            g_running = false;
-            break;
-        case '\n':
-        case '\r':
-            break;
-        default:
-            LOG_W("Demo App: Unknown command '%c'", cmd);
-            _demo_app_print_help();
-            break;
-    }
-}
+    // 获取帧信息
+    data_bus_item_info_t info = {0};
+    data_bus_get_item_info(item, &info);
 
-// 内部辅助函数实现
-static void _demo_app_signal_handler(int sig)
-{
-    (void)sig;
-    LOG_I("Demo App: Received signal %d, stopping...", sig);
-    g_running = false;
-}
+    // 这里只是演示，实际项目中可以：
+    // 1. 把帧传给显示服务
+    // 2. 把帧传给 AI 服务
+    // 3. 保存 YUV 文件
+    LOG_D("Demo App: Processed frame (index=%d, ts=%lu, size=%u)", 
+          0, // 实际可以从 data_ptr 里解析
+          (unsigned long)info.timestamp, 
+          info.data_size);
 
-static void _demo_app_event_error_cb(const event_t *event, void *user_data)
-{
-    (void)user_data;
-    LOG_E("Demo App: Received error event from %s", 
-          event->source ? event->source : "unknown");
+    // 释放帧
+    data_bus_release(item);
 }
 
 static void _demo_app_print_help(void)
 {
-    printf("\n========================================\n");
-    printf("  %s\n", CONFIG_APP_NAME);
-    printf("========================================\n");
-    printf("  Commands:\n");
-    printf("    h - Print this help\n");
-    printf("    s - Start video capture\n");
-    printf("    t - Stop video capture\n");
-    printf("    q - Quit the application\n");
-    printf("========================================\n\n");
+    LOG_I("========================================");
+    LOG_I("  Demo App Control:");
+    LOG_I("    [s] - Start system");
+    LOG_I("    [t] - Stop system");
+    LOG_I("    [q] - Quit application");
+    LOG_I("    [h] - Show this help");
+    LOG_I("========================================");
 }
