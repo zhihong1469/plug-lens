@@ -4,17 +4,23 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 // ==========================================================================
-// 【Event Bus铁律】
-// 1. 只做事件路由，不做业务处理
-// 2. 不依赖任何业务层，完全独立
-// 3. 轻量高效，只传递小数据
-// 4. 可监控，支持统计/调试
+// 【Event Bus 铁律】
+// 1. 纯发布-订阅，不做任何业务逻辑判断
+// 2. 线程安全，支持多生产者多消费者
+// 3. 事件回调在锁外执行，避免死锁
+// 4. 支持优先级（预留）
 // ==========================================================================
 
 // ==========================================================================
-// 1. 事件优先级（用于调度）
+// 1. 不透明句柄
+// ==========================================================================
+typedef void* event_bus_handle_t;
+
+// ==========================================================================
+// 2. 事件优先级（预留，当前默认使用 NORMAL）
 // ==========================================================================
 typedef enum {
     EVENT_PRIORITY_LOW = 0,
@@ -25,136 +31,132 @@ typedef enum {
 } event_priority_t;
 
 // ==========================================================================
-// 2. 通用事件类型（所有模块统一）
+// 3. 通用事件类型定义（分层预留，方便扩展）
 // ==========================================================================
 typedef enum {
     EVENT_TYPE_INVALID = 0,
-    // 系统事件
-    EVENT_TYPE_SYSTEM_INIT,
-    EVENT_TYPE_SYSTEM_START,
-    EVENT_TYPE_SYSTEM_STOP,
-    EVENT_TYPE_SYSTEM_SHUTDOWN,
-    // 采集事件
-    EVENT_TYPE_CAPTURE_START,
-    EVENT_TYPE_CAPTURE_STOP,
-    EVENT_TYPE_CAPTURE_FRAME_READY,
-    // AI事件
+
+    // 系统层事件 (0x0001 - 0x0FFF)
+    EVENT_TYPE_SYS_BASE = 0x0001,
+    EVENT_TYPE_SYS_STATE_CHANGED,
+    EVENT_TYPE_SYS_START,
+    EVENT_TYPE_SYS_STOP,
+    EVENT_TYPE_SYS_SHUTDOWN,
+    EVENT_TYPE_SYS_ERROR,
+
+    // 模块层事件 (0x1000 - 0x1FFF)
+    EVENT_TYPE_MOD_BASE = 0x1000,
+    EVENT_TYPE_MOD_STATE_CHANGED,
+    EVENT_TYPE_MOD_READY,
+    EVENT_TYPE_MOD_RUNNING,
+    EVENT_TYPE_MOD_ERROR,
+    EVENT_TYPE_MOD_STOPPED,
+
+    // 业务层事件 - 采集 (0x2000 - 0x2FFF)
+    EVENT_TYPE_CAP_BASE = 0x2000,
+    EVENT_TYPE_CAP_FRAME_READY,
+    EVENT_TYPE_CAP_START,
+    EVENT_TYPE_CAP_STOP,
+
+    // 业务层事件 - AI (0x3000 - 0x3FFF)
+    EVENT_TYPE_AI_BASE = 0x3000,
+    EVENT_TYPE_AI_RESULT_READY,
     EVENT_TYPE_AI_START,
     EVENT_TYPE_AI_STOP,
-    EVENT_TYPE_AI_RESULT_READY,
-    // 显示事件
-    EVENT_TYPE_DISPLAY_START,
-    EVENT_TYPE_DISPLAY_STOP,
-    // 存储事件
-    EVENT_TYPE_STORAGE_START,
-    EVENT_TYPE_STORAGE_STOP,
-    // 异常事件
-    EVENT_TYPE_ERROR,
-    EVENT_TYPE_WARNING,
-    // 自定义事件（模块可扩展）
-    EVENT_TYPE_CUSTOM_BASE = 0x1000,
-    EVENT_TYPE_MAX
+
+    // 业务层事件 - 显示 (0x4000 - 0x4FFF)
+    EVENT_TYPE_DISP_BASE = 0x4000,
+    EVENT_TYPE_DISP_VSYNC,
+    EVENT_TYPE_DISP_ERROR,
+
+    // 自定义事件扩展 (0xF000 - 0xFFFF)
+    EVENT_TYPE_CUSTOM_BASE = 0xF000,
+
+    EVENT_TYPE_MAX = 0xFFFF
 } event_type_t;
 
 // ==========================================================================
-// 3. 事件结构体（轻量，只传小数据）
+// 4. 通用事件结构体
 // ==========================================================================
 typedef struct {
-    event_type_t type;
-    event_priority_t priority;
-    uint64_t timestamp;       // 微秒级时间戳
-    const char *source;       // 事件源（模块名）
-    void *data;               // 事件数据（小数据，大数据走Data Bus）
-    uint32_t data_len;        // 数据长度
+    event_type_t type;          // 事件类型
+    event_priority_t priority;   // 事件优先级
+    uint64_t timestamp;          // 时间戳（微秒）
+    const char *source;          // 事件源（模块名）
+    void *data;                  // 事件数据（小数据，大数据走Data Bus）
+    uint32_t data_len;           // 事件数据长度
 } event_t;
 
 // ==========================================================================
-// 4. 事件回调函数类型
+// 5. 事件回调函数类型
 // ==========================================================================
 typedef void (*event_callback_t)(const event_t *event, void *user_data);
 
 // ==========================================================================
-// 5. 不透明句柄
-// ==========================================================================
-typedef void* event_bus_handle_t;
-
-// ==========================================================================
-// 6. 总线配置
+// 6. 订阅者信息结构体（用于注册）
 // ==========================================================================
 typedef struct {
-    uint32_t max_subscribers;   // 最大订阅者数量
-    uint32_t max_event_queue;   // 事件队列大小
-    bool enable_stats;          // 是否启用统计
+    event_type_t event_type;     // 订阅的事件类型（或 EVENT_TYPE_INVALID 表示订阅所有）
+    event_callback_t callback;    // 回调函数
+    void *user_data;              // 用户数据
+} event_subscriber_t;
+
+// ==========================================================================
+// 7. Event Bus 配置
+// ==========================================================================
+typedef struct {
+    uint32_t max_subscribers;     // 最大订阅者数量
 } event_bus_config_t;
 
 // ==========================================================================
-// 7. 统计信息（可监控）
-// ==========================================================================
-typedef struct {
-    uint64_t total_published;   // 总发布事件数
-    uint64_t total_delivered;    // 总投递事件数
-    uint64_t total_dropped;      // 总丢弃事件数
-    uint64_t event_count[EVENT_TYPE_MAX]; // 各类型事件计数
-} event_bus_stats_t;
-
-// ==========================================================================
-// 8. 核心接口
+// 8. 【核心】接口
 // ==========================================================================
 
 /**
- * @brief 初始化事件总线（单例）
+ * @brief 初始化事件总线
  * @param config 配置
  * @param out_handle 输出句柄
  * @return 0成功
  */
-int event_bus_init(const event_bus_config_t *config, event_bus_handle_t *out_handle);
+int event_bus_init(const event_bus_config_t *config,
+                   event_bus_handle_t *out_handle);
 
 /**
  * @brief 订阅事件
  * @param handle 句柄
- * @param type 事件类型
- * @param cb 回调函数
- * @param user_data 用户数据
- * @return 0成功
+ * @param subscriber 订阅者信息
+ * @return 订阅ID（用于取消订阅），<0失败
  */
 int event_bus_subscribe(event_bus_handle_t handle,
-                         event_type_t type,
-                         event_callback_t cb,
-                         void *user_data);
+                        const event_subscriber_t *subscriber);
 
 /**
  * @brief 取消订阅
  * @param handle 句柄
- * @param type 事件类型
- * @param cb 回调函数
+ * @param subscription_id 订阅ID
  * @return 0成功
  */
 int event_bus_unsubscribe(event_bus_handle_t handle,
-                           event_type_t type,
-                           event_callback_t cb);
+                          int subscription_id);
 
 /**
  * @brief 发布事件（核心入口）
  * @param handle 句柄
- * @param event 事件
+ * @param event 事件（会内部拷贝一份，调用者可立即释放）
  * @return 0成功
  */
 int event_bus_publish(event_bus_handle_t handle, const event_t *event);
 
 /**
- * @brief 获取统计信息（可监控）
+ * @brief 【辅助】快速发布简单事件（不需要填充完整结构体）
  * @param handle 句柄
- * @param stats 输出统计
+ * @param type 事件类型
+ * @param source 事件源
  * @return 0成功
  */
-int event_bus_get_stats(event_bus_handle_t handle, event_bus_stats_t *stats);
-
-/**
- * @brief 重置统计信息
- * @param handle 句柄
- * @return 0成功
- */
-int event_bus_reset_stats(event_bus_handle_t handle);
+int event_bus_publish_simple(event_bus_handle_t handle,
+                             event_type_t type,
+                             const char *source);
 
 /**
  * @brief 销毁事件总线
@@ -164,17 +166,10 @@ int event_bus_reset_stats(event_bus_handle_t handle);
 int event_bus_deinit(event_bus_handle_t handle);
 
 /**
- * @brief 事件类型转字符串（调试用）
+ * @brief 【辅助】事件类型转字符串
  * @param type 事件类型
- * @return 事件名称
+ * @return 字符串
  */
 const char* event_type_to_str(event_type_t type);
-
-/**
- * @brief 优先级转字符串
- * @param priority 优先级
- * @return 优先级名称
- */
-const char* event_priority_to_str(event_priority_t priority);
 
 #endif /* EVENT_BUS_H */
