@@ -1,86 +1,15 @@
+
 [root@100ask:/mnt]# ./vision_ai_app
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:131][main] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:132][main]   Vision AI Demo
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:133][main] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:140][main] Main: Initializing framework...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:170][main] Main: Framework initialized successfully
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:173][main] Main: Loading plugins...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:185][main] Main: Plugins loaded successfully
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:32][capture_srv_plugin_init] Capture Srv Plugin: Initializing...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:57][capture_srv_plugin_init] Capture Srv Plugin: Initialized
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:28][demo_app_init] Demo App: Initializing...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:38][demo_app_init] Demo App: Initialized successfully
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:195][main] Main: Starting plugins...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:63][capture_srv_plugin_start] Capture Srv Plugin: Starting...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:65][capture_srv_plugin_start] Capture Srv Plugin: Ready (press 's' to start capture)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:45][demo_app_start] Demo App: Starting...
-
-========================================
-  Vision AI Demo
-========================================
-  Commands:
-    h - Print this help
-    s - Start video capture
-    t - Stop video capture
-    q - Quit the application
-========================================
-
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:48][demo_app_start] Demo App: Started successfully
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:202][main] Main: System is running...
-s
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:95][demo_app_command_loop] Demo App: Starting capture...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52680395
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52716802
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=52749151
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=52784542
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52816896
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52849278
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=52884720
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=52917056
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=52952495
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=52984834
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53017259
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53052652
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53084977
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53120412
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53152774
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53185098
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53220565
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53252965
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53285224
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53320707
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53353098
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53388484
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53420830
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53453251
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53488661
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53520969
-t[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53556414
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53588809
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53621117
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53656570
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53688992
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53721248
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=0, len=614400, ts=53756739
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=1, len=614400, ts=53789098
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=2, len=614400, ts=53824543
-
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:215][main] Main: Got frame! index=3, len=614400, ts=53856861
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:100][demo_app_command_loop] Demo App: Stopping capture...
-h
-
-========================================
-  Vision AI Demo
-========================================
-  Commands:
-    h - Print this help
-    s - Start video capture
-    t - Stop video capture
-    q - Quit the application
-========================================
-
-q
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:105][demo_app_command_loop] Demo App: User requested quit
-^C[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:124][_demo_app_signal_handler] Demo App: Received signal 2, stopping...
-^C[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:124][_demo_app_signal_handler] Demo App: Received signal 2, stopping...
-
+[I][log.c:0][log_init] Log system initialized (level=3)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:85][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:86][main] Main: Vision AI Application Starting...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:87][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:95][main] Main: Initializing Event Bus...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:87][event_bus_init] Event Bus: Initialized, max subscribers=64
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:104][main] Main: Initializing Data Bus...
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:110][main] Main: Failed to init Data Bus
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:211][main] Main: ========================================
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:212][main] Main: Application exited with error
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:213][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:238][event_bus_deinit] Event Bus: Deinitialized
+[root@100ask:/mnt]#

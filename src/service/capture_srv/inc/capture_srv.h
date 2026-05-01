@@ -3,15 +3,18 @@
 #define CAPTURE_SRV_H
 
 #include "frame_link.h"
-#include "module_fsm.h" // 只依赖基类
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
 #include <stdint.h>
 #include <stdbool.h>
 
 // ==========================================================================
-// 【Service层铁律】
-// 1. 只依赖 Link层 和 module_fsm 基类
-// 2. 不依赖 Event Bus 或 Global FSM
-// 3. 所有对外通知通过回调完成
+// 【Capture Service 铁律】
+// 1. 只依赖 Link层、Module FSM基类、双总线基类
+// 2. 所有外部依赖通过 config 注入（无全局变量）
+// 3. 所有硬件动作由 FSM 状态迁移触发
+// 4. 所有数据通过 Data Bus 流出，所有通知通过 Event Bus 发出
 // ==========================================================================
 
 // ==========================================================================
@@ -20,39 +23,54 @@
 typedef void* capture_srv_handle_t;
 
 // ==========================================================================
-// 2. 配置
+// 2. 上层回调接口（由 Global FSM 或 App 实现）
 // ==========================================================================
 typedef struct {
-    frame_link_config_t link_config;
+    module_state_change_cb_t state_change_cb; // 状态变化通知给上层
+    void *user_data;
+} capture_srv_callbacks_t;
+
+// ==========================================================================
+// 3. 完整配置结构体（依赖注入容器）
+// ==========================================================================
+typedef struct {
+    // Link层 配置
+    frame_link_config_t link_cfg;
+    
+    // 双总线 句柄注入
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    
+    // 上层回调注入
+    capture_srv_callbacks_t callbacks;
+    
+    // 运行时配置
     bool auto_start;
 } capture_srv_config_t;
 
 // ==========================================================================
-// 3. 【核心】接口
+// 4. 【核心】标准 Service 接口
 // ==========================================================================
 
 /**
- * @brief 初始化采集服务
- * @param config 配置
- * @param fsm_state_cb 状态变化回调（传给 Global FSM）
- * @param fsm_user_data 用户数据
+ * @brief 创建并初始化采集服务
+ * @param config 配置（包含所有依赖注入）
  * @param out_handle 输出句柄
  * @return 0成功
  */
-int capture_srv_init(const capture_srv_config_t *config,
-                     module_state_change_cb_t fsm_state_cb,
-                     void *fsm_user_data,
-                     capture_srv_handle_t *out_handle);
+int capture_srv_create(const capture_srv_config_t *config,
+                       capture_srv_handle_t *out_handle);
 
 /**
- * @brief 获取子状态机句柄（供 Global FSM 投递事件）
+ * @brief 获取子状态机句柄（供上层投递事件）
  * @param handle 服务句柄
  * @return 子状态机句柄
  */
 module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle);
 
 /**
- * @brief 获取帧（仅在 RUNNING 状态有效）
+ * @brief 【可选】直接获取帧（绕过总线，用于低延迟场景）
+ * @note 推荐通过 Event/Data Bus 获取
  */
 int capture_srv_get_frame(capture_srv_handle_t handle,
                           video_frame_t *frame,
@@ -65,8 +83,10 @@ int capture_srv_put_frame(capture_srv_handle_t handle,
                           const video_frame_t *frame);
 
 /**
- * @brief 反初始化
+ * @brief 销毁服务
+ * @param handle 服务句柄
+ * @return 0成功
  */
-int capture_srv_deinit(capture_srv_handle_t handle);
+int capture_srv_destroy(capture_srv_handle_t handle);
 
 #endif /* CAPTURE_SRV_H */

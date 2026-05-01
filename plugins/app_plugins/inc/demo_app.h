@@ -1,7 +1,8 @@
 // plugins/app_plugins/inc/demo_app.h
 #ifndef DEMO_APP_H
-#define DEMO_APP_H
-
+#define DEMO_APP_H   
+#include "global_fsm.h"   
+#include "module_fsm.h"
 #include "event_bus.h"
 #include "data_bus.h"
 #include "global_fsm.h"

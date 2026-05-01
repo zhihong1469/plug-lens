@@ -61,10 +61,6 @@ static const char* g_global_event_str[] = {
 // ==========================================================================
 // 内部辅助函数声明
 // ==========================================================================
-static void _global_fsm_module_state_cb(const char *module_name,
-                                         module_state_t old_state,
-                                         module_state_t new_state,
-                                         void *user_data);
 static void _global_fsm_update_global_state(global_fsm_context_t *ctx);
 static void _global_fsm_notify_event(global_fsm_context_t *ctx,
                                       global_event_t event,
@@ -302,10 +298,10 @@ const char* global_event_to_str(global_event_t event)
  * 这是子模块与 Global FSM 交互的核心桥梁：
  * 子模块 state change -> 此回调 -> 更新缓存 -> 重新计算全局状态
  */
-void _global_fsm_module_state_cb(const char *module_name,
-                                 module_state_t old_state,
-                                 module_state_t new_state,
-                                 void *user_data)
+void global_fsm_on_module_state_change(const char *module_name,
+                                        module_state_t old_state,
+                                        module_state_t new_state,
+                                        void *user_data)
 {
     global_fsm_context_t *ctx = (global_fsm_context_t*)user_data;
     if (ctx == NULL || module_name == NULL) return;
