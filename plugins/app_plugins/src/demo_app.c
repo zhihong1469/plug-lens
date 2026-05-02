@@ -62,28 +62,41 @@ int demo_app_init(const demo_app_config_t *config)
     return 0;
 }
 
+#include <signal.h>
+extern volatile sig_atomic_t g_quit_flag; 
 int demo_app_run(void)
 {
     g_demo_ctx.running = true;
     LOG_I("Demo App: Running...");
-
+    static int heartbeat = 0; // <-- 增加静态变量
     // 简单的主循环：处理用户输入 + 检查状态
-    while (g_demo_ctx.running) {
+    while (g_demo_ctx.running && !g_quit_flag) { // <-- 【修改】增加 !g_quit_flag 检查
         // 检查全局状态
         global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
-        (void)g_state; // 告诉编译器这个变量是有意未使用的
-        // 非阻塞读取用户输入（简化版）
+        (void)g_state;
+        
+        // 【重要】每次 select 之前必须完全重置 fd_set 和 timeval！
         fd_set fds;
         struct timeval tv;
+        
         FD_ZERO(&fds);
         FD_SET(STDIN_FILENO, &fds);
         tv.tv_sec = 0;
         tv.tv_usec = 100000; // 100ms 超时
-
+        // 【增加】心跳打印，每100次循环打印一次 (约1秒)
+        if (heartbeat % 100 == 0) {
+             LOG_D("Demo App: Heartbeat %d", heartbeat); // 如果你想确认主循环在跑，打开这行
+        }
+        heartbeat++;
         int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
         if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
             char cmd = 0;
-            if (read(STDIN_FILENO, &cmd, 1) > 0) {
+            // 【修改】read 改成循环读，把缓冲区读空，避免残留的 \n 影响
+            while (read(STDIN_FILENO, &cmd, 1) > 0) {
+                if (cmd == '\n' || cmd == '\r') continue;
+                
+                LOG_I("Demo App: Received key '%c'", cmd); // <-- 增加日志
+                
                 switch (cmd) {
                     case 's':
                     case 'S':
@@ -105,19 +118,19 @@ int demo_app_run(void)
                     case 'H':
                         _demo_app_print_help();
                         break;
-                    case '\n':
-                    case '\r':
-                        break; // 忽略回车
                     default:
                         LOG_W("Demo App: Unknown command '%c'", cmd);
                         _demo_app_print_help();
                         break;
                 }
+                break; // 只处理一个字符
             }
+        } else if (ret < 0 && errno != EINTR) {
+            LOG_E("Demo App: select error (errno=%d)", errno);
         }
 
         // 小睡一会，避免 CPU 100%
-        usleep(10000);
+        usleep(1000);
     }
 
     LOG_I("Demo App: Main loop exited");

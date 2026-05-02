@@ -132,6 +132,7 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     return VIDEO_OK;
 }
 
+#include "log.h"
 video_err_t frame_link_start(frame_link_handle_t handle)
 {
     if (handle == NULL) {
@@ -140,23 +141,32 @@ video_err_t frame_link_start(frame_link_handle_t handle)
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
     if (ctx->running) {
+        LOG_I("Frame Link: Already running");
         return VIDEO_OK;
     }
 
+    LOG_I("Frame Link: Starting HAL layer stream..."); // <-- 增加
     // 启动HAL层流
     video_err_t err = video_start_stream(ctx->hal_handle);
     if (err != VIDEO_OK) {
+        LOG_E("Frame Link: Failed to start HAL stream (err=%d)", err); // <-- 增加
         return err;
     }
+    LOG_I("Frame Link: HAL stream started"); // <-- 增加
+    
     ctx->streaming = true;
 
     // 启动采集线程
+    LOG_I("Frame Link: Creating capture thread..."); // <-- 增加
     ctx->running = true;
     if (pthread_create(&ctx->capture_thread, NULL, _frame_link_capture_thread, ctx) != 0) {
+        LOG_E("Frame Link: Failed to create thread"); // <-- 增加
         video_stop_stream(ctx->hal_handle);
         ctx->streaming = false;
+        ctx->running = false;
         return VIDEO_ERR_INVALID_PARAM;
     }
+    LOG_I("Frame Link: Capture thread created"); // <-- 增加
 
     return VIDEO_OK;
 }
@@ -388,29 +398,53 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
     return node;
 }
 
+#include <signal.h>
+// 顶部新增，引入main.c的全局退出标志
+extern volatile sig_atomic_t g_quit_flag;
 static void* _frame_link_capture_thread(void *arg)
 {
     frame_link_context_t *ctx = (frame_link_context_t*)arg;
-
-    while (ctx->running) {
-        // 从HAL层取帧
+    LOG_I("Frame Link: Capture thread entered loop");
+    
+    int consecutive_errors = 0;
+    
+    // 【核心修复】全局退出标志触发时，立即终止线程
+    while (ctx->running && !g_quit_flag) {
+        // 1. 申请帧节点
         frame_node_t *node = _frame_link_alloc_frame(ctx);
         if (node == NULL) {
-            usleep(10000); // 帧池满，等待
+            usleep(5000);
             continue;
         }
 
+        // 2. 从 HAL 取帧
         video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
         if (err != VIDEO_OK) {
             _frame_link_free_frame(ctx, node);
-            if (!ctx->running) break;
-            usleep(10000);
+            consecutive_errors++;
+            
+            // 优化：仅连续30次错误才打印，避免刷屏
+            if (consecutive_errors % 30 == 0) {
+                LOG_W("Frame Link: video_get_frame failed %d times (last err=%s)", 
+                      consecutive_errors, video_err_str(err));
+            }
+            
+            // 全局退出，立即跳出循环
+            if (g_quit_flag) break;
+            
+            usleep(5000);
             continue;
         }
+        
+        // 成功取帧，重置错误计数
+        if (consecutive_errors > 0) {
+            LOG_I("Frame Link: Recovered after %d consecutive errors", consecutive_errors);
+        }
+        consecutive_errors = 0;
 
-        // 入队
+        // 3. 帧入队
         _frame_link_enqueue(ctx, node);
     }
-
+    LOG_I("Frame Link: Capture thread exiting");
     return NULL;
 }

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 // 错误码字符串表（纯数据，无状态）
-static const char* g_err_str[] = {
+const char* g_err_str[] = {
     [VIDEO_OK] = "Success",
     [VIDEO_ERR_OPEN] = "Failed to open device",
     [VIDEO_ERR_QUERYCAP] = "Failed to query device capabilities",
@@ -35,7 +35,7 @@ const char* video_err_str(video_err_t err)
     }
     return g_err_str[err];
 }
-
+#include "log.h"
 video_err_t video_open(const video_config_t *config,
                        video_capability_t *cap,
                        video_handle_t *out_handle)
@@ -60,7 +60,11 @@ video_err_t video_open(const video_config_t *config,
         // 非致命错误，继续
     }
     memcpy(cap, &ctx->cap, sizeof(video_capability_t));
-
+    // 【新增】打印摄像头能力
+    LOG_I("Video HAL: Detected camera: %s", ctx->cap.device_name);
+    LOG_I("Video HAL: Support YUYV: %s", ctx->cap.support_yuyv ? "YES" : "NO");
+    LOG_I("Video HAL: Support MJPEG: %s", ctx->cap.support_mjpeg ? "YES" : "NO");
+    LOG_I("Video HAL: Support NV12: %s", ctx->cap.support_nv12 ? "YES" : "NO");
     // 设置格式
     if (_video_usb_set_format(ctx) != 0) {
         _video_usb_close(ctx);

@@ -11,7 +11,7 @@
 #include "capture_srv.h"
 #include "demo_app.h"
 #include "vision_ai_config.h" 
-
+#include <termios.h> 
 // ==========================================================================
 // 全局句柄（简化版，实际项目中建议封装在 main_context_t 里）
 // ==========================================================================
@@ -19,8 +19,38 @@ event_bus_handle_t g_evt_bus = NULL;
 data_bus_handle_t g_data_bus = NULL;
 global_fsm_handle_t g_g_fsm = NULL;
 capture_srv_handle_t g_cap_srv = NULL;
-static volatile sig_atomic_t g_quit_flag = 0;
+volatile sig_atomic_t g_quit_flag = 0;
 
+// ==========================================================================
+// 新增：终端模式管理
+// ==========================================================================
+static struct termios g_old_termios;
+static bool g_termios_saved = false;
+
+static void _set_noncanonical_mode(void)
+{
+    struct termios new_termios;
+    if (tcgetattr(STDIN_FILENO, &g_old_termios) == 0) {
+        g_termios_saved = true;
+        new_termios = g_old_termios;
+        // 禁用规范模式，禁用回显（可选）
+        new_termios.c_lflag &= ~(ICANON | ECHO); 
+        // 设置最小读取字符数和超时
+        new_termios.c_cc[VMIN] = 1;
+        new_termios.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+    }
+}
+
+// 恢复终端默认模式
+static void _restore_terminal_mode(void)
+{
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
+        g_termios_saved = false;
+        LOG_I("Main: Terminal mode restored");
+    }
+}
 // ==========================================================================
 // 信号处理
 // ==========================================================================
@@ -28,6 +58,7 @@ static void _sigint_handler(int sig)
 {
     (void)sig;
     g_quit_flag = 1;
+    _restore_terminal_mode(); // <-- 新增：收到信号先恢复终端
     LOG_W("Main: Received SIGINT, shutting down...");
 }
 
@@ -81,14 +112,15 @@ int main(int argc, char **argv)
     int ret = 0;
 
     // 1. 初始化日志
-    log_init(LOG_LEVEL_INFO);
+    log_init(LOG_LEVEL_ALL);
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Application Starting...");
     LOG_I("Main: ========================================");
 
     // 2. 注册信号
     signal(SIGINT, _sigint_handler);
-
+    // 【新增】设置终端为非阻塞模式
+    _set_noncanonical_mode();
     // -------------------------------------------------------------------------
     // 3. 初始化双总线
     // -------------------------------------------------------------------------
@@ -104,8 +136,8 @@ int main(int argc, char **argv)
     LOG_I("Main: Initializing Data Bus...");
     data_bus_config_t data_bus_cfg = {0};
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
-    data_bus_cfg.max_item_size = 4 * 1024 * 1024; // 4MB
-    ret = data_bus_init(&data_bus_cfg, &g_data_bus);
+    data_bus_cfg.max_item_size = 2 * 1024 * 1024; // MB
+    ret = data_bus_init(&data_bus_cfg, &g_data_bus); //max_items * max_item_size
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
         goto error_exit;

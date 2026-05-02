@@ -113,7 +113,7 @@ int data_bus_init(const data_bus_config_t *config,
     pthread_rwlock_init(&ctx->rwlock, NULL);
 
     *out_handle = (data_bus_handle_t)ctx;
-    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%zuKB", 
+    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%uKB", 
           ctx->max_items, ctx->max_item_size / 1024);
     return 0;
 }
