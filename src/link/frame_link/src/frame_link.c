@@ -5,6 +5,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>  
 
 // ==========================================================================
 // 内部宏定义
@@ -399,52 +400,53 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 }
 
 #include <signal.h>
-// 顶部新增，引入main.c的全局退出标志
-extern volatile sig_atomic_t g_quit_flag;
 static void* _frame_link_capture_thread(void *arg)
 {
     frame_link_context_t *ctx = (frame_link_context_t*)arg;
     LOG_I("Frame Link: Capture thread entered loop");
     
-    int consecutive_errors = 0;
-    
-    // 【核心修复】全局退出标志触发时，立即终止线程
+    extern volatile sig_atomic_t g_quit_flag;
+
+    // 添加一个计数器，用于降低日志频率
+    static int frame_count = 0;
+
     while (ctx->running && !g_quit_flag) {
-        // 1. 申请帧节点
-        frame_node_t *node = _frame_link_alloc_frame(ctx);
-        if (node == NULL) {
-            usleep(5000);
-            continue;
-        }
-
-        // 2. 从 HAL 取帧
-        video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
-        if (err != VIDEO_OK) {
-            _frame_link_free_frame(ctx, node);
-            consecutive_errors++;
-            
-            // 优化：仅连续30次错误才打印，避免刷屏
-            if (consecutive_errors % 30 == 0) {
-                LOG_W("Frame Link: video_get_frame failed %d times (last err=%s)", 
-                      consecutive_errors, video_err_str(err));
-            }
-            
-            // 全局退出，立即跳出循环
-            if (g_quit_flag) break;
-            
-            usleep(5000);
-            continue;
-        }
+        // 1. 从 HAL 取帧
+        video_frame_t hal_frame = {0};
         
-        // 成功取帧，重置错误计数
-        if (consecutive_errors > 0) {
-            LOG_I("Frame Link: Recovered after %d consecutive errors", consecutive_errors);
-        }
-        consecutive_errors = 0;
+        // 【修改 1】这里的 LOG_D 太刷屏了，注释掉
+        // LOG_D("Frame Link: Polling frame...");
+        
+        video_err_t err = video_get_frame(ctx->hal_handle, &hal_frame);
+        
+        if (!ctx->running || g_quit_flag) break;
 
-        // 3. 帧入队
-        _frame_link_enqueue(ctx, node);
+        if (err != VIDEO_OK) {
+            usleep(10000);
+            continue;
+        }
+
+        // 2. 通知 Service 层
+        if (ctx->frame_ready_cb != NULL) {
+            ctx->frame_ready_cb(&hal_frame, ctx->cb_user_data);
+        }
+
+        // 3. 归还缓冲区
+        video_put_frame(ctx->hal_handle, &hal_frame);
+        
+        // 【修改 2】偶尔打印一次证明还活着即可，比如每秒一次
+        if (++frame_count % 30 == 0) {
+             LOG_D("Frame Link: Captured %d frames", frame_count);
+        }
+
+        // ===================== 【核心新增修复】=====================
+        // 主动让出CPU时间片，不占满内核，给主线程键盘调度机会
+        // 不影响帧率，只是礼貌释放时间片，根治主线程被饿死
+        // sched_yield();
+        usleep(10000);  // 1毫秒，几乎无感
+        // =========================================================
     }
+    
     LOG_I("Frame Link: Capture thread exiting");
     return NULL;
 }

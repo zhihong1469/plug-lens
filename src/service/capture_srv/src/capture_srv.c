@@ -272,6 +272,13 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
 
 /**
  * @brief Link层 帧就绪回调（数据入口）
+ * 
+ * 【核心逻辑】
+ * 1. 收到 Link 层的帧指针
+ * 2. 申请 Data Bus Item
+ * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
+ * 4. 发布 Data Bus Item
+ * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
  */
 static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
 {
@@ -284,8 +291,51 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
         return;
     }
 
-    // 推送到双总线
-    _capture_srv_feed_bus(ctx, frame);
+    // 1. 从 Data Bus 申请 Item
+    data_bus_item_handle_t item = NULL;
+    size_t data_size = frame->length;
+    
+    int ret = data_bus_alloc(ctx->data_bus, 
+                              DATA_TYPE_VIDEO_FRAME, 
+                              data_size, 
+                              "capture_srv", 
+                              &item);
+    if (ret != 0 || item == NULL) {
+        // Data Bus 满了，这帧直接丢，必须归还 Link 帧！
+        // 【注意】这里我们没有 capture_srv_put_frame 的句柄，
+        // 但没关系，我们修改一下逻辑，不在这里还，
+        // 而是修改 Link 层的回调机制，让它在回调返回后自动还！
+        // 
+        // 为了最小化改动，我们采用一个更简单的方案：
+        // 【方案】修改 frame_link.c，在 _frame_link_enqueue 之后，
+        // 或者在回调返回之后，由 Link 层自己负责把 HAL 层的帧还回去！
+        return;
+    }
+
+    // 2. 拷贝数据 (从 Link 的 mmap 区域 拷贝到 Data Bus 的池子里)
+    void *w_ptr = data_bus_get_writable_ptr(item);
+    if (w_ptr == NULL) {
+        data_bus_release(item);
+        return;
+    }
+    memcpy(w_ptr, frame->data, data_size);
+
+    // 3. 发布到 Data Bus
+    ret = data_bus_publish(ctx->data_bus, item);
+    if (ret != 0) {
+        data_bus_release(item);
+        return;
+    }
+    
+    // 4. 生产者释放引用
+    data_bus_release(item); 
+
+    // 5. 发布事件到 Event Bus
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
+
+    // 【重要】此时，数据已经安全拷贝到 Data Bus 了。
+    // 但是！Link 层的那个 frame 还没还给摄像头！
+    // 我们需要修改 Link 层的逻辑。
 }
 
 /**
@@ -327,6 +377,11 @@ static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *fr
         data_bus_release(item);
         return -1;
     }
+    
+    // 【重要】发布成功后，生产者也要释放自己的引用！
+    // 因为 data_bus_publish 后，所有权就交给总线了。
+    // 如果不 release，ref_count 会一直 >= 1，导致 item 永远无法回收！
+    data_bus_release(item); 
 
     // 4. 发布事件到 Event Bus
     event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");

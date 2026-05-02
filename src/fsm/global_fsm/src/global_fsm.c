@@ -210,18 +210,9 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
         }
         
         case GLOBAL_EVENT_SYSTEM_SHUTDOWN: {
+            // 【修改】直接改状态，不要在锁里投事件（容易死锁）
             _global_fsm_change_state(ctx, GLOBAL_STATE_SHUTTING_DOWN);
-            // 给所有子模块投 DEINIT 事件
-            pthread_mutex_lock(&ctx->lock);
-            for (uint32_t i = 0; i < ctx->module_count; i++) {
-                if (ctx->modules[i].registered) {
-                    LOG_I("Global FSM: Sending DEINIT to module %s", ctx->modules[i].name);
-                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_DEINIT);
-                }
-            }
-            pthread_mutex_unlock(&ctx->lock);
-            // 延迟一会后设为 OFF（实际项目中应等所有子模块 DEINIT 回调）
-            _global_fsm_change_state(ctx, GLOBAL_STATE_OFF);
+            // 【删除】这里的循环投 DEINIT 事件，改由 main 函数在外部串行销毁
             break;
         }
         

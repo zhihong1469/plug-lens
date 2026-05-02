@@ -36,6 +36,9 @@ typedef struct {
     // 最新数据项索引（用于 acquire_latest）
     int latest_item_index;
     
+    // 【新增】内部持有的最新 item 引用（防止被回收）
+    data_item_t *latest_item_held;
+    
     // 内存池（预分配）
     void *memory_pool;
     
@@ -82,7 +85,7 @@ int data_bus_init(const data_bus_config_t *config,
     ctx->max_items = (config->max_items > 0) ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
     ctx->max_item_size = (config->max_item_size > 0) ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
     ctx->latest_item_index = -1;
-
+    ctx->latest_item_held = NULL; // 【新增】初始化
     // 分配数据项数组
     ctx->items = (data_item_t*)malloc(ctx->max_items * sizeof(data_item_t));
     if (ctx->items == NULL) {
@@ -194,23 +197,48 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
         return -1;
     }
 
+    // 【新增】先释放旧的 latest_item_held
+    if (ctx->latest_item_held != NULL) {
+        data_item_t *old_item = ctx->latest_item_held;
+        
+        // 原子减少引用计数
+        pthread_mutex_lock(&old_item->ref_lock);
+        old_item->info.ref_count--;
+        uint32_t new_count = old_item->info.ref_count;
+        pthread_mutex_unlock(&old_item->ref_lock);
+        
+        // 如果引用计数为0，回收
+        if (new_count == 0) {
+            _data_bus_reset_item(old_item);
+            LOG_D("Data Bus: Old latest item recycled");
+        }
+        
+        ctx->latest_item_held = NULL;
+    }
+
     // 标记为已发布
     ditem->published = true;
-    ditem->info.timestamp = _data_bus_get_timestamp_us(); // 更新发布时间
+    ditem->info.timestamp = _data_bus_get_timestamp_us();
 
     // 更新最新 item 索引
-    // 这里我们通过指针偏移计算索引
     int index = (int)((uint8_t*)ditem - (uint8_t*)ctx->items) / sizeof(data_item_t);
     ctx->latest_item_index = index;
 
+    // 【新增】内部持有这个新 item 的引用（ref_count +1）
+    pthread_mutex_lock(&ditem->ref_lock);
+    ditem->info.ref_count++; // 这里增加引用，防止被回收
+    pthread_mutex_unlock(&ditem->ref_lock);
+    
+    ctx->latest_item_held = ditem;
+
     pthread_mutex_unlock(&ctx->lock);
 
-    LOG_D("Data Bus: Published item (type=%s, producer=%s)", 
+    LOG_D("Data Bus: Published item (type=%s, producer=%s, ref_count now=%u)", 
           data_type_to_str(ditem->info.type), 
-          ditem->info.producer);
+          ditem->info.producer,
+          ditem->info.ref_count);
     return 0;
 }
-
 // -------------------------------------------------------------------------
 // 消费者接口
 // -------------------------------------------------------------------------
@@ -321,7 +349,11 @@ int data_bus_deinit(data_bus_handle_t handle)
     data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
     pthread_rwlock_wrlock(&ctx->rwlock);
-
+    // 【新增】先释放内部持有的 latest_item_held
+    if (ctx->latest_item_held != NULL) {
+        _data_bus_reset_item(ctx->latest_item_held);
+        ctx->latest_item_held = NULL;
+    }
     // 销毁所有 item 的锁
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         pthread_mutex_destroy(&ctx->items[i].ref_lock);
@@ -377,13 +409,9 @@ static void _data_bus_reset_item(data_item_t *item)
 {
     if (item == NULL) return;
     
-    pthread_mutex_lock(&item->ref_lock);
+    // 【修改】不要在 reset_item 里拿 ref_lock，因为此时 ref_count 应该已经是 0 了
+    // 直接清零
     memset(&item->info, 0, sizeof(item->info));
-    // 注意：不重置 data_ptr 指向，只清空内容
-    if (item->data_ptr != NULL) {
-        memset(item->data_ptr, 0, 128); // 只清空前128字节，避免大内存操作
-    }
     item->in_use = false;
     item->published = false;
-    pthread_mutex_unlock(&item->ref_lock);
 }

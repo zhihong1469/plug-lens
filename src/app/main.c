@@ -27,41 +27,53 @@ volatile sig_atomic_t g_quit_flag = 0;
 static struct termios g_old_termios;
 static bool g_termios_saved = false;
 
+// 【新增】这是一个通用的恢复函数，可被信号处理和 atexit 调用
+static void _restore_terminal_mode_safe(void)
+{
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
+        g_termios_saved = false;
+        // 这里不能用 LOG_I，因为如果是 atexit 调用，log 可能已经 deinit 了
+        fprintf(stderr, "\n[System] Terminal restored.\n");
+    }
+}
+
 static void _set_noncanonical_mode(void)
 {
     struct termios new_termios;
     if (tcgetattr(STDIN_FILENO, &g_old_termios) == 0) {
         g_termios_saved = true;
         new_termios = g_old_termios;
-        // 禁用规范模式，禁用回显（可选）
+        
+        // 禁用规范模式和回显
         new_termios.c_lflag &= ~(ICANON | ECHO); 
-        // 设置最小读取字符数和超时
+        
+        // VMIN=1, VTIME=0 -> 只要有数据就返回 (比纯0更可靠)
         new_termios.c_cc[VMIN] = 1;
         new_termios.c_cc[VTIME] = 0;
+        
         tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+        
+        // 【关键】注册退出钩子，确保万无一失
+        atexit(_restore_terminal_mode_safe);
     }
 }
 
-// 恢复终端默认模式
-static void _restore_terminal_mode(void)
-{
-    if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
-        g_termios_saved = false;
-        LOG_I("Main: Terminal mode restored");
-    }
-}
 // ==========================================================================
 // 信号处理
 // ==========================================================================
+// 【修改】原来的 _restore_terminal_mode 保留，用于正常流程，内部调用 safe 版本
+static void _restore_terminal_mode(void)
+{
+    _restore_terminal_mode_safe();
+}
 static void _sigint_handler(int sig)
 {
     (void)sig;
-    g_quit_flag = 1;
-    _restore_terminal_mode(); // <-- 新增：收到信号先恢复终端
-    LOG_W("Main: Received SIGINT, shutting down...");
+    g_quit_flag = 1; 
+    // 【新增】信号来了也尝试立即恢复终端，防止用户按 Ctrl+C 后终端还是瞎的
+    _restore_terminal_mode_safe();
 }
-
 // ==========================================================================
 // 【核心】Global FSM 回调 -> Event Bus 适配层
 // ==========================================================================
@@ -223,15 +235,26 @@ int main(int argc, char **argv)
     demo_app_run();
 
     // -------------------------------------------------------------------------
-    // 8. 优雅退出
+    // 8. 【唯一】清理流程
     // -------------------------------------------------------------------------
-    LOG_I("Main: Starting graceful shutdown...");
+    LOG_I("Main: Starting forced shutdown...");
 
+    // 【重要】在这里，也只在这里恢复终端！
+    _restore_terminal_mode();
+
+    // 2. 停止 Demo App
     demo_app_deinit();
-    capture_srv_destroy(g_cap_srv);
-    global_fsm_deinit(g_g_fsm);
-    data_bus_deinit(g_data_bus);
-    event_bus_deinit(g_evt_bus);
+
+    // 3. 销毁 Capture Service
+    if (g_cap_srv) {
+        capture_srv_destroy(g_cap_srv);
+        g_cap_srv = NULL;
+    }
+
+    // 4. 销毁 FSM 和总线
+    if (g_g_fsm) global_fsm_deinit(g_g_fsm);
+    if (g_data_bus) data_bus_deinit(g_data_bus);
+    if (g_evt_bus) event_bus_deinit(g_evt_bus);
 
     LOG_I("Main: ========================================");
     LOG_I("Main: Application exited successfully");
@@ -244,7 +267,9 @@ error_exit:
     LOG_E("Main: Application exited with error");
     LOG_E("Main: ========================================");
     
-    // 尝试清理
+    // 【重要】出错了也要恢复终端！
+    _restore_terminal_mode();
+    
     if (g_cap_srv) capture_srv_destroy(g_cap_srv);
     if (g_g_fsm) global_fsm_deinit(g_g_fsm);
     if (g_data_bus) data_bus_deinit(g_data_bus);
