@@ -214,28 +214,21 @@ LDFLAGS :=
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
 #define CONFIG_CAPTURE_WIDTH 640
 #define CONFIG_CAPTURE_HEIGHT 480
-#define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV
+#define CONFIG_CAPTURE_FORMAT 2  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
-#define CONFIG_CAPTURE_LOCK_EXPOSURE true
-#define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
-#define CONFIG_CAPTURE_LOCK_GAIN true
+#define CONFIG_CAPTURE_LOCK_EXPOSURE false  
+#define CONFIG_CAPTURE_LOCK_WHITE_BALANCE false  
+#define CONFIG_CAPTURE_LOCK_GAIN false  
 
 // 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
-
-// ==========================================================================
-// 【修改】移除对bus/fsm头文件的依赖，避免循环依赖
-// 改为在main.c中定义全局句柄，这里只做声明
-// ==========================================================================
+// 只保留类型别名，方便使用
 typedef void* event_bus_handle_t;
 typedef void* data_bus_handle_t;
 typedef void* global_fsm_handle_t;
 
-extern event_bus_handle_t g_event_bus;
-extern data_bus_handle_t g_data_bus;
-extern global_fsm_handle_t g_global_fsm;
 
 #endif /* VISION_AI_CONFIG_H */
 
@@ -1052,6 +1045,8 @@ typedef struct {
     uint64_t timestamp;
     uint32_t index;
 } video_frame_t;
+
+extern const char* g_err_str[];
 
 // ==========================================================================
 // 7. 【核心】完美重构后的通用摄像头接口（无状态、纯函数）
@@ -1885,7 +1880,7 @@ int data_bus_init(const data_bus_config_t *config,
     pthread_rwlock_init(&ctx->rwlock, NULL);
 
     *out_handle = (data_bus_handle_t)ctx;
-    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%zuKB", 
+    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%uKB", 
           ctx->max_items, ctx->max_item_size / 1024);
     return 0;
 }
@@ -3416,6 +3411,7 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     return VIDEO_OK;
 }
 
+#include "log.h"
 video_err_t frame_link_start(frame_link_handle_t handle)
 {
     if (handle == NULL) {
@@ -3424,23 +3420,32 @@ video_err_t frame_link_start(frame_link_handle_t handle)
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
     if (ctx->running) {
+        LOG_I("Frame Link: Already running");
         return VIDEO_OK;
     }
 
+    LOG_I("Frame Link: Starting HAL layer stream..."); // <-- 增加
     // 启动HAL层流
     video_err_t err = video_start_stream(ctx->hal_handle);
     if (err != VIDEO_OK) {
+        LOG_E("Frame Link: Failed to start HAL stream (err=%d)", err); // <-- 增加
         return err;
     }
+    LOG_I("Frame Link: HAL stream started"); // <-- 增加
+    
     ctx->streaming = true;
 
     // 启动采集线程
+    LOG_I("Frame Link: Creating capture thread..."); // <-- 增加
     ctx->running = true;
     if (pthread_create(&ctx->capture_thread, NULL, _frame_link_capture_thread, ctx) != 0) {
+        LOG_E("Frame Link: Failed to create thread"); // <-- 增加
         video_stop_stream(ctx->hal_handle);
         ctx->streaming = false;
+        ctx->running = false;
         return VIDEO_ERR_INVALID_PARAM;
     }
+    LOG_I("Frame Link: Capture thread created"); // <-- 增加
 
     return VIDEO_OK;
 }
@@ -3675,27 +3680,47 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 static void* _frame_link_capture_thread(void *arg)
 {
     frame_link_context_t *ctx = (frame_link_context_t*)arg;
-
+    LOG_I("Frame Link: Capture thread entered loop");
+    
+    int error_count = 0;
+    int consecutive_errors = 0; // <-- 新增：连续错误计数
+    
     while (ctx->running) {
-        // 从HAL层取帧
+        // 1. 申请帧节点
         frame_node_t *node = _frame_link_alloc_frame(ctx);
         if (node == NULL) {
-            usleep(10000); // 帧池满，等待
-            continue;
-        }
-
-        video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
-        if (err != VIDEO_OK) {
-            _frame_link_free_frame(ctx, node);
-            if (!ctx->running) break;
             usleep(10000);
             continue;
         }
 
-        // 入队
+        // 2. 从 HAL 取帧
+        video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
+        if (err != VIDEO_OK) {
+            _frame_link_free_frame(ctx, node);
+            consecutive_errors++;
+            
+            // 【优化】只有连续错误超过一定次数才打印，且降级为 WARN
+            if (consecutive_errors % 100 == 0) { // 每100次连续错误才打一次
+                LOG_W("Frame Link: video_get_frame failed %d times (last err=%s)", 
+                      consecutive_errors, g_err_str[err]);
+            }
+            
+            if (!ctx->running) break;
+            usleep(5000); // 稍微缩短等待时间
+            continue;
+        }
+        
+        // 成功取到帧，重置计数器
+        if (consecutive_errors > 0) {
+            LOG_I("Frame Link: Recovered after %d consecutive errors", consecutive_errors);
+        }
+        consecutive_errors = 0;
+        error_count = 0;
+
+        // 3. 入队
         _frame_link_enqueue(ctx, node);
     }
-
+    LOG_I("Frame Link: Capture thread exiting");
     return NULL;
 }
 
@@ -4277,7 +4302,7 @@ int  _video_usb_dump_yuv(const video_frame_t *frame, const char *path);
 #include <stdlib.h>
 
 // 错误码字符串表（纯数据，无状态）
-static const char* g_err_str[] = {
+const char* g_err_str[] = {
     [VIDEO_OK] = "Success",
     [VIDEO_ERR_OPEN] = "Failed to open device",
     [VIDEO_ERR_QUERYCAP] = "Failed to query device capabilities",
@@ -4307,7 +4332,7 @@ const char* video_err_str(video_err_t err)
     }
     return g_err_str[err];
 }
-
+#include "log.h"
 video_err_t video_open(const video_config_t *config,
                        video_capability_t *cap,
                        video_handle_t *out_handle)
@@ -4332,7 +4357,11 @@ video_err_t video_open(const video_config_t *config,
         // 非致命错误，继续
     }
     memcpy(cap, &ctx->cap, sizeof(video_capability_t));
-
+    // 【新增】打印摄像头能力
+    LOG_I("Video HAL: Detected camera: %s", ctx->cap.device_name);
+    LOG_I("Video HAL: Support YUYV: %s", ctx->cap.support_yuyv ? "YES" : "NO");
+    LOG_I("Video HAL: Support MJPEG: %s", ctx->cap.support_mjpeg ? "YES" : "NO");
+    LOG_I("Video HAL: Support NV12: %s", ctx->cap.support_nv12 ? "YES" : "NO");
     // 设置格式
     if (_video_usb_set_format(ctx) != 0) {
         _video_usb_close(ctx);
@@ -4634,7 +4663,7 @@ int _video_usb_detect_capability(video_usb_context_t *ctx)
 
     return 0;
 }
-
+#include "log.h"
 int _video_usb_set_format(video_usb_context_t *ctx)
 {
     struct v4l2_format fmt;
@@ -4647,11 +4676,39 @@ int _video_usb_set_format(video_usb_context_t *ctx)
     fmt.fmt.pix.pixelformat = _video_usb_format_to_fourcc(ctx->config.format);
     fmt.fmt.pix.field = V4L2_FIELD_ANY;
 
+    // 【1】尝试设置格式
+    LOG_I("Video USB: Trying to set format: %dx%d, FourCC: %c%c%c%c",
+          ctx->config.width, ctx->config.height,
+          (fmt.fmt.pix.pixelformat >> 0) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 8) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 16) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 24) & 0xFF);
+
     ret = ioctl(ctx->fd, VIDIOC_S_FMT, &fmt);
     if (ret < 0) {
+        LOG_E("Video USB: VIDIOC_S_FMT failed, errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
+    // 【2】【关键】立刻读回来，看看驱动到底改成了什么！
+    memset(&fmt, 0, sizeof(fmt));
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ret = ioctl(ctx->fd, VIDIOC_G_FMT, &fmt);
+    if (ret < 0) {
+        LOG_E("Video USB: VIDIOC_G_FMT failed (verify)");
+        return -1;
+    }
+
+    // 【3】打印驱动实际返回的参数
+    LOG_I("Video USB: Driver ACTUALLY set: %dx%d, FourCC: %c%c%c%c, SizeImage: %u",
+          fmt.fmt.pix.width, fmt.fmt.pix.height,
+          (fmt.fmt.pix.pixelformat >> 0) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 8) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 16) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 24) & 0xFF,
+          fmt.fmt.pix.sizeimage);
+
+    // 更新我们的配置，以驱动返回的为准
     ctx->config.width = fmt.fmt.pix.width;
     ctx->config.height = fmt.fmt.pix.height;
     ctx->config.format = _video_usb_fourcc_to_format(fmt.fmt.pix.pixelformat);
@@ -4778,13 +4835,21 @@ int _video_usb_dqbuf(video_usb_context_t *ctx, video_frame_t *frame)
     memset(&fds, 0, sizeof(fds));
     fds.fd = ctx->fd;
     fds.events = POLLIN;
-    ret = poll(&fds, 1, 3000);
+    // 【新增】每次 poll 前打个点，证明线程没死
+    LOG_D("Video USB: Polling for data...");
 
-    if (ret == -1 && errno == EINTR) {
+    // 【修改】增加日志，并且 poll 时间稍微缩短，增加循环
+    ret = poll(&fds, 1, 1000); // 改成 1 秒超时，方便观察
+
+    if (ret == -1) {
+        // 【修改】打印系统错误号
+        LOG_E("Video USB: poll error, errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
-    if (ret <= 0) {
+    if (ret == 0) {
+        // 【修改】打印超时提示（不要每次都打，或者在 link 层控制频率）
+        // LOG_W("Video USB: poll timeout (no data from camera)");
         return -1;
     }
 
@@ -4983,6 +5048,7 @@ int demo_app_deinit(void);
 // plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
 #include "log.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5044,28 +5110,41 @@ int demo_app_init(const demo_app_config_t *config)
     return 0;
 }
 
+#include <signal.h>
+extern volatile sig_atomic_t g_quit_flag; 
 int demo_app_run(void)
 {
     g_demo_ctx.running = true;
     LOG_I("Demo App: Running...");
-
+    static int heartbeat = 0; // <-- 增加静态变量
     // 简单的主循环：处理用户输入 + 检查状态
-    while (g_demo_ctx.running) {
+    while (g_demo_ctx.running && !g_quit_flag) { // <-- 【修改】增加 !g_quit_flag 检查
         // 检查全局状态
         global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
+        (void)g_state;
         
-        // 非阻塞读取用户输入（简化版）
+        // 【重要】每次 select 之前必须完全重置 fd_set 和 timeval！
         fd_set fds;
         struct timeval tv;
+        
         FD_ZERO(&fds);
         FD_SET(STDIN_FILENO, &fds);
         tv.tv_sec = 0;
         tv.tv_usec = 100000; // 100ms 超时
-
+        // 【增加】心跳打印，每100次循环打印一次 (约1秒)
+        if (heartbeat % 100 == 0) {
+             LOG_D("Demo App: Heartbeat %d", heartbeat); // 如果你想确认主循环在跑，打开这行
+        }
+        heartbeat++;
         int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
         if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
             char cmd = 0;
-            if (read(STDIN_FILENO, &cmd, 1) > 0) {
+            // 【修改】read 改成循环读，把缓冲区读空，避免残留的 \n 影响
+            while (read(STDIN_FILENO, &cmd, 1) > 0) {
+                if (cmd == '\n' || cmd == '\r') continue;
+                
+                LOG_I("Demo App: Received key '%c'", cmd); // <-- 增加日志
+                
                 switch (cmd) {
                     case 's':
                     case 'S':
@@ -5087,15 +5166,15 @@ int demo_app_run(void)
                     case 'H':
                         _demo_app_print_help();
                         break;
-                    case '\n':
-                    case '\r':
-                        break; // 忽略回车
                     default:
                         LOG_W("Demo App: Unknown command '%c'", cmd);
                         _demo_app_print_help();
                         break;
                 }
+                break; // 只处理一个字符
             }
+        } else if (ret < 0 && errno != EINTR) {
+            LOG_E("Demo App: select error (errno=%d)", errno);
         }
 
         // 小睡一会，避免 CPU 100%
@@ -5193,16 +5272,44 @@ static void _demo_app_print_help(void)
 #include "capture_srv.h"
 #include "demo_app.h"
 #include "vision_ai_config.h" 
-
+#include <termios.h> // <-- 新增
 // ==========================================================================
 // 全局句柄（简化版，实际项目中建议封装在 main_context_t 里）
 // ==========================================================================
-static event_bus_handle_t g_evt_bus = NULL;
-static data_bus_handle_t g_data_bus = NULL;
-static global_fsm_handle_t g_g_fsm = NULL;
-static capture_srv_handle_t g_cap_srv = NULL;
-static volatile sig_atomic_t g_quit_flag = 0;
+event_bus_handle_t g_evt_bus = NULL;
+data_bus_handle_t g_data_bus = NULL;
+global_fsm_handle_t g_g_fsm = NULL;
+capture_srv_handle_t g_cap_srv = NULL;
+volatile sig_atomic_t g_quit_flag = 0;
 
+// ==========================================================================
+// 新增：终端模式管理
+// ==========================================================================
+static struct termios g_old_termios;
+static bool g_termios_saved = false;
+
+static void _set_noncanonical_mode(void)
+{
+    struct termios new_termios;
+    if (tcgetattr(STDIN_FILENO, &g_old_termios) == 0) {
+        g_termios_saved = true;
+        new_termios = g_old_termios;
+        // 禁用规范模式，禁用回显（可选）
+        new_termios.c_lflag &= ~(ICANON | ECHO); 
+        // 设置最小读取字符数和超时
+        new_termios.c_cc[VMIN] = 1;
+        new_termios.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+    }
+}
+
+static void _restore_terminal_mode(void)
+{
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
+        g_termios_saved = false;
+    }
+}
 // ==========================================================================
 // 信号处理
 // ==========================================================================
@@ -5210,6 +5317,7 @@ static void _sigint_handler(int sig)
 {
     (void)sig;
     g_quit_flag = 1;
+    _restore_terminal_mode(); // <-- 新增：收到信号先恢复终端
     LOG_W("Main: Received SIGINT, shutting down...");
 }
 
@@ -5263,14 +5371,15 @@ int main(int argc, char **argv)
     int ret = 0;
 
     // 1. 初始化日志
-    log_init(LOG_LEVEL_INFO);
+    log_init(LOG_LEVEL_ALL);
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Application Starting...");
     LOG_I("Main: ========================================");
 
     // 2. 注册信号
     signal(SIGINT, _sigint_handler);
-
+    // 【新增】设置终端为非阻塞模式
+    _set_noncanonical_mode();
     // -------------------------------------------------------------------------
     // 3. 初始化双总线
     // -------------------------------------------------------------------------
@@ -5286,8 +5395,8 @@ int main(int argc, char **argv)
     LOG_I("Main: Initializing Data Bus...");
     data_bus_config_t data_bus_cfg = {0};
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
-    data_bus_cfg.max_item_size = 4 * 1024 * 1024; // 4MB
-    ret = data_bus_init(&data_bus_cfg, &g_data_bus);
+    data_bus_cfg.max_item_size = 2 * 1024 * 1024; // MB
+    ret = data_bus_init(&data_bus_cfg, &g_data_bus); //max_items * max_item_size
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
         goto error_exit;
@@ -5309,7 +5418,7 @@ int main(int argc, char **argv)
     }
 
     // -------------------------------------------------------------------------
-    // 5. 初始化业务服务（Capture Service）
+    // 5. 初始化业务服务（Capture Service）（【修复2】修正回调注入）
     // -------------------------------------------------------------------------
     LOG_I("Main: Initializing Capture Service...");
     
@@ -5333,12 +5442,10 @@ int main(int argc, char **argv)
     cap_srv_cfg.evt_bus = g_evt_bus;
     cap_srv_cfg.data_bus = g_data_bus;
     
+    // 5.3 【关键修复】完美注入 Global FSM 回调
+    // 【删除】原来的 NULL 覆盖逻辑
     cap_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
     cap_srv_cfg.callbacks.user_data = g_g_fsm; // user_data 传 Global FSM 句柄
-    
-    // 5.3 (续) 这里我们先不设置 callbacks，后面手动处理
-    cap_srv_cfg.callbacks.state_change_cb = NULL; 
-    cap_srv_cfg.callbacks.user_data = NULL;
     cap_srv_cfg.auto_start = false;
 
     // 创建 Capture Service
@@ -5351,6 +5458,7 @@ int main(int argc, char **argv)
     // 注册到 Global FSM
     module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_cap_srv);
     global_fsm_register_module(g_g_fsm, "capture_srv", cap_fsm, true);
+
 
     // -------------------------------------------------------------------------
     // 6. 初始化 Demo App

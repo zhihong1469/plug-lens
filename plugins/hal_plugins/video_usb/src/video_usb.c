@@ -145,7 +145,7 @@ int _video_usb_detect_capability(video_usb_context_t *ctx)
 
     return 0;
 }
-
+#include "log.h"
 int _video_usb_set_format(video_usb_context_t *ctx)
 {
     struct v4l2_format fmt;
@@ -158,11 +158,39 @@ int _video_usb_set_format(video_usb_context_t *ctx)
     fmt.fmt.pix.pixelformat = _video_usb_format_to_fourcc(ctx->config.format);
     fmt.fmt.pix.field = V4L2_FIELD_ANY;
 
+    // 【1】尝试设置格式
+    LOG_I("Video USB: Trying to set format: %dx%d, FourCC: %c%c%c%c",
+          ctx->config.width, ctx->config.height,
+          (fmt.fmt.pix.pixelformat >> 0) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 8) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 16) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 24) & 0xFF);
+
     ret = ioctl(ctx->fd, VIDIOC_S_FMT, &fmt);
     if (ret < 0) {
+        LOG_E("Video USB: VIDIOC_S_FMT failed, errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
+    // 【2】【关键】立刻读回来，看看驱动到底改成了什么！
+    memset(&fmt, 0, sizeof(fmt));
+    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ret = ioctl(ctx->fd, VIDIOC_G_FMT, &fmt);
+    if (ret < 0) {
+        LOG_E("Video USB: VIDIOC_G_FMT failed (verify)");
+        return -1;
+    }
+
+    // 【3】打印驱动实际返回的参数
+    LOG_I("Video USB: Driver ACTUALLY set: %dx%d, FourCC: %c%c%c%c, SizeImage: %u",
+          fmt.fmt.pix.width, fmt.fmt.pix.height,
+          (fmt.fmt.pix.pixelformat >> 0) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 8) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 16) & 0xFF,
+          (fmt.fmt.pix.pixelformat >> 24) & 0xFF,
+          fmt.fmt.pix.sizeimage);
+
+    // 更新我们的配置，以驱动返回的为准
     ctx->config.width = fmt.fmt.pix.width;
     ctx->config.height = fmt.fmt.pix.height;
     ctx->config.format = _video_usb_fourcc_to_format(fmt.fmt.pix.pixelformat);
@@ -289,13 +317,21 @@ int _video_usb_dqbuf(video_usb_context_t *ctx, video_frame_t *frame)
     memset(&fds, 0, sizeof(fds));
     fds.fd = ctx->fd;
     fds.events = POLLIN;
-    ret = poll(&fds, 1, 3000);
+    // 【新增】每次 poll 前打个点，证明线程没死
+    LOG_D("Video USB: Polling for data...");
 
-    if (ret == -1 && errno == EINTR) {
+    // 【修改】增加日志，并且 poll 时间稍微缩短，增加循环
+    ret = poll(&fds, 1, 1000); // 改成 1 秒超时，方便观察
+
+    if (ret == -1) {
+        // 【修改】打印系统错误号
+        LOG_E("Video USB: poll error, errno=%d (%s)", errno, strerror(errno));
         return -1;
     }
 
-    if (ret <= 0) {
+    if (ret == 0) {
+        // 【修改】打印超时提示（不要每次都打，或者在 link 层控制频率）
+        // LOG_W("Video USB: poll timeout (no data from camera)");
         return -1;
     }
 
