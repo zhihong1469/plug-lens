@@ -214,12 +214,12 @@ LDFLAGS :=
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
 #define CONFIG_CAPTURE_WIDTH 640
 #define CONFIG_CAPTURE_HEIGHT 480
-#define CONFIG_CAPTURE_FORMAT 2  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
+#define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
-#define CONFIG_CAPTURE_LOCK_EXPOSURE false  
-#define CONFIG_CAPTURE_LOCK_WHITE_BALANCE false  
-#define CONFIG_CAPTURE_LOCK_GAIN false  
+#define CONFIG_CAPTURE_LOCK_EXPOSURE true
+#define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
+#define CONFIG_CAPTURE_LOCK_GAIN true
 
 // 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
@@ -1803,6 +1803,9 @@ typedef struct {
     // 最新数据项索引（用于 acquire_latest）
     int latest_item_index;
     
+    // 【新增】内部持有的最新 item 引用（防止被回收）
+    data_item_t *latest_item_held;
+    
     // 内存池（预分配）
     void *memory_pool;
     
@@ -1849,7 +1852,7 @@ int data_bus_init(const data_bus_config_t *config,
     ctx->max_items = (config->max_items > 0) ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
     ctx->max_item_size = (config->max_item_size > 0) ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
     ctx->latest_item_index = -1;
-
+    ctx->latest_item_held = NULL; // 【新增】初始化
     // 分配数据项数组
     ctx->items = (data_item_t*)malloc(ctx->max_items * sizeof(data_item_t));
     if (ctx->items == NULL) {
@@ -1961,23 +1964,48 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
         return -1;
     }
 
+    // 【新增】先释放旧的 latest_item_held
+    if (ctx->latest_item_held != NULL) {
+        data_item_t *old_item = ctx->latest_item_held;
+        
+        // 原子减少引用计数
+        pthread_mutex_lock(&old_item->ref_lock);
+        old_item->info.ref_count--;
+        uint32_t new_count = old_item->info.ref_count;
+        pthread_mutex_unlock(&old_item->ref_lock);
+        
+        // 如果引用计数为0，回收
+        if (new_count == 0) {
+            _data_bus_reset_item(old_item);
+            LOG_D("Data Bus: Old latest item recycled");
+        }
+        
+        ctx->latest_item_held = NULL;
+    }
+
     // 标记为已发布
     ditem->published = true;
-    ditem->info.timestamp = _data_bus_get_timestamp_us(); // 更新发布时间
+    ditem->info.timestamp = _data_bus_get_timestamp_us();
 
     // 更新最新 item 索引
-    // 这里我们通过指针偏移计算索引
     int index = (int)((uint8_t*)ditem - (uint8_t*)ctx->items) / sizeof(data_item_t);
     ctx->latest_item_index = index;
 
+    // 【新增】内部持有这个新 item 的引用（ref_count +1）
+    pthread_mutex_lock(&ditem->ref_lock);
+    ditem->info.ref_count++; // 这里增加引用，防止被回收
+    pthread_mutex_unlock(&ditem->ref_lock);
+    
+    ctx->latest_item_held = ditem;
+
     pthread_mutex_unlock(&ctx->lock);
 
-    LOG_D("Data Bus: Published item (type=%s, producer=%s)", 
+    LOG_D("Data Bus: Published item (type=%s, producer=%s, ref_count now=%u)", 
           data_type_to_str(ditem->info.type), 
-          ditem->info.producer);
+          ditem->info.producer,
+          ditem->info.ref_count);
     return 0;
 }
-
 // -------------------------------------------------------------------------
 // 消费者接口
 // -------------------------------------------------------------------------
@@ -2088,7 +2116,11 @@ int data_bus_deinit(data_bus_handle_t handle)
     data_bus_context_t *ctx = (data_bus_context_t*)handle;
 
     pthread_rwlock_wrlock(&ctx->rwlock);
-
+    // 【新增】先释放内部持有的 latest_item_held
+    if (ctx->latest_item_held != NULL) {
+        _data_bus_reset_item(ctx->latest_item_held);
+        ctx->latest_item_held = NULL;
+    }
     // 销毁所有 item 的锁
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         pthread_mutex_destroy(&ctx->items[i].ref_lock);
@@ -2144,15 +2176,11 @@ static void _data_bus_reset_item(data_item_t *item)
 {
     if (item == NULL) return;
     
-    pthread_mutex_lock(&item->ref_lock);
+    // 【修改】不要在 reset_item 里拿 ref_lock，因为此时 ref_count 应该已经是 0 了
+    // 直接清零
     memset(&item->info, 0, sizeof(item->info));
-    // 注意：不重置 data_ptr 指向，只清空内容
-    if (item->data_ptr != NULL) {
-        memset(item->data_ptr, 0, 128); // 只清空前128字节，避免大内存操作
-    }
     item->in_use = false;
     item->published = false;
-    pthread_mutex_unlock(&item->ref_lock);
 }
 
 
@@ -2939,18 +2967,9 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
         }
         
         case GLOBAL_EVENT_SYSTEM_SHUTDOWN: {
+            // 【修改】直接改状态，不要在锁里投事件（容易死锁）
             _global_fsm_change_state(ctx, GLOBAL_STATE_SHUTTING_DOWN);
-            // 给所有子模块投 DEINIT 事件
-            pthread_mutex_lock(&ctx->lock);
-            for (uint32_t i = 0; i < ctx->module_count; i++) {
-                if (ctx->modules[i].registered) {
-                    LOG_I("Global FSM: Sending DEINIT to module %s", ctx->modules[i].name);
-                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_DEINIT);
-                }
-            }
-            pthread_mutex_unlock(&ctx->lock);
-            // 延迟一会后设为 OFF（实际项目中应等所有子模块 DEINIT 回调）
-            _global_fsm_change_state(ctx, GLOBAL_STATE_OFF);
+            // 【删除】这里的循环投 DEINIT 事件，改由 main 函数在外部串行销毁
             break;
         }
         
@@ -3284,6 +3303,7 @@ video_err_t frame_link_deinit(frame_link_handle_t handle);
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <sched.h>  
 
 // ==========================================================================
 // 内部宏定义
@@ -3677,53 +3697,57 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
     return node;
 }
 
+#include <signal.h>
 static void* _frame_link_capture_thread(void *arg)
 {
     frame_link_context_t *ctx = (frame_link_context_t*)arg;
     LOG_I("Frame Link: Capture thread entered loop");
     
-    int error_count = 0;
-    int consecutive_errors = 0; // <-- 新增：连续错误计数
-    
-    while (ctx->running) {
-        // 1. 申请帧节点
-        frame_node_t *node = _frame_link_alloc_frame(ctx);
-        if (node == NULL) {
+    extern volatile sig_atomic_t g_quit_flag;
+
+    // 添加一个计数器，用于降低日志频率
+    static int frame_count = 0;
+
+    while (ctx->running && !g_quit_flag) {
+        // 1. 从 HAL 取帧
+        video_frame_t hal_frame = {0};
+        
+        // 【修改 1】这里的 LOG_D 太刷屏了，注释掉
+        // LOG_D("Frame Link: Polling frame...");
+        
+        video_err_t err = video_get_frame(ctx->hal_handle, &hal_frame);
+        
+        if (!ctx->running || g_quit_flag) break;
+
+        if (err != VIDEO_OK) {
             usleep(10000);
             continue;
         }
 
-        // 2. 从 HAL 取帧
-        video_err_t err = video_get_frame(ctx->hal_handle, &node->frame);
-        if (err != VIDEO_OK) {
-            _frame_link_free_frame(ctx, node);
-            consecutive_errors++;
-            
-            // 【优化】只有连续错误超过一定次数才打印，且降级为 WARN
-            if (consecutive_errors % 100 == 0) { // 每100次连续错误才打一次
-                LOG_W("Frame Link: video_get_frame failed %d times (last err=%s)", 
-                      consecutive_errors, g_err_str[err]);
-            }
-            
-            if (!ctx->running) break;
-            usleep(5000); // 稍微缩短等待时间
-            continue;
+        // 2. 通知 Service 层
+        if (ctx->frame_ready_cb != NULL) {
+            ctx->frame_ready_cb(&hal_frame, ctx->cb_user_data);
         }
-        
-        // 成功取到帧，重置计数器
-        if (consecutive_errors > 0) {
-            LOG_I("Frame Link: Recovered after %d consecutive errors", consecutive_errors);
-        }
-        consecutive_errors = 0;
-        error_count = 0;
 
-        // 3. 入队
-        _frame_link_enqueue(ctx, node);
+        // 3. 归还缓冲区
+        video_put_frame(ctx->hal_handle, &hal_frame);
+        
+        // 【修改 2】偶尔打印一次证明还活着即可，比如每秒一次
+        if (++frame_count % 30 == 0) {
+             LOG_D("Frame Link: Captured %d frames", frame_count);
+        }
+
+        // ===================== 【核心新增修复】=====================
+        // 主动让出CPU时间片，不占满内核，给主线程键盘调度机会
+        // 不影响帧率，只是礼貌释放时间片，根治主线程被饿死
+        // sched_yield();
+        usleep(10000);  // 1毫秒，几乎无感
+        // =========================================================
     }
+    
     LOG_I("Frame Link: Capture thread exiting");
     return NULL;
 }
-
 
 
 =============================================
@@ -4100,6 +4124,13 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
 
 /**
  * @brief Link层 帧就绪回调（数据入口）
+ * 
+ * 【核心逻辑】
+ * 1. 收到 Link 层的帧指针
+ * 2. 申请 Data Bus Item
+ * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
+ * 4. 发布 Data Bus Item
+ * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
  */
 static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
 {
@@ -4112,8 +4143,51 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
         return;
     }
 
-    // 推送到双总线
-    _capture_srv_feed_bus(ctx, frame);
+    // 1. 从 Data Bus 申请 Item
+    data_bus_item_handle_t item = NULL;
+    size_t data_size = frame->length;
+    
+    int ret = data_bus_alloc(ctx->data_bus, 
+                              DATA_TYPE_VIDEO_FRAME, 
+                              data_size, 
+                              "capture_srv", 
+                              &item);
+    if (ret != 0 || item == NULL) {
+        // Data Bus 满了，这帧直接丢，必须归还 Link 帧！
+        // 【注意】这里我们没有 capture_srv_put_frame 的句柄，
+        // 但没关系，我们修改一下逻辑，不在这里还，
+        // 而是修改 Link 层的回调机制，让它在回调返回后自动还！
+        // 
+        // 为了最小化改动，我们采用一个更简单的方案：
+        // 【方案】修改 frame_link.c，在 _frame_link_enqueue 之后，
+        // 或者在回调返回之后，由 Link 层自己负责把 HAL 层的帧还回去！
+        return;
+    }
+
+    // 2. 拷贝数据 (从 Link 的 mmap 区域 拷贝到 Data Bus 的池子里)
+    void *w_ptr = data_bus_get_writable_ptr(item);
+    if (w_ptr == NULL) {
+        data_bus_release(item);
+        return;
+    }
+    memcpy(w_ptr, frame->data, data_size);
+
+    // 3. 发布到 Data Bus
+    ret = data_bus_publish(ctx->data_bus, item);
+    if (ret != 0) {
+        data_bus_release(item);
+        return;
+    }
+    
+    // 4. 生产者释放引用
+    data_bus_release(item); 
+
+    // 5. 发布事件到 Event Bus
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
+
+    // 【重要】此时，数据已经安全拷贝到 Data Bus 了。
+    // 但是！Link 层的那个 frame 还没还给摄像头！
+    // 我们需要修改 Link 层的逻辑。
 }
 
 /**
@@ -4155,6 +4229,11 @@ static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *fr
         data_bus_release(item);
         return -1;
     }
+    
+    // 【重要】发布成功后，生产者也要释放自己的引用！
+    // 因为 data_bus_publish 后，所有权就交给总线了。
+    // 如果不 release，ref_count 会一直 >= 1，导致 item 永远无法回收！
+    data_bus_release(item); 
 
     // 4. 发布事件到 Event Bus
     event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
@@ -4835,8 +4914,7 @@ int _video_usb_dqbuf(video_usb_context_t *ctx, video_frame_t *frame)
     memset(&fds, 0, sizeof(fds));
     fds.fd = ctx->fd;
     fds.events = POLLIN;
-    // 【新增】每次 poll 前打个点，证明线程没死
-    LOG_D("Video USB: Polling for data...");
+    // LOG_D("Video USB: Polling for data...");
 
     // 【修改】增加日志，并且 poll 时间稍微缩短，增加循环
     ret = poll(&fds, 1, 1000); // 改成 1 秒超时，方便观察
@@ -5048,12 +5126,12 @@ int demo_app_deinit(void);
 // plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
 #include "log.h"
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <errno.h>
+#include <sys/select.h> // 【新增】用于 select
 // ==========================================================================
 // 内部状态
 // ==========================================================================
@@ -5111,74 +5189,77 @@ int demo_app_init(const demo_app_config_t *config)
 }
 
 #include <signal.h>
-extern volatile sig_atomic_t g_quit_flag; 
 int demo_app_run(void)
 {
     g_demo_ctx.running = true;
     LOG_I("Demo App: Running...");
-    static int heartbeat = 0; // <-- 增加静态变量
-    // 简单的主循环：处理用户输入 + 检查状态
-    while (g_demo_ctx.running && !g_quit_flag) { // <-- 【修改】增加 !g_quit_flag 检查
-        // 检查全局状态
-        global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
-        (void)g_state;
-        
-        // 【重要】每次 select 之前必须完全重置 fd_set 和 timeval！
-        fd_set fds;
-        struct timeval tv;
-        
-        FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000; // 100ms 超时
-        // 【增加】心跳打印，每100次循环打印一次 (约1秒)
-        if (heartbeat % 100 == 0) {
-             LOG_D("Demo App: Heartbeat %d", heartbeat); // 如果你想确认主循环在跑，打开这行
-        }
-        heartbeat++;
-        int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
-        if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
-            char cmd = 0;
-            // 【修改】read 改成循环读，把缓冲区读空，避免残留的 \n 影响
-            while (read(STDIN_FILENO, &cmd, 1) > 0) {
-                if (cmd == '\n' || cmd == '\r') continue;
-                
-                LOG_I("Demo App: Received key '%c'", cmd); // <-- 增加日志
-                
-                switch (cmd) {
-                    case 's':
-                    case 'S':
-                        LOG_I("Demo App: User pressed START");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
-                        break;
-                    case 't':
-                    case 'T':
-                        LOG_I("Demo App: User pressed STOP");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
-                        break;
-                    case 'q':
-                    case 'Q':
-                        LOG_I("Demo App: User pressed QUIT");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_SHUTDOWN);
-                        g_demo_ctx.running = false;
-                        break;
-                    case 'h':
-                    case 'H':
-                        _demo_app_print_help();
-                        break;
-                    default:
-                        LOG_W("Demo App: Unknown command '%c'", cmd);
-                        _demo_app_print_help();
-                        break;
-                }
-                break; // 只处理一个字符
-            }
-        } else if (ret < 0 && errno != EINTR) {
-            LOG_E("Demo App: select error (errno=%d)", errno);
-        }
+    
+    extern volatile sig_atomic_t g_quit_flag;
+    // 新增：超时计数器，排查主线程是否正常运行
+    int timeout_count = 0;
 
-        // 小睡一会，避免 CPU 100%
-        usleep(10000);
+    while (g_demo_ctx.running && !g_quit_flag) 
+    { 
+        fd_set read_fds;
+        struct timeval timeout;
+        
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 20000; // 20ms超时
+
+        int ret = select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            LOG_E("Demo App: select error: %s", strerror(errno));
+            break;
+        } 
+        else if (ret > 0) {
+            // 有按键数据
+            if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+                char cmd = 0;
+                ssize_t nread = read(STDIN_FILENO, &cmd, 1);
+                
+                if (nread == 1) {
+                    // 重置超时计数
+                    timeout_count = 0;
+                    if (cmd == '\n' || cmd == '\r') {
+                        continue;
+                    } 
+                    LOG_I("Demo App: Received key '%c'", cmd);
+                    // 你的switch逻辑不变...
+                    switch (cmd) {
+                        case 's': case 'S':
+                            LOG_I("Demo App: User pressed START");
+                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
+                            break;
+                        case 't': case 'T':
+                            LOG_I("Demo App: User pressed STOP");
+                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
+                            break;
+                        case 'q': case 'Q':
+                            LOG_I("Demo App: User pressed QUIT");
+                            g_demo_ctx.running = false; 
+                            break;
+                        case 'h': case 'H':
+                            _demo_app_print_help();
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+        // 【新增】select超时：主线程正常运行，打印日志验证
+        else {
+            timeout_count++;
+            // 每100次超时（2秒）打印一次，避免刷屏
+            if (timeout_count % 100 == 0) {
+                LOG_D("Demo App: Main thread alive, select timeout %d times", timeout_count);
+            }
+        }
     }
 
     LOG_I("Demo App: Main loop exited");
@@ -5272,7 +5353,7 @@ static void _demo_app_print_help(void)
 #include "capture_srv.h"
 #include "demo_app.h"
 #include "vision_ai_config.h" 
-#include <termios.h> // <-- 新增
+#include <termios.h> 
 // ==========================================================================
 // 全局句柄（简化版，实际项目中建议封装在 main_context_t 里）
 // ==========================================================================
@@ -5288,39 +5369,53 @@ volatile sig_atomic_t g_quit_flag = 0;
 static struct termios g_old_termios;
 static bool g_termios_saved = false;
 
+// 【新增】这是一个通用的恢复函数，可被信号处理和 atexit 调用
+static void _restore_terminal_mode_safe(void)
+{
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
+        g_termios_saved = false;
+        // 这里不能用 LOG_I，因为如果是 atexit 调用，log 可能已经 deinit 了
+        fprintf(stderr, "\n[System] Terminal restored.\n");
+    }
+}
+
 static void _set_noncanonical_mode(void)
 {
     struct termios new_termios;
     if (tcgetattr(STDIN_FILENO, &g_old_termios) == 0) {
         g_termios_saved = true;
         new_termios = g_old_termios;
-        // 禁用规范模式，禁用回显（可选）
+        
+        // 禁用规范模式和回显
         new_termios.c_lflag &= ~(ICANON | ECHO); 
-        // 设置最小读取字符数和超时
+        
+        // VMIN=1, VTIME=0 -> 只要有数据就返回 (比纯0更可靠)
         new_termios.c_cc[VMIN] = 1;
         new_termios.c_cc[VTIME] = 0;
+        
         tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
+        
+        // 【关键】注册退出钩子，确保万无一失
+        atexit(_restore_terminal_mode_safe);
     }
 }
 
-static void _restore_terminal_mode(void)
-{
-    if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
-        g_termios_saved = false;
-    }
-}
 // ==========================================================================
 // 信号处理
 // ==========================================================================
+// 【修改】原来的 _restore_terminal_mode 保留，用于正常流程，内部调用 safe 版本
+static void _restore_terminal_mode(void)
+{
+    _restore_terminal_mode_safe();
+}
 static void _sigint_handler(int sig)
 {
     (void)sig;
-    g_quit_flag = 1;
-    _restore_terminal_mode(); // <-- 新增：收到信号先恢复终端
-    LOG_W("Main: Received SIGINT, shutting down...");
+    g_quit_flag = 1; 
+    // 【新增】信号来了也尝试立即恢复终端，防止用户按 Ctrl+C 后终端还是瞎的
+    _restore_terminal_mode_safe();
 }
-
 // ==========================================================================
 // 【核心】Global FSM 回调 -> Event Bus 适配层
 // ==========================================================================
@@ -5482,15 +5577,26 @@ int main(int argc, char **argv)
     demo_app_run();
 
     // -------------------------------------------------------------------------
-    // 8. 优雅退出
+    // 8. 【唯一】清理流程
     // -------------------------------------------------------------------------
-    LOG_I("Main: Starting graceful shutdown...");
+    LOG_I("Main: Starting forced shutdown...");
 
+    // 【重要】在这里，也只在这里恢复终端！
+    _restore_terminal_mode();
+
+    // 2. 停止 Demo App
     demo_app_deinit();
-    capture_srv_destroy(g_cap_srv);
-    global_fsm_deinit(g_g_fsm);
-    data_bus_deinit(g_data_bus);
-    event_bus_deinit(g_evt_bus);
+
+    // 3. 销毁 Capture Service
+    if (g_cap_srv) {
+        capture_srv_destroy(g_cap_srv);
+        g_cap_srv = NULL;
+    }
+
+    // 4. 销毁 FSM 和总线
+    if (g_g_fsm) global_fsm_deinit(g_g_fsm);
+    if (g_data_bus) data_bus_deinit(g_data_bus);
+    if (g_evt_bus) event_bus_deinit(g_evt_bus);
 
     LOG_I("Main: ========================================");
     LOG_I("Main: Application exited successfully");
@@ -5503,7 +5609,9 @@ error_exit:
     LOG_E("Main: Application exited with error");
     LOG_E("Main: ========================================");
     
-    // 尝试清理
+    // 【重要】出错了也要恢复终端！
+    _restore_terminal_mode();
+    
     if (g_cap_srv) capture_srv_destroy(g_cap_srv);
     if (g_g_fsm) global_fsm_deinit(g_g_fsm);
     if (g_data_bus) data_bus_deinit(g_data_bus);

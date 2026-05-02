@@ -5,7 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <errno.h>
+#include <sys/select.h> // 【新增】用于 select
 // ==========================================================================
 // 内部状态
 // ==========================================================================
@@ -63,74 +64,77 @@ int demo_app_init(const demo_app_config_t *config)
 }
 
 #include <signal.h>
-extern volatile sig_atomic_t g_quit_flag; 
 int demo_app_run(void)
 {
     g_demo_ctx.running = true;
     LOG_I("Demo App: Running...");
-    static int heartbeat = 0; // <-- 增加静态变量
-    // 简单的主循环：处理用户输入 + 检查状态
-    while (g_demo_ctx.running && !g_quit_flag) { // <-- 【修改】增加 !g_quit_flag 检查
-        // 检查全局状态
-        global_state_t g_state = global_fsm_get_state(g_demo_ctx.g_fsm);
-        (void)g_state;
-        
-        // 【重要】每次 select 之前必须完全重置 fd_set 和 timeval！
-        fd_set fds;
-        struct timeval tv;
-        
-        FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 100000; // 100ms 超时
-        // 【增加】心跳打印，每100次循环打印一次 (约1秒)
-        if (heartbeat % 100 == 0) {
-             LOG_D("Demo App: Heartbeat %d", heartbeat); // 如果你想确认主循环在跑，打开这行
-        }
-        heartbeat++;
-        int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
-        if (ret > 0 && FD_ISSET(STDIN_FILENO, &fds)) {
-            char cmd = 0;
-            // 【修改】read 改成循环读，把缓冲区读空，避免残留的 \n 影响
-            while (read(STDIN_FILENO, &cmd, 1) > 0) {
-                if (cmd == '\n' || cmd == '\r') continue;
-                
-                LOG_I("Demo App: Received key '%c'", cmd); // <-- 增加日志
-                
-                switch (cmd) {
-                    case 's':
-                    case 'S':
-                        LOG_I("Demo App: User pressed START");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
-                        break;
-                    case 't':
-                    case 'T':
-                        LOG_I("Demo App: User pressed STOP");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
-                        break;
-                    case 'q':
-                    case 'Q':
-                        LOG_I("Demo App: User pressed QUIT");
-                        global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_SHUTDOWN);
-                        g_demo_ctx.running = false;
-                        break;
-                    case 'h':
-                    case 'H':
-                        _demo_app_print_help();
-                        break;
-                    default:
-                        LOG_W("Demo App: Unknown command '%c'", cmd);
-                        _demo_app_print_help();
-                        break;
-                }
-                break; // 只处理一个字符
-            }
-        } else if (ret < 0 && errno != EINTR) {
-            LOG_E("Demo App: select error (errno=%d)", errno);
-        }
+    
+    extern volatile sig_atomic_t g_quit_flag;
+    // 新增：超时计数器，排查主线程是否正常运行
+    int timeout_count = 0;
 
-        // 小睡一会，避免 CPU 100%
-        usleep(1000);
+    while (g_demo_ctx.running && !g_quit_flag) 
+    { 
+        fd_set read_fds;
+        struct timeval timeout;
+        
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 20000; // 20ms超时
+
+        int ret = select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &timeout);
+
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            LOG_E("Demo App: select error: %s", strerror(errno));
+            break;
+        } 
+        else if (ret > 0) {
+            // 有按键数据
+            if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+                char cmd = 0;
+                ssize_t nread = read(STDIN_FILENO, &cmd, 1);
+                
+                if (nread == 1) {
+                    // 重置超时计数
+                    timeout_count = 0;
+                    if (cmd == '\n' || cmd == '\r') {
+                        continue;
+                    } 
+                    LOG_I("Demo App: Received key '%c'", cmd);
+                    // 你的switch逻辑不变...
+                    switch (cmd) {
+                        case 's': case 'S':
+                            LOG_I("Demo App: User pressed START");
+                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
+                            break;
+                        case 't': case 'T':
+                            LOG_I("Demo App: User pressed STOP");
+                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
+                            break;
+                        case 'q': case 'Q':
+                            LOG_I("Demo App: User pressed QUIT");
+                            g_demo_ctx.running = false; 
+                            break;
+                        case 'h': case 'H':
+                            _demo_app_print_help();
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+        }
+        // 【新增】select超时：主线程正常运行，打印日志验证
+        else {
+            timeout_count++;
+            // 每100次超时（2秒）打印一次，避免刷屏
+            if (timeout_count % 100 == 0) {
+                LOG_D("Demo App: Main thread alive, select timeout %d times", timeout_count);
+            }
+        }
     }
 
     LOG_I("Demo App: Main loop exited");
