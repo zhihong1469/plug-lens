@@ -317,9 +317,6 @@ int _video_usb_dqbuf(video_usb_context_t *ctx, video_frame_t *frame)
     memset(&fds, 0, sizeof(fds));
     fds.fd = ctx->fd;
     fds.events = POLLIN;
-    // LOG_D("Video USB: Polling for data...");
-
-    // 【修改】增加日志，并且 poll 时间稍微缩短，增加循环
     ret = poll(&fds, 1, 1000); // 改成 1 秒超时，方便观察
 
     if (ret == -1) {

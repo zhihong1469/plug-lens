@@ -164,7 +164,7 @@ int data_bus_alloc(data_bus_handle_t handle,
     pthread_mutex_unlock(&ctx->lock);
 
     *out_item = (data_bus_item_handle_t)item;
-    LOG_D("Data Bus: Allocated item (type=%s, size=%u)", data_type_to_str(type), (uint32_t)size);
+    // LOG_D("Data Bus: Allocated item (type=%s, size=%u)", data_type_to_str(type), (uint32_t)size);
     return 0;
 }
 
@@ -210,7 +210,7 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
         // 如果引用计数为0，回收
         if (new_count == 0) {
             _data_bus_reset_item(old_item);
-            LOG_D("Data Bus: Old latest item recycled");
+            // LOG_D("Data Bus: Old latest item recycled");
         }
         
         ctx->latest_item_held = NULL;
@@ -233,10 +233,10 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
 
     pthread_mutex_unlock(&ctx->lock);
 
-    LOG_D("Data Bus: Published item (type=%s, producer=%s, ref_count now=%u)", 
-          data_type_to_str(ditem->info.type), 
-          ditem->info.producer,
-          ditem->info.ref_count);
+    // LOG_D("Data Bus: Published item (type=%s, producer=%s, ref_count now=%u)", 
+    //       data_type_to_str(ditem->info.type), 
+    //       ditem->info.producer,
+    //       ditem->info.ref_count);
     return 0;
 }
 // -------------------------------------------------------------------------
@@ -280,7 +280,7 @@ int data_bus_acquire_latest(data_bus_handle_t handle,
     pthread_rwlock_unlock(&ctx->rwlock);
 
     *out_item = (data_bus_item_handle_t)item;
-    LOG_D("Data Bus: Acquired latest item (ref_count=%u)", item->info.ref_count);
+    // LOG_D("Data Bus: Acquired latest item (ref_count=%u)", item->info.ref_count);
     return 0;
 }
 
@@ -329,9 +329,9 @@ int data_bus_release(data_bus_item_handle_t item)
     if (new_count == 0) {
         // 注意：这里我们不需要加总线的大锁，因为 item 已经没人用了
         _data_bus_reset_item(ditem);
-        LOG_D("Data Bus: Item released and recycled");
+        // LOG_D("Data Bus: Item released and recycled");
     } else {
-        LOG_D("Data Bus: Item released (ref_count=%u)", new_count);
+        // LOG_D("Data Bus: Item released (ref_count=%u)", new_count);
     }
 
     return 0;
