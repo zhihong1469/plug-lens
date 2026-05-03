@@ -1,69 +1,402 @@
 [root@100ask:/mnt]# ./vision_ai_app
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:68][v4l2_app_init] Initializing V4L2 App...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:128][v4l2_video_init] Initializing V4L2 video: dev=/dev/video1, 640x480, fmt=0, fps=30, bufs=4
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:160][v4l2_video_init] Device: Wed Camera, Bus: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:421][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:422][_v4l2_detect_capability] Camera Capability Detection Result:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:423][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:424][_v4l2_detect_capability] Device Name: Wed Camera
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:425][_v4l2_detect_capability] Bus Info: usb-ci_hdrc.1-1
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:427][_v4l2_detect_capability] --- Supported Formats ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:437][_v4l2_detect_capability]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:450][_v4l2_detect_capability] --- AI Control Support ---
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:455][_v4l2_detect_capability]   Manual Exposure: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:456][_v4l2_detect_capability]   Lock White Balance: Yes
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:457][_v4l2_detect_capability]   Lock Auto Gain: No
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:458][_v4l2_detect_capability] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:489][_v4l2_enum_formats] Enumerating supported formats:
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [0] Motion-JPEG (0x47504A4D)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:499][_v4l2_enum_formats]   [1] YUYV 4:2:2 (0x56595559)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:528][_v4l2_set_format] Set format success: actual 640x480, fmt=0x56595559
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:569][_v4l2_set_fps] Set FPS success: requested 30, actual 30
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:590][_v4l2_alloc_buffers] Allocated 4 buffers
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 0: offset=0x0, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 1: offset=0x96000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 2: offset=0x12C000, len=614400
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:623][_v4l2_mmap_buffers] Mmap buffer 3: offset=0x1C2000, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:654][_v4l2_lock_ai_params] Locking AI parameters (exposure/wb/gain)...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:664][_v4l2_lock_ai_params] Exposure locked to manual
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:676][_v4l2_lock_ai_params] White balance locked
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:198][v4l2_video_init] V4L2 video init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:100][v4l2_app_init] Frame pool size: 4
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:121][v4l2_app_init] V4L2 App init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:143][v4l2_app_start] Starting V4L2 capture...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:645][_v4l2_queue_all_buffers] Queued 4 buffers
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:238][v4l2_video_start] V4L2 stream started
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:168][v4l2_app_start] Capture thread started
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:43][main] System running...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:290][_capture_thread_func] Capture thread running
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=92928405
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:820][v4l2_video_dump_yuv] Dump YUV success: /tmp/frame_000000.yuv (614400 bytes)
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=1, len=614400, ts=92960872
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=1, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=2, len=614400, ts=92993183
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=2, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95276474
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95308910
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=0
-[D][/^C[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=3, len=614400, ts=95777232
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=3, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/main/main.c:53][main] Got frame for AI: 640x480
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:334][v4l2_video_put_frame] Put frame: idx=3
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:227][v4l2_app_stop] Stopping V4L2 capture...
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/BSP/v4l2_video/src/v4l2_video.c:299][v4l2_video_get_frame] Got frame: idx=0, len=614400, ts=95812691
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:337][_capture_thread_func] Capture thread got frame: idx=0, len=614400
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/app/modules/v4l2_app/src/v4l2_app.c:348][_capture_thread_func] Capture thread exiting
-^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C^C
+[I][log.c:0][log_init] Log system initialized (level=4)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:128][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:129][main] Main: Vision AI Application Starting...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:130][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:139][main] Main: Initializing Event Bus...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:111][event_bus_init] Event Bus: Initialized (Async Mode), max subscribers=64
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:148][main] Main: Initializing Data Bus...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:120][data_bus_init] Data Bus: Initialized, max_items=128, max_item_size=2048KB
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:161][main] Main: Initializing Global FSM...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:109][global_fsm_init] Global FSM: Initialized, max modules=16
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:176][main] Main: Initializing Capture Service...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:101][capture_srv_create] Capture Srv: Initializing Link layer...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:64][video_open] Video HAL: Detected camera: Wed Camera
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:65][video_open] Video HAL: Support YUYV: YES
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:66][video_open] Video HAL: Support MJPEG: YES
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:67][video_open] Video HAL: Support NV12: NO
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_usb.c:167][_video_usb_set_format] Video USB: Trying to set format: 640x480, FourCC: YUYV
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_usb.c:191][_video_usb_set_format] Video USB: Driver ACTUALLY set: 640x480, FourCC: YUYV, SizeImage: 614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:114][capture_srv_create] Capture Srv: Creating Module FSM...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:101][module_fsm_create] Module FSM: [capture_srv] created, initial state: IDLE
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: INIT (current state: IDLE)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: INIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:422][_global_fsm_change_state] Global FSM: Global state changed: INIT -> RUNNING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: INIT_OK (current state: INITIALIZING)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: INIT_OK
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:144][capture_srv_create] Capture Srv: Created successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:154][global_fsm_register_module] Global FSM: Module capture_srv registered (critical=1)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:422][_global_fsm_change_state] Global FSM: Global state changed: RUNNING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:219][main] Main: Initializing Demo App...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:147][event_bus_subscribe] Event Bus: Subscribed (id=1, event_type=0x2001)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:62][demo_app_init] Demo App: Initialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:211][_demo_app_print_help] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:212][_demo_app_print_help]   Demo App Control:
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:213][_demo_app_print_help]     [s] - Start system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:214][_demo_app_print_help]     [t] - Stop system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:215][_demo_app_print_help]     [q] - Quit application
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:216][_demo_app_print_help]     [h] - Show this help
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:217][_demo_app_print_help] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:234][main] Main: Entering main loop...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:71][demo_app_run] Demo App: Running...
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:150][demo_app_run] Demo App: Main thread alive, select timeout 100 times
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:122][demo_app_run] Demo App: Received key 'h'
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:211][_demo_app_print_help] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:212][_demo_app_print_help]   Demo App Control:
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:213][_demo_app_print_help]     [s] - Start system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:214][_demo_app_print_help]     [t] - Stop system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:215][_demo_app_print_help]     [q] - Quit application
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:216][_demo_app_print_help]     [h] - Show this help
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:217][_demo_app_print_help] ========================================
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:150][demo_app_run] Demo App: Main thread alive, select timeout 100 times
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:122][demo_app_run] Demo App: Received key 'q'
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:134][demo_app_run] Demo App: User pressed QUIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:155][demo_app_run] Demo App: Main loop exited
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:240][main] Main: Starting forced shutdown...
+
+[System] Terminal restored.
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:175][event_bus_unsubscribe] Event Bus: Unsubscribed (id=1)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:167][demo_app_deinit] Demo App: Deinitialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: DEINIT (current state: READY)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: DEINIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: READY -> DEINITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: READY -> DEINITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: READY -> DEINITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: DEINIT_OK (current state: DEINITIALIZING)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: DEINIT_OK
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: DEINITIALIZING -> DEINIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: DEINITIALIZING -> DEINIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: DEINITIALIZING -> DEINIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:199][module_fsm_destroy] Module FSM: Destroyed
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:210][capture_srv_destroy] Capture Srv: Destroyed
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:262][global_fsm_deinit] Global FSM: Deinitialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:376][data_bus_deinit] Data Bus: Deinitialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:323][event_bus_deinit] Event Bus: Deinitialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:259][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:260][main] Main: Application exited successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:261][main] Main: ========================================
+
+[root@100ask:/mnt]# ./vision_ai_app
+[I][log.c:0][log_init] Log system initialized (level=4)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:128][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:129][main] Main: Vision AI Application Starting...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:130][main] Main: ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:139][main] Main: Initializing Event Bus...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:111][event_bus_init] Event Bus: Initialized (Async Mode), max subscribers=64
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:148][main] Main: Initializing Data Bus...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:120][data_bus_init] Data Bus: Initialized, max_items=128, max_item_size=2048KB
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:161][main] Main: Initializing Global FSM...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:109][global_fsm_init] Global FSM: Initialized, max modules=16
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:176][main] Main: Initializing Capture Service...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:101][capture_srv_create] Capture Srv: Initializing Link layer...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:64][video_open] Video HAL: Detected camera: Wed Camera
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:65][video_open] Video HAL: Support YUYV: YES
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:66][video_open] Video HAL: Support MJPEG: YES
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_hal.c:67][video_open] Video HAL: Support NV12: NO
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_usb.c:167][_video_usb_set_format] Video USB: Trying to set format: 640x480, FourCC: YUYV
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/hal_plugins/video_usb/src/video_usb.c:191][_video_usb_set_format] Video USB: Driver ACTUALLY set: 640x480, FourCC: YUYV, SizeImage: 614400
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:114][capture_srv_create] Capture Srv: Creating Module FSM...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:101][module_fsm_create] Module FSM: [capture_srv] created, initial state: IDLE
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: INIT (current state: IDLE)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: INIT
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: IDLE -> INITIALIZING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:422][_global_fsm_change_state] Global FSM: Global state changed: INIT -> RUNNING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: INIT_OK (current state: INITIALIZING)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: INIT_OK
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: INITIALIZING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:144][capture_srv_create] Capture Srv: Created successfully
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:154][global_fsm_register_module] Global FSM: Module capture_srv registered (critical=1)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:422][_global_fsm_change_state] Global FSM: Global state changed: RUNNING -> READY
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:219][main] Main: Initializing Demo App...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:147][event_bus_subscribe] Event Bus: Subscribed (id=1, event_type=0x2001)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:62][demo_app_init] Demo App: Initialized
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:211][_demo_app_print_help] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:212][_demo_app_print_help]   Demo App Control:
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:213][_demo_app_print_help]     [s] - Start system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:214][_demo_app_print_help]     [t] - Stop system
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:215][_demo_app_print_help]     [q] - Quit application
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:216][_demo_app_print_help]     [h] - Show this help
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:217][_demo_app_print_help] ========================================
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/main.c:234][main] Main: Entering main loop...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:71][demo_app_run] Demo App: Running...
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:150][demo_app_run] Demo App: Main thread alive, select timeout 100 times
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:150][demo_app_run] Demo App: Main thread alive, select timeout 200 times
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:150][demo_app_run] Demo App: Main thread alive, select timeout 300 times
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:122][demo_app_run] Demo App: Received key 's'
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:126][demo_app_run] Demo App: User pressed START
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:170][global_fsm_post_event] Global FSM: Received global event SYSTEM_START
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:187][global_fsm_post_event] Global FSM: Sending START to module capture_srv
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: START (current state: READY)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: START
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: READY -> STARTING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: READY -> STARTING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:253][_capture_srv_fsm_state_relay] Capture Srv: Starting Link layer...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:149][frame_link_start] Frame Link: Starting HAL layer stream...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:156][frame_link_start] Frame Link: HAL stream started
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:161][frame_link_start] Frame Link: Creating capture thread...
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:170][frame_link_start] Frame Link: Capture thread created
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:117][module_fsm_post_event] Module FSM: [capture_srv] received event: START_OK (current state: STARTING)
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:226][_capture_srv_fsm_event_handler] Capture Srv: FSM Event Handler received: START_OK
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/module_fsm/src/module_fsm.c:150][module_fsm_post_event] Module FSM: [capture_srv] state changed: STARTING -> RUNNING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/service/capture_srv/src/capture_srv.c:249][_capture_srv_fsm_state_relay] Capture Srv: State changed: STARTING -> RUNNING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/fsm/global_fsm/src/global_fsm.c:303][global_fsm_on_module_state_change] Global FSM: Module capture_srv state changed: STARTING -> RUNNING
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:406][_frame_link_capture_thread] Frame Link: Capture thread entered loop
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:439][_frame_link_capture_thread] Frame Link: Captured 30 frames
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:439][_frame_link_capture_thread] Frame Link: Captured 60 frames
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_release] Data Bus: Item released (ref_count=1)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:213][data_bus_publish] Data Bus: Old latest item recycled
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:239][data_bus_publish] Data Bus: Published item (type=VIDEO_FRAME, producer=capture_srv, ref_count now=2)
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:334][data_bus_re
+[System] Terminal restored.
+[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/link/frame_link/src/frame_link.c:450][_frame_link_capture_thread] Frame Link: Capture thread exiting

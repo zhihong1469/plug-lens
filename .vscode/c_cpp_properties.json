@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "name": "ARM-Linux",
+            "includePath": [
+                // 1. 项目自身的头文件路径（其实 clangd 能从 JSON 自动识别，这里兜底）
+                "${workspaceFolder}/lib/inc",
+                "${workspaceFolder}/app/inc",
+                "/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/include"
+            ],
+            "defines": [
+                // 手动补充项目里的宏定义（兜底用，比如 "__ARM__" 之类的）
+                "__ARM__"
+            ],
+            "compilerPath": "/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gcc",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}
