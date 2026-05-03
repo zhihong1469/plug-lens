@@ -6,8 +6,9 @@
 # 3. 支持 src/ 下多子模块编译
 # ==========================================================================
 
-# 0. 定义交叉编译工具链
-CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
+# 0. 编译工具链：本地编译测试用，交叉编译时请取消注释上面的
+# CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
+CROSS_COMPILE ?=
 CC 			:= $(CROSS_COMPILE)gcc
 LD 			:= $(CROSS_COMPILE)ld
 AR 			:= $(CROSS_COMPILE)ar
