@@ -163,12 +163,16 @@ static void _cleanup_resources(void)
     LOG_I("Main: Starting resource cleanup...");
 
     _restore_terminal_mode();
+    // ============== 修复：先反初始化业务插件（停止所有线程） ==============
     demo_app_deinit();
 
+    // ============== 修复：再销毁采集服务（停止硬件采集） ==============
     if (g_app_ctx.cap_srv) {
         capture_srv_destroy(g_app_ctx.cap_srv);
         g_app_ctx.cap_srv = NULL;
     }
+    
+    // 最后销毁核心组件
     if (g_app_ctx.g_fsm) {
         global_fsm_deinit(g_app_ctx.g_fsm);
         g_app_ctx.g_fsm = NULL;

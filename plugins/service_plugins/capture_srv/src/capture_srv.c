@@ -285,57 +285,46 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
     if (ctx == NULL || frame == NULL) return;
 
-    // 检查状态
     module_state_t state = module_fsm_get_state(ctx->fsm_handle);
     if (state != MODULE_STATE_RUNNING) {
+        // ============== 修复：非运行状态必须归还帧 ==============
+        video_put_frame(ctx->link_handle, frame);
         return;
     }
 
-    // 1. 从 Data Bus 申请 Item
+    // 申请Data Bus项
     data_bus_item_handle_t item = NULL;
     size_t data_size = frame->length;
     
-    int ret = data_bus_alloc(ctx->data_bus, 
-                              DATA_TYPE_VIDEO_FRAME, 
-                              data_size, 
-                              "capture_srv", 
-                              &item);
+    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
     if (ret != 0 || item == NULL) {
-        // Data Bus 满了，这帧直接丢，必须归还 Link 帧！
-        // 【注意】这里我们没有 capture_srv_put_frame 的句柄，
-        // 但没关系，我们修改一下逻辑，不在这里还，
-        // 而是修改 Link 层的回调机制，让它在回调返回后自动还！
-        // 
-        // 为了最小化改动，我们采用一个更简单的方案：
-        // 【方案】修改 frame_link.c，在 _frame_link_enqueue 之后，
-        // 或者在回调返回之后，由 Link 层自己负责把 HAL 层的帧还回去！
+        // ============== 修复：申请失败必须归还帧 ==============
+        video_put_frame(ctx->link_handle, frame);
         return;
     }
 
-    // 2. 拷贝数据 (从 Link 的 mmap 区域 拷贝到 Data Bus 的池子里)
+    // 拷贝数据
     void *w_ptr = data_bus_get_writable_ptr(item);
     if (w_ptr == NULL) {
         data_bus_release(item);
+        video_put_frame(ctx->link_handle, frame);
         return;
     }
     memcpy(w_ptr, frame->data, data_size);
 
-    // 3. 发布到 Data Bus
+    // 发布数据
     ret = data_bus_publish(ctx->data_bus, item);
     if (ret != 0) {
         data_bus_release(item);
+        video_put_frame(ctx->link_handle, frame);
         return;
     }
     
-    // 4. 生产者释放引用
     data_bus_release(item); 
-
-    // 5. 发布事件到 Event Bus
     event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
 
-    // 【重要】此时，数据已经安全拷贝到 Data Bus 了。
-    // 但是！Link 层的那个 frame 还没还给摄像头！
-    // 我们需要修改 Link 层的逻辑。
+    // ============== 修复：核心！数据拷贝完成后立即归还帧 ==============
+    video_put_frame(ctx->link_handle, frame);
 }
 
 /**

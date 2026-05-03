@@ -258,6 +258,7 @@ int event_bus_dispatch(event_bus_handle_t handle)
     if (event == NULL) return -1;
 
     // 3. 【核心】执行回调 (逻辑复用旧代码，但在主线程执行)
+    // 在持有 rdlock 时调用用户回调。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
     pthread_rwlock_rdlock(&ctx->rwlock);
 
     #define MAX_TEMP_CALLBACKS 32

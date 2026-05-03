@@ -75,12 +75,12 @@ int demo_app_run(void)
     }
 
     int timeout_count = 0;
-    // 计算最大fd：键盘 + 总线 + 退出管道
+    // 计算最大fd
     int max_fd = STDIN_FILENO;
     if(bus_fd > max_fd) max_fd = bus_fd;
     if(g_demo_ctx.exit_pipe_read_fd > max_fd) max_fd = g_demo_ctx.exit_pipe_read_fd;
 
-    // 全局唯一退出标志
+    // 核心：全局运行标志（volatile，线程安全）
     while (g_app_ctx.app_running) 
     { 
         fd_set read_fds;
@@ -89,50 +89,45 @@ int demo_app_run(void)
         FD_ZERO(&read_fds);
         FD_SET(STDIN_FILENO, &read_fds);
         FD_SET(bus_fd, &read_fds);
-        FD_SET(g_demo_ctx.exit_pipe_read_fd, &read_fds); // 监听退出管道
+        FD_SET(g_demo_ctx.exit_pipe_read_fd, &read_fds);
         
         timeout.tv_sec = 0;
-        timeout.tv_usec = 20000; // 20ms 超时
+        timeout.tv_usec = 20000; // 20ms超时
 
         int ret = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
 
-        // ===================== 【正确修复】彻底解决EINTR卡死 =====================
+        // ============== 修复：信号中断直接退出 ==============
         if (ret < 0) {
-            // Ctrl+C 触发EINTR：直接检查全局退出标志，不continue！
             if (errno == EINTR) {
-                // 被信号打断，立即判断是否要退出
-                if (!g_app_ctx.app_running) {
-                    break;
-                }
-                continue;
+                LOG_I("Demo App: Select interrupted by signal, exiting...");
+                break;
             }
             LOG_E("Demo App: select error: %s", strerror(errno));
             break;
         }
-        // ========================================================================
-        else if (ret > 0) {
-            // 优先级1：检测全局退出管道（Ctrl+C 优先响应）
-            if (FD_ISSET(g_demo_ctx.exit_pipe_read_fd, &read_fds)) {
-                LOG_I("Demo App: Receive global exit signal, ready to quit");
-                app_trigger_soft_exit();
-                continue;
-            }
 
-            // 优先级2：Event Bus事件分发
+        // ============== 修复：最高优先级处理退出管道 ==============
+        if (ret > 0 && FD_ISSET(g_demo_ctx.exit_pipe_read_fd, &read_fds)) {
+            LOG_I("Demo App: Received global exit signal, exiting main loop");
+            // 直接终止循环，不再处理任何事件
+            break;
+        }
+
+        // 正常事件处理
+        if (ret > 0) {
+            // Event Bus事件分发
             if (FD_ISSET(bus_fd, &read_fds)) {
                 event_bus_dispatch(g_demo_ctx.evt_bus);
             }
 
-            // 优先级3：键盘命令解析
+            // 键盘命令解析
             if (FD_ISSET(STDIN_FILENO, &read_fds)) {
                 char cmd = 0;
                 ssize_t nread = read(STDIN_FILENO, &cmd, 1);
                 
                 if (nread == 1) {
                     timeout_count = 0;
-                    if (cmd == '\n' || cmd == '\r') {
-                        continue;
-                    } 
+                    if (cmd == '\n' || cmd == '\r') continue;
                     LOG_I("Demo App: Received key '%c'", cmd);
                     
                     switch (cmd) {
@@ -158,15 +153,15 @@ int demo_app_run(void)
             }
         }
         else {
-            // 超时保活日志
+            // 超时保活
             timeout_count++;
             if (timeout_count % 100 == 0) {
-                LOG_D("Demo App: Main thread alive, select timeout %d times", timeout_count);
+                LOG_D("Demo App: Main thread alive");
             }
         }
     }
 
-    LOG_I("Demo App: Main loop exited");
+    LOG_I("Demo App: Main loop exited gracefully");
     return 0;
 }
 
@@ -185,6 +180,7 @@ int demo_app_deinit(void)
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
+// 用户回调函数,调用时处于Event Bus rdlock 期间。该函数请尽可能简单。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
 static void _demo_app_on_event(const event_t *event, void *user_data)
 {
     if (event == NULL) return;
