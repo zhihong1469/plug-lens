@@ -19,12 +19,12 @@ typedef enum {
 
 // ==========================================================================
 // 【核心开关：一键切换调试/发布模式】
+// 【修改】为了解决日志刷屏，默认关闭 DEBUG 日志
 // ==========================================================================
-// 发布模式：开启后，所有日志全关闭，零开销（发布到设备上时打开）
 #define RELEASE_MODE    0
 
-// 调试日志开关：开启后DEBUG级日志生效，关闭后只保留ERROR/WARN/INFO
-#define DEBUG_ENABLE    1
+// 调试日志开关：0=关闭(默认)，1=开启
+#define DEBUG_ENABLE    0
 
 // 编译时日志级别控制
 #if RELEASE_MODE
@@ -33,12 +33,12 @@ typedef enum {
     #if DEBUG_ENABLE
         #define COMPILE_LOG_LEVEL LOG_LEVEL_DEBUG
     #else
-        #define COMPILE_LOG_LEVEL LOG_LEVEL_INFO
+        #define COMPILE_LOG_LEVEL LOG_LEVEL_INFO  // 【修改】默认只打到 INFO
     #endif
 #endif
 
 // ==========================================================================
-// 日志格式化前缀（自动带文件名、行号、函数名，方便定位）
+// 日志格式化前缀
 // ==========================================================================
 #define LOG_FMT_ERROR   "[E][%s:%d][%s] "
 #define LOG_FMT_WARN    "[W][%s:%d][%s] "
@@ -48,24 +48,19 @@ typedef enum {
 #define LOG_ARGS        __FILE__, __LINE__, __func__
 
 // ==========================================================================
-// 运行时日志级别（可选，用于动态调整）
+// 运行时日志级别
 // ==========================================================================
 void log_set_level(log_level_t level);
 log_level_t log_get_level(void);
 
-// ==========================================================================
-// 初始化与反初始化（兼容之前的代码调用，实际上你的宏设计可以不需要，但为了架构完整保留）
-// ==========================================================================
 int log_init(log_level_t level);
 void log_deinit(void);
 
 // ==========================================================================
-// 【核心日志宏实现】
-// 用 do{...}while(0) 包裹，避免if/else悬挂语法坑，兼容所有C编译器
-// 关闭模式下，宏直接展开为空语句，预编译期完全剔除，无任何运行开销
+// 【核心】日志宏实现
 // ==========================================================================
 
-// 错误日志：发布模式也默认保留，用于故障排查
+// 错误日志：永远保留
 #if COMPILE_LOG_LEVEL >= LOG_LEVEL_ERROR
 #define LOG_E(fmt, ...) do { \
     if (log_get_level() >= LOG_LEVEL_ERROR) { \
@@ -98,7 +93,7 @@ void log_deinit(void);
 #define LOG_I(fmt, ...) do { } while(0)
 #endif
 
-// 调试日志
+// 调试日志：默认关闭
 #if COMPILE_LOG_LEVEL >= LOG_LEVEL_DEBUG
 #define LOG_D(fmt, ...) do { \
     if (log_get_level() >= LOG_LEVEL_DEBUG) { \

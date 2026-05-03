@@ -1,4 +1,3 @@
-// src/fsm/global_fsm/src/global_fsm.c
 #include "global_fsm.h"
 #include "log.h"
 #include <stdlib.h>
@@ -147,10 +146,6 @@ int global_fsm_register_module(global_fsm_handle_t handle,
     info->registered = true;
     ctx->module_count++;
 
-    // 【关键】这里我们暂时不修改子模块的 state_cb
-    // 上层（main.c）应该在创建子模块时，把 Global FSM 的内部回调设为子模块的 state_cb
-    // 这样就形成了：子模块 state change -> Global FSM 内部回调 -> 全局决策
-
     LOG_I("Global FSM: Module %s registered (critical=%d)", module_name, is_critical);
     
     // 注册后立即更新一次全局状态
@@ -180,15 +175,31 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
                 LOG_W("Global FSM: Cannot start, current state %s", global_state_to_str(current));
                 return -1;
             }
-            // 给所有子模块投 START 事件
+            
+            // ===================== 【修复开始】=====================
+            // 1. 先在锁里拷贝模块句柄到临时数组
+            module_fsm_handle_t *temp_modules = NULL;
+            uint32_t temp_count = 0;
+            
             pthread_mutex_lock(&ctx->lock);
-            for (uint32_t i = 0; i < ctx->module_count; i++) {
-                if (ctx->modules[i].registered) {
-                    LOG_I("Global FSM: Sending START to module %s", ctx->modules[i].name);
-                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_START);
+            temp_count = ctx->module_count;
+            temp_modules = (module_fsm_handle_t*)malloc(temp_count * sizeof(module_fsm_handle_t));
+            if (temp_modules != NULL) {
+                for (uint32_t i = 0; i < temp_count; i++) {
+                    temp_modules[i] = ctx->modules[i].fsm;
                 }
             }
             pthread_mutex_unlock(&ctx->lock);
+
+            // 2. 在锁外面给所有子模块投 START 事件
+            if (temp_modules != NULL) {
+                for (uint32_t i = 0; i < temp_count; i++) {
+                    LOG_I("Global FSM: Sending START to module (lock-free)");
+                    module_fsm_post_event(temp_modules[i], MODULE_EVENT_START);
+                }
+                free(temp_modules);
+            }
+            // ===================== 【修复结束】=====================
             break;
         }
         
@@ -197,22 +208,37 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
                 LOG_W("Global FSM: Cannot stop, current state %s", global_state_to_str(current));
                 return -1;
             }
-            // 给所有子模块投 STOP 事件
+            
+            // ===================== 【修复开始】=====================
+            // 1. 先在锁里拷贝模块句柄到临时数组
+            module_fsm_handle_t *temp_modules_stop = NULL;
+            uint32_t temp_count_stop = 0;
+            
             pthread_mutex_lock(&ctx->lock);
-            for (uint32_t i = 0; i < ctx->module_count; i++) {
-                if (ctx->modules[i].registered) {
-                    LOG_I("Global FSM: Sending STOP to module %s", ctx->modules[i].name);
-                    module_fsm_post_event(ctx->modules[i].fsm, MODULE_EVENT_STOP);
+            temp_count_stop = ctx->module_count;
+            temp_modules_stop = (module_fsm_handle_t*)malloc(temp_count_stop * sizeof(module_fsm_handle_t));
+            if (temp_modules_stop != NULL) {
+                for (uint32_t i = 0; i < temp_count_stop; i++) {
+                    temp_modules_stop[i] = ctx->modules[i].fsm;
                 }
             }
             pthread_mutex_unlock(&ctx->lock);
+
+            // 2. 在锁外面给所有子模块投 STOP 事件
+            if (temp_modules_stop != NULL) {
+                for (uint32_t i = 0; i < temp_count_stop; i++) {
+                    LOG_I("Global FSM: Sending STOP to module (lock-free)");
+                    module_fsm_post_event(temp_modules_stop[i], MODULE_EVENT_STOP);
+                }
+                free(temp_modules_stop);
+            }
+            // ===================== 【修复结束】=====================
             break;
         }
         
         case GLOBAL_EVENT_SYSTEM_SHUTDOWN: {
-            // 【修改】直接改状态，不要在锁里投事件（容易死锁）
+            // 直接改状态，不要在锁里投事件（容易死锁）
             _global_fsm_change_state(ctx, GLOBAL_STATE_SHUTTING_DOWN);
-            // 【删除】这里的循环投 DEINIT 事件，改由 main 函数在外部串行销毁
             break;
         }
         

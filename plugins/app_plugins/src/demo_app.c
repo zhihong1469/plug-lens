@@ -6,7 +6,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/select.h> // 【新增】用于 select
+#include <sys/select.h>
+
 // ==========================================================================
 // 内部状态
 // ==========================================================================
@@ -46,7 +47,7 @@ int demo_app_init(const demo_app_config_t *config)
     g_demo_ctx.cap_srv = config->cap_srv;
     g_demo_ctx.running = false;
 
-    // 订阅事件
+    // 订阅事件 (注意：现在只是注册，回调不会立即在发布线程执行)
     event_subscriber_t sub = {0};
     sub.event_type = EVENT_TYPE_CAP_FRAME_READY; // 订阅帧就绪事件
     sub.callback = _demo_app_on_event;
@@ -70,8 +71,16 @@ int demo_app_run(void)
     LOG_I("Demo App: Running...");
     
     extern volatile sig_atomic_t g_quit_flag;
-    // 新增：超时计数器，排查主线程是否正常运行
+    
+    // 【新增】获取 Event Bus 的等待文件描述符
+    int bus_fd = event_bus_get_wait_fd(g_demo_ctx.evt_bus);
+    if (bus_fd < 0) {
+        LOG_E("Demo App: Failed to get bus wait fd");
+        return -1;
+    }
+
     int timeout_count = 0;
+    int max_fd = (STDIN_FILENO > bus_fd) ? STDIN_FILENO : bus_fd;
 
     while (g_demo_ctx.running && !g_quit_flag) 
     { 
@@ -80,11 +89,13 @@ int demo_app_run(void)
         
         FD_ZERO(&read_fds);
         FD_SET(STDIN_FILENO, &read_fds);
+        FD_SET(bus_fd, &read_fds); // 【新增】监听 Bus FD
         
         timeout.tv_sec = 0;
-        timeout.tv_usec = 20000; // 20ms超时
+        timeout.tv_usec = 20000; // 20ms 超时
 
-        int ret = select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &timeout);
+        // 【修改】nfds 必须是最大 fd + 1
+        int ret = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
 
         if (ret < 0) {
             if (errno == EINTR) continue;
@@ -92,19 +103,24 @@ int demo_app_run(void)
             break;
         } 
         else if (ret > 0) {
-            // 有按键数据
+            // 【优先级1】检查 Event Bus 是否有事件
+            if (FD_ISSET(bus_fd, &read_fds)) {
+                // 【核心】分发事件，这会执行 _demo_app_on_event
+                event_bus_dispatch(g_demo_ctx.evt_bus);
+            }
+
+            // 【优先级2】检查键盘是否有输入
             if (FD_ISSET(STDIN_FILENO, &read_fds)) {
                 char cmd = 0;
                 ssize_t nread = read(STDIN_FILENO, &cmd, 1);
                 
                 if (nread == 1) {
-                    // 重置超时计数
                     timeout_count = 0;
                     if (cmd == '\n' || cmd == '\r') {
                         continue;
                     } 
                     LOG_I("Demo App: Received key '%c'", cmd);
-                    // 你的switch逻辑不变...
+                    
                     switch (cmd) {
                         case 's': case 'S':
                             LOG_I("Demo App: User pressed START");
@@ -127,10 +143,9 @@ int demo_app_run(void)
                 }
             }
         }
-        // 【新增】select超时：主线程正常运行，打印日志验证
         else {
+            // 超时逻辑
             timeout_count++;
-            // 每100次超时（2秒）打印一次，避免刷屏
             if (timeout_count % 100 == 0) {
                 LOG_D("Demo App: Main thread alive, select timeout %d times", timeout_count);
             }
@@ -143,7 +158,6 @@ int demo_app_run(void)
 
 int demo_app_deinit(void)
 {
-    // 取消订阅
     if (g_demo_ctx.cap_sub_id >= 0) {
         event_bus_unsubscribe(g_demo_ctx.evt_bus, g_demo_ctx.cap_sub_id);
         g_demo_ctx.cap_sub_id = -1;
@@ -165,6 +179,7 @@ static void _demo_app_on_event(const event_t *event, void *user_data)
     switch (event->type) {
         case EVENT_TYPE_CAP_FRAME_READY:
             // 收到帧就绪事件，去 Data Bus 取帧
+            // 注意：这个函数现在运行在 Main Thread 了！
             _demo_app_process_frame();
             break;
         default:

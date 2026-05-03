@@ -166,6 +166,21 @@ int event_bus_publish_simple(event_bus_handle_t handle,
 int event_bus_deinit(event_bus_handle_t handle);
 
 /**
+ * @brief 【新增】获取用于 select/poll 的等待文件描述符
+ * @param handle 句柄
+ * @return 文件描述符 fd，<0 失败
+ */
+int event_bus_get_wait_fd(event_bus_handle_t handle);
+
+/**
+ * @brief 【新增】分发一次事件 (非阻塞)
+ * @param handle 句柄
+ * @return 0 成功分发了事件, <0 没有事件或失败
+ * @note 必须在主线程调用
+ */
+int event_bus_dispatch(event_bus_handle_t handle);
+
+/**
  * @brief 【辅助】事件类型转字符串
  * @param type 事件类型
  * @return 字符串
