@@ -12,146 +12,126 @@
 #include "capture_srv.h"
 #include "demo_app.h"
 #include "vision_ai_config.h" 
-#include <termios.h> 
+#include "main.h"
+
+// 全局唯一应用上下文（公共层实例化，无零散全局变量）
+app_context_t g_app_ctx = {0};
 
 // ==========================================================================
-// 全局句柄
+// 终端 公共基建实现
 // ==========================================================================
-event_bus_handle_t g_evt_bus = NULL;
-data_bus_handle_t g_data_bus = NULL;
-global_fsm_handle_t g_g_fsm = NULL;
-capture_srv_handle_t g_cap_srv = NULL;
-
-// ==========================================================================
-// 【核心】全局退出标志（必须是 volatile sig_atomic_t）
-// ==========================================================================
-volatile sig_atomic_t g_quit_flag = 0;
-
-// ==========================================================================
-// 终端模式管理
-// ==========================================================================
-static struct termios g_old_termios;
-static bool g_termios_saved = false;
-
-/**
- * @brief 【异步信号不安全】恢复终端模式
- * 
- * 注意：这个函数不能在信号处理函数里调用！
- * 只能在主线程的正常退出流程里调用。
- */
-static void _restore_terminal_mode(void)
-{
-    if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
-        g_termios_saved = false;
-        LOG_I("Main: Terminal restored");
-    }
-}
-
-/**
- * @brief 【atexit 专用】最后的终端恢复保障
- * 
- * 注意：这里用 fprintf 而不是 LOG_I，因为 log 可能已经 deinit 了。
- */
-static void _restore_terminal_mode_atexit(void)
-{
-    if (g_termios_saved) {
-        tcsetattr(STDIN_FILENO, TCSANOW, &g_old_termios);
-        g_termios_saved = false;
-        fprintf(stderr, "\n[System] Terminal restored (atexit fallback).\n");
-    }
-}
-
-/**
- * @brief 设置终端为非规范模式（无回显、立即响应）
- */
-static void _set_noncanonical_mode(void)
+void app_set_terminal_noncanonical(void)
 {
     struct termios new_termios;
-    if (tcgetattr(STDIN_FILENO, &g_old_termios) == 0) {
-        g_termios_saved = true;
-        new_termios = g_old_termios;
+    if (tcgetattr(STDIN_FILENO, &g_app_ctx.old_termios) == 0) {
+        g_app_ctx.termios_saved = true;
+        new_termios = g_app_ctx.old_termios;
         
-        // 禁用规范模式和回显
         new_termios.c_lflag &= ~(ICANON | ECHO); 
-        
-        // VMIN=1, VTIME=0 -> 只要有数据就返回
         new_termios.c_cc[VMIN] = 1;
         new_termios.c_cc[VTIME] = 0;
         
         tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
-        
-        // 注册 atexit 作为最后的保障
-        atexit(_restore_terminal_mode_atexit);
-        
+        atexit(app_restore_terminal_safe);
         LOG_I("Main: Terminal set to non-canonical mode");
     } else {
         LOG_W("Main: Failed to set terminal mode (tcgetattr error: %s)", strerror(errno));
     }
 }
 
+void app_restore_terminal_safe(void)
+{
+    if (g_app_ctx.termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_app_ctx.old_termios);
+        g_app_ctx.termios_saved = false;
+        fprintf(stderr, "\n[System] Terminal restored (atexit fallback).\n");
+    }
+}
+
+static void _restore_terminal_mode(void)
+{
+    if (g_app_ctx.termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_app_ctx.old_termios);
+        g_app_ctx.termios_saved = false;
+        LOG_I("Main: Terminal restored");
+    }
+}
+
 // ==========================================================================
-// 【核心】信号处理函数（必须是异步信号安全的！）
-// 
-// 规则：
-// ❌ 绝对禁止：拿锁、malloc/free、printf、LOG_I、tcsetattr 等
-// ✅ 只允许：给 volatile sig_atomic_t 变量赋值
+// 退出Pipe 公共基建实现
+// ==========================================================================
+int app_exit_pipe_init(void)
+{
+    if(pipe(g_app_ctx.exit_pipe) < 0) {
+        LOG_E("Main: Create exit pipe failed, errno=%d", errno);
+        return -1;
+    }
+    LOG_I("Main: Global exit pipe init success");
+    return 0;
+}
+
+void app_trigger_soft_exit(void)
+{
+    // 异步信号安全：仅向管道写入1字节，触发所有监听线程退出
+    char sig = 'E';
+    (void)write(g_app_ctx.exit_pipe[1], &sig, 1);
+    g_app_ctx.app_running = false;
+}
+
+void app_exit_pipe_deinit(void)
+{
+    if(g_app_ctx.exit_pipe[0] > 0) close(g_app_ctx.exit_pipe[0]);
+    if(g_app_ctx.exit_pipe[1] > 0) close(g_app_ctx.exit_pipe[1]);
+    memset(g_app_ctx.exit_pipe, 0, sizeof(g_app_ctx.exit_pipe));
+    LOG_I("Main: Global exit pipe deinit success");
+}
+
+// ==========================================================================
+// 信号处理（纯异步信号安全，仅触发管道写入）
 // ==========================================================================
 static void _signal_handler(int sig)
 {
-    (void)sig; // 避免未使用参数警告
-    
-    // 【只做这一件事！】设置退出标志
-    g_quit_flag = 1;
+    (void)sig;
+    // 唯一操作：触发全局软退出，无任何不安全调用
+    app_trigger_soft_exit();
 }
 
-/**
- * @brief 初始化信号处理（使用 sigaction，比 signal() 更可靠）
- */
 static void _init_signal_handling(void)
 {
     struct sigaction sa;
-
-    // 1. 初始化 sigaction 结构体
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = _signal_handler;
-    sa.sa_flags = 0; // 不要用 SA_RESTART，否则 select 会被自动重启
-
-    // 2. 屏蔽所有其他信号（防止信号处理函数被中断）
+    sa.sa_flags = 0;
     sigfillset(&sa.sa_mask);
 
-    // 3. 注册 SIGINT (Ctrl+C)
     if (sigaction(SIGINT, &sa, NULL) != 0) {
-        LOG_E("Main: Failed to register SIGINT handler (error: %s)", strerror(errno));
+        LOG_E("Main: Failed to register SIGINT handler");
     } else {
-        LOG_I("Main: SIGINT handler registered (Ctrl+C will set quit flag)");
+        LOG_I("Main: SIGINT(Ctrl+C) handler registered");
     }
 
-    // 4. 注册 SIGTERM (kill 命令)
     if (sigaction(SIGTERM, &sa, NULL) != 0) {
-        LOG_E("Main: Failed to register SIGTERM handler (error: %s)", strerror(errno));
+        LOG_E("Main: Failed to register SIGTERM handler");
     } else {
-        LOG_I("Main: SIGTERM handler registered");
+        LOG_I("Main: SIGTERM(kill) handler registered");
     }
 }
 
 // ==========================================================================
-// Global FSM 回调 -> Event Bus 适配层
+// Global FSM 回调适配层
 // ==========================================================================
 static void _main_on_g_fsm_state_change(global_state_t old_state,
                                           global_state_t new_state,
                                           void *user_data)
 {
     (void)user_data;
-    
-    // 全局状态变化，发布到 Event Bus
-    if (g_evt_bus != NULL) {
+    if (g_app_ctx.evt_bus != NULL) {
         event_t evt = {0};
         evt.type = EVENT_TYPE_SYS_STATE_CHANGED;
         evt.source = "global_fsm";
         evt.data = &new_state;
         evt.data_len = sizeof(new_state);
-        event_bus_publish(g_evt_bus, &evt);
+        event_bus_publish(g_app_ctx.evt_bus, &evt);
     }
 }
 
@@ -160,9 +140,7 @@ static void _main_on_g_fsm_event(global_event_t event,
                                   void *user_data)
 {
     (void)user_data;
-    
-    // 全局事件，转换后发布到 Event Bus
-    if (g_evt_bus == NULL) return;
+    if (g_app_ctx.evt_bus == NULL) return;
 
     event_type_t evt_type = EVENT_TYPE_INVALID;
     switch (event) {
@@ -173,72 +151,66 @@ static void _main_on_g_fsm_event(global_event_t event,
     }
     
     if (evt_type != EVENT_TYPE_INVALID) {
-        event_bus_publish_simple(g_evt_bus, evt_type, module_name);
+        event_bus_publish_simple(g_app_ctx.evt_bus, evt_type, module_name);
     }
 }
 
 // ==========================================================================
-// 【辅助】统一清理资源
+// 统一资源清理（基建层收口，顺序可控）
 // ==========================================================================
 static void _cleanup_resources(void)
 {
     LOG_I("Main: Starting resource cleanup...");
 
-    // 1. 恢复终端（必须在最前面，防止 log 关闭后无法恢复）
     _restore_terminal_mode();
-
-    // 2. 停止 Demo App
     demo_app_deinit();
 
-    // 3. 销毁 Capture Service
-    if (g_cap_srv) {
-        capture_srv_destroy(g_cap_srv);
-        g_cap_srv = NULL;
+    if (g_app_ctx.cap_srv) {
+        capture_srv_destroy(g_app_ctx.cap_srv);
+        g_app_ctx.cap_srv = NULL;
+    }
+    if (g_app_ctx.g_fsm) {
+        global_fsm_deinit(g_app_ctx.g_fsm);
+        g_app_ctx.g_fsm = NULL;
+    }
+    if (g_app_ctx.data_bus) {
+        data_bus_deinit(g_app_ctx.data_bus);
+        g_app_ctx.data_bus = NULL;
+    }
+    if (g_app_ctx.evt_bus) {
+        event_bus_deinit(g_app_ctx.evt_bus);
+        g_app_ctx.evt_bus = NULL;
     }
 
-    // 4. 销毁 FSM 和总线
-    if (g_g_fsm) {
-        global_fsm_deinit(g_g_fsm);
-        g_g_fsm = NULL;
-    }
-    if (g_data_bus) {
-        data_bus_deinit(g_data_bus);
-        g_data_bus = NULL;
-    }
-    if (g_evt_bus) {
-        event_bus_deinit(g_evt_bus);
-        g_evt_bus = NULL;
-    }
-
+    app_exit_pipe_deinit();
     LOG_I("Main: Resource cleanup complete");
 }
 
 // ==========================================================================
-// 主函数
+// 主函数：纯架构流水线，零业务逻辑
 // ==========================================================================
 int main(int argc, char **argv)
 {
     int ret = 0;
+    memset(&g_app_ctx, 0, sizeof(g_app_ctx));
+    g_app_ctx.app_running = true;
 
-    // 1. 初始化日志
+    // 1. 日志初始化
     log_init(LOG_LEVEL_DEBUG);
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Application Starting...");
     LOG_I("Main: ========================================");
 
-    // 2. 初始化信号处理（必须在最前面！）
+    // 2. 基建层初始化（信号 -> 管道 -> 终端 顺序固定）
     _init_signal_handling();
+    if(app_exit_pipe_init() < 0) goto error_exit;
+    app_set_terminal_noncanonical();
 
-    // 3. 设置终端为非规范模式
-    _set_noncanonical_mode();
-
-    // -------------------------------------------------------------------------
-    // 4. 初始化双总线
-    // -------------------------------------------------------------------------
+    // 3. 初始化双总线
     LOG_I("Main: Initializing Event Bus...");
     event_bus_config_t evt_bus_cfg = {0};
     evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
-    ret = event_bus_init(&evt_bus_cfg, &g_evt_bus);
+    ret = event_bus_init(&evt_bus_cfg, &g_app_ctx.evt_bus);
     if (ret != 0) {
         LOG_E("Main: Failed to init Event Bus");
         goto error_exit;
@@ -247,37 +219,29 @@ int main(int argc, char **argv)
     LOG_I("Main: Initializing Data Bus...");
     data_bus_config_t data_bus_cfg = {0};
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
-    data_bus_cfg.max_item_size = 2 * 1024 * 1024; // 2 MB
-    ret = data_bus_init(&data_bus_cfg, &g_data_bus);
+    data_bus_cfg.max_item_size = 2 * 1024 * 1024;
+    ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
         goto error_exit;
     }
 
-    // -------------------------------------------------------------------------
-    // 5. 初始化 Global FSM
-    // -------------------------------------------------------------------------
+    // 4. 初始化全局状态机
     LOG_I("Main: Initializing Global FSM...");
     global_fsm_config_t g_fsm_cfg = {0};
     g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
     g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
     g_fsm_cfg.event_cb = _main_on_g_fsm_event;
     g_fsm_cfg.user_data = NULL;
-    ret = global_fsm_init(&g_fsm_cfg, &g_g_fsm);
+    ret = global_fsm_init(&g_fsm_cfg, &g_app_ctx.g_fsm);
     if (ret != 0) {
         LOG_E("Main: Failed to init Global FSM");
         goto error_exit;
     }
 
-    // -------------------------------------------------------------------------
-    // 6. 初始化业务服务（Capture Service）
-    // -------------------------------------------------------------------------
+    // 5. 初始化采集服务
     LOG_I("Main: Initializing Capture Service...");
-    
-    // 构建 Capture Service 配置
     capture_srv_config_t cap_srv_cfg = {0};
-    
-    // 填充 Link层 配置
     cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
     cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
     cap_srv_cfg.link_cfg.hal_config.height = CONFIG_CAPTURE_HEIGHT;
@@ -290,66 +254,52 @@ int main(int argc, char **argv)
     cap_srv_cfg.link_cfg.frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE;
     cap_srv_cfg.link_cfg.queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE;
     
-    // 注入双总线句柄
-    cap_srv_cfg.evt_bus = g_evt_bus;
-    cap_srv_cfg.data_bus = g_data_bus;
-    
-    // 注入 Global FSM 回调
+    cap_srv_cfg.evt_bus = g_app_ctx.evt_bus;
+    cap_srv_cfg.data_bus = g_app_ctx.data_bus;
     cap_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
-    cap_srv_cfg.callbacks.user_data = g_g_fsm;
+    cap_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
     cap_srv_cfg.auto_start = false;
 
-    // 创建 Capture Service
-    ret = capture_srv_create(&cap_srv_cfg, &g_cap_srv);
+    ret = capture_srv_create(&cap_srv_cfg, &g_app_ctx.cap_srv);
     if (ret != 0) {
         LOG_E("Main: Failed to create Capture Service");
         goto error_exit;
     }
 
-    // 注册到 Global FSM
-    module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_cap_srv);
-    global_fsm_register_module(g_g_fsm, "capture_srv", cap_fsm, true);
+    module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_app_ctx.cap_srv);
+    global_fsm_register_module(g_app_ctx.g_fsm, "capture_srv", cap_fsm, true);
 
-    // -------------------------------------------------------------------------
-    // 7. 初始化 Demo App
-    // -------------------------------------------------------------------------
+    // 6. 初始化业务插件（注入顶层上下文+管道读端）
     LOG_I("Main: Initializing Demo App...");
     demo_app_config_t app_cfg = {0};
-    app_cfg.evt_bus = g_evt_bus;
-    app_cfg.data_bus = g_data_bus;
-    app_cfg.g_fsm = g_g_fsm;
-    app_cfg.cap_srv = g_cap_srv;
+    app_cfg.evt_bus = g_app_ctx.evt_bus;
+    app_cfg.data_bus = g_app_ctx.data_bus;
+    app_cfg.g_fsm = g_app_ctx.g_fsm;
+    app_cfg.cap_srv = g_app_ctx.cap_srv;
+    app_cfg.exit_pipe_read_fd = g_app_ctx.exit_pipe[0]; // 注入管道读端
+
     ret = demo_app_init(&app_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Demo App");
         goto error_exit;
     }
 
-    // -------------------------------------------------------------------------
-    // 8. 主循环
-    // -------------------------------------------------------------------------
+    // 7. 进入业务主循环
     LOG_I("Main: Entering main loop...");
     demo_app_run();
 
-    // -------------------------------------------------------------------------
-    // 9. 正常退出流程
-    // -------------------------------------------------------------------------
+    // 8. 正常退出流程
     LOG_I("Main: ========================================");
     LOG_I("Main: Application exited normally");
     LOG_I("Main: ========================================");
-    
     _cleanup_resources();
     log_deinit();
     return 0;
 
-    // -------------------------------------------------------------------------
-    // 错误退出流程
-    // -------------------------------------------------------------------------
 error_exit:
     LOG_E("Main: ========================================");
     LOG_E("Main: Application exited with error");
     LOG_E("Main: ========================================");
-    
     _cleanup_resources();
     log_deinit();
     return -1;

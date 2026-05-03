@@ -213,3 +213,11 @@ video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath)
     }
     return VIDEO_OK;
 }
+
+// 新增：HAL层转发获取摄像头fd
+int video_get_wait_fd(video_handle_t handle)
+{
+    if (handle == NULL) return -1;
+    video_usb_context_t *ctx = (video_usb_context_t*)handle;
+    return _video_usb_get_fd(ctx);
+}

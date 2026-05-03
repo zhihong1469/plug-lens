@@ -39,10 +39,12 @@ typedef void (*frame_link_frame_ready_cb)(const video_frame_t *frame, void *user
 /**
  * @brief 初始化视频帧链路
  * @param config 链路配置
+ * @param exit_pipe_read_fd, 注入全局退出管道
  * @param out_handle 输出：不透明句柄
  * @return 错误码（复用HAL层错误码）
  */
 video_err_t frame_link_init(const frame_link_config_t *config,
+                            int exit_pipe_read_fd,
                             frame_link_handle_t *out_handle);
 
 /**
