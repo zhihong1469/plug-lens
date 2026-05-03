@@ -629,6 +629,7 @@ int demo_app_deinit(void)
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
+// 用户回调函数,调用时处于Event Bus rdlock 期间。该函数请尽可能简单。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
 static void _demo_app_on_event(const event_t *event, void *user_data)
 {
     if (event == NULL) return;
@@ -673,7 +674,6 @@ static void _demo_app_print_help(void)
 
 
 --- [3/8] 帧链路 - FrameLink（子线程poll退出） ---
-// src/link/frame_link/inc/frame_link.h
 #ifndef FRAME_LINK_H
 #define FRAME_LINK_H
 
@@ -778,6 +778,8 @@ video_err_t frame_link_deinit(frame_link_handle_t handle);
 #endif /* FRAME_LINK_H */
 #include "frame_link.h"
 #include "video_hal.h"
+#include "pool.h"       // 【新增】引入通用对象池
+#include "queue.h"      // 【新增】引入通用队列
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -785,7 +787,7 @@ video_err_t frame_link_deinit(frame_link_handle_t handle);
 #include <sched.h>
 #include <sys/poll.h>
 #include "log.h"
-#include "main.h"   // 【新增】引入全局应用上下文
+#include "main.h"
 
 // ==========================================================================
 // 内部宏定义
@@ -794,16 +796,14 @@ video_err_t frame_link_deinit(frame_link_handle_t handle);
 #define FRAME_LINK_MAX_QUEUE_SIZE 16
 
 // ==========================================================================
-// 内部帧节点结构体
+// 内部帧节点结构体（简化，不再需要 in_use/ref_count，由 Pool 管理）
 // ==========================================================================
 typedef struct {
     video_frame_t frame;       // 帧数据
-    bool in_use;               // 是否被占用
-    uint32_t ref_count;        // 引用计数（预留）
 } frame_node_t;
 
 // ==========================================================================
-// 【核心】内部状态结构体（新增退出管道fd）
+// 【核心】内部状态结构体（重构版）
 // ==========================================================================
 typedef struct {
     // HAL层相关
@@ -812,17 +812,16 @@ typedef struct {
     frame_link_config_t config;
     int cam_fd;                // 摄像头设备fd（用于poll）
 
-    // 帧池管理
-    frame_node_t *frame_pool;
-    uint32_t pool_size;
-    pthread_mutex_t pool_lock;
+    // 【重构】通用对象池（替代手写帧池）
+    Pool_t frame_pool;
+    void *pool_memory_buffer;       // 池内存缓冲区
+    void **pool_free_list_buffer;   // 池空闲列表缓冲区
 
-    // 队列管理
-    frame_node_t **queue;
-    uint32_t queue_size;
-    uint32_t queue_head;
-    uint32_t queue_tail;
-    uint32_t queue_count;
+    // 【重构】通用队列（替代手写队列）
+    Queue_t frame_queue;
+    void **queue_buffer;            // 队列缓冲区
+
+    // 队列同步（保留，因为 Queue 组件不做等待）
     pthread_mutex_t queue_lock;
     pthread_cond_t queue_not_empty;
     pthread_cond_t queue_not_full;
@@ -832,10 +831,10 @@ typedef struct {
     bool running;
     bool streaming;
 
-    // 【新增】全局优雅退出管道读端
+    // 全局优雅退出管道读端
     int exit_pipe_read_fd;
 
-    // 【预留】Service层回调
+    // Service层回调
     frame_link_frame_ready_cb frame_ready_cb;
     void *cb_user_data;
 } frame_link_context_t;
@@ -850,10 +849,11 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 static void* _frame_link_capture_thread(void *arg);
 
 // ==========================================================================
-// 对外API：初始化时注入退出管道fd
+// 对外API实现
 // ==========================================================================
+
 video_err_t frame_link_init(const frame_link_config_t *config,
-                            int exit_pipe_read_fd,  // 【新增】注入全局退出管道
+                            int exit_pipe_read_fd,
                             frame_link_handle_t *out_handle)
 {
     if (config == NULL || out_handle == NULL || exit_pipe_read_fd < 0) {
@@ -877,36 +877,61 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     if (ctx->config.queue_size == 0) ctx->config.queue_size = 4;
     if (ctx->config.queue_size > FRAME_LINK_MAX_QUEUE_SIZE) ctx->config.queue_size = FRAME_LINK_MAX_QUEUE_SIZE;
 
-    // 初始化锁
-    pthread_mutex_init(&ctx->pool_lock, NULL);
+    // -------------------------------------------------------------------------
+    // 【重构】1. 分配并初始化通用对象池
+    // -------------------------------------------------------------------------
+    size_t pool_mem_size = sizeof(frame_node_t) * ctx->config.frame_pool_size;
+    size_t pool_flist_size = sizeof(void*) * ctx->config.frame_pool_size;
+    
+    ctx->pool_memory_buffer = malloc(pool_mem_size);
+    ctx->pool_free_list_buffer = malloc(pool_flist_size);
+    
+    if (ctx->pool_memory_buffer == NULL || ctx->pool_free_list_buffer == NULL) {
+        if (ctx->pool_memory_buffer) free(ctx->pool_memory_buffer);
+        if (ctx->pool_free_list_buffer) free(ctx->pool_free_list_buffer);
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    
+    Pool_Init(&ctx->frame_pool, 
+              sizeof(frame_node_t), 
+              ctx->config.frame_pool_size,
+              ctx->pool_memory_buffer,
+              ctx->pool_free_list_buffer);
+
+    // -------------------------------------------------------------------------
+    // 【重构】2. 分配并初始化通用队列
+    // -------------------------------------------------------------------------
+    size_t queue_buf_size = sizeof(void*) * (ctx->config.queue_size + 1); // +1 是环形队列经典设计
+    ctx->queue_buffer = malloc(queue_buf_size);
+    
+    if (ctx->queue_buffer == NULL) {
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    
+    Queue_Init(&ctx->frame_queue, ctx->queue_buffer, ctx->config.queue_size + 1);
+
+    // -------------------------------------------------------------------------
+    // 3. 初始化队列同步锁和条件变量
+    // -------------------------------------------------------------------------
     pthread_mutex_init(&ctx->queue_lock, NULL);
     pthread_cond_init(&ctx->queue_not_empty, NULL);
     pthread_cond_init(&ctx->queue_not_full, NULL);
 
-    // 分配帧池
-    ctx->pool_size = ctx->config.frame_pool_size;
-    ctx->frame_pool = (frame_node_t*)malloc(ctx->pool_size * sizeof(frame_node_t));
-    if (ctx->frame_pool == NULL) {
-        free(ctx);
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-    memset(ctx->frame_pool, 0, ctx->pool_size * sizeof(frame_node_t));
-
-    // 分配队列
-    ctx->queue_size = ctx->config.queue_size;
-    ctx->queue = (frame_node_t**)malloc(ctx->queue_size * sizeof(frame_node_t*));
-    if (ctx->queue == NULL) {
-        free(ctx->frame_pool);
-        free(ctx);
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-    memset(ctx->queue, 0, ctx->queue_size * sizeof(frame_node_t*));
-
-    // 初始化HAL层
+    // -------------------------------------------------------------------------
+    // 4. 初始化HAL层
+    // -------------------------------------------------------------------------
     video_err_t err = video_open(&ctx->config.hal_config, &ctx->hal_cap, &ctx->hal_handle);
     if (err != VIDEO_OK) {
-        free(ctx->queue);
-        free(ctx->frame_pool);
+        free(ctx->queue_buffer);
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        pthread_mutex_destroy(&ctx->queue_lock);
+        pthread_cond_destroy(&ctx->queue_not_empty);
+        pthread_cond_destroy(&ctx->queue_not_full);
         free(ctx);
         return err;
     }
@@ -915,8 +940,12 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     ctx->cam_fd = video_get_wait_fd(ctx->hal_handle);
     if (ctx->cam_fd < 0) {
         video_close(ctx->hal_handle);
-        free(ctx->queue);
-        free(ctx->frame_pool);
+        free(ctx->queue_buffer);
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        pthread_mutex_destroy(&ctx->queue_lock);
+        pthread_cond_destroy(&ctx->queue_not_empty);
+        pthread_cond_destroy(&ctx->queue_not_full);
         free(ctx);
         return VIDEO_ERR_INVALID_PARAM;
     }
@@ -968,7 +997,6 @@ video_err_t frame_link_start(frame_link_handle_t handle)
     return VIDEO_OK;
 }
 
-// 【修复】线程停止函数：配合全局退出，确保线程退出
 video_err_t frame_link_stop(frame_link_handle_t handle)
 {
     if (handle == NULL) {
@@ -982,9 +1010,12 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
 
     // 停止采集线程
     ctx->running = false;
-    // 唤醒所有条件变量 + 依赖全局管道退出，双重保险
+    // 唤醒所有条件变量
+    pthread_mutex_lock(&ctx->queue_lock);
     pthread_cond_broadcast(&ctx->queue_not_empty);
     pthread_cond_broadcast(&ctx->queue_not_full);
+    pthread_mutex_unlock(&ctx->queue_lock);
+    
     // 等待线程安全退出
     pthread_join(ctx->capture_thread, NULL);
 
@@ -996,11 +1027,11 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
 
     // 清空队列
     pthread_mutex_lock(&ctx->queue_lock);
-    while (ctx->queue_count > 0) {
-        frame_node_t *node = ctx->queue[ctx->queue_head];
-        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-        ctx->queue_count--;
-        _frame_link_free_frame(ctx, node);
+    void *item = NULL;
+    while (Queue_Get(&ctx->frame_queue, &item) == QUEUE_OK) {
+        if (item != NULL) {
+            _frame_link_free_frame(ctx, (frame_node_t*)item);
+        }
     }
     pthread_mutex_unlock(&ctx->queue_lock);
 
@@ -1024,6 +1055,10 @@ video_err_t frame_link_get_frame(frame_link_handle_t handle,
 
     // 拷贝帧数据
     memcpy(frame, &node->frame, sizeof(video_frame_t));
+    
+    // 【重要】释放节点（因为我们已经拷贝了数据）
+    _frame_link_free_frame(ctx, node);
+    
     return VIDEO_OK;
 }
 
@@ -1035,26 +1070,9 @@ video_err_t frame_link_put_frame(frame_link_handle_t handle,
     }
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    // 通过index找到对应的帧节点
-    pthread_mutex_lock(&ctx->pool_lock);
-    frame_node_t *node = NULL;
-    for (uint32_t i = 0; i < ctx->pool_size; i++) {
-        if (ctx->frame_pool[i].frame.index == frame->index) {
-            node = &ctx->frame_pool[i];
-            break;
-        }
-    }
-    pthread_mutex_unlock(&ctx->pool_lock);
-
-    if (node == NULL) {
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-
     // 归还HAL层缓冲区
     video_put_frame(ctx->hal_handle, frame);
-
-    // 释放帧节点
-    _frame_link_free_frame(ctx, node);
+    
     return VIDEO_OK;
 }
 
@@ -1089,64 +1107,62 @@ video_err_t frame_link_deinit(frame_link_handle_t handle)
     video_close(ctx->hal_handle);
 
     // 释放资源
-    pthread_mutex_destroy(&ctx->pool_lock);
     pthread_mutex_destroy(&ctx->queue_lock);
     pthread_cond_destroy(&ctx->queue_not_empty);
     pthread_cond_destroy(&ctx->queue_not_full);
 
-    free(ctx->queue);
-    free(ctx->frame_pool);
+    // 【重构】释放通用组件缓冲区
+    if (ctx->queue_buffer) free(ctx->queue_buffer);
+    if (ctx->pool_memory_buffer) free(ctx->pool_memory_buffer);
+    if (ctx->pool_free_list_buffer) free(ctx->pool_free_list_buffer);
+
     free(ctx);
 
     return VIDEO_OK;
 }
 
 // ==========================================================================
-// 内部辅助函数实现（无修改）
+// 内部辅助函数实现（重构版）
 // ==========================================================================
+
 static frame_node_t* _frame_link_alloc_frame(frame_link_context_t *ctx)
 {
-    pthread_mutex_lock(&ctx->pool_lock);
     frame_node_t *node = NULL;
-    for (uint32_t i = 0; i < ctx->pool_size; i++) {
-        if (!ctx->frame_pool[i].in_use) {
-            node = &ctx->frame_pool[i];
-            node->in_use = true;
-            node->ref_count = 1;
-            break;
-        }
+    PoolErr_t err = Pool_Acquire(&ctx->frame_pool, (void**)&node);
+    
+    if (err != POOL_OK || node == NULL) {
+        return NULL;
     }
-    pthread_mutex_unlock(&ctx->pool_lock);
+    
+    // 清零节点
+    memset(node, 0, sizeof(frame_node_t));
     return node;
 }
 
 static void _frame_link_free_frame(frame_link_context_t *ctx, frame_node_t *node)
 {
     if (node == NULL) return;
-
-    pthread_mutex_lock(&ctx->pool_lock);
-    node->in_use = false;
-    node->ref_count = 0;
-    memset(&node->frame, 0, sizeof(video_frame_t));
-    pthread_mutex_unlock(&ctx->pool_lock);
+    Pool_Release(&ctx->frame_pool, node);
 }
 
 static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node)
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
-    // 队列满：丢旧帧
-    if (ctx->queue_count >= ctx->queue_size) {
-        frame_node_t *old_node = ctx->queue[ctx->queue_head];
-        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-        ctx->queue_count--;
-        _frame_link_free_frame(ctx, old_node);
+    // 【重构】队列满：丢旧帧
+    if (Queue_IsFull(&ctx->frame_queue)) {
+        void *old_node = NULL;
+        if (Queue_Get(&ctx->frame_queue, &old_node) == QUEUE_OK && old_node != NULL) {
+            _frame_link_free_frame(ctx, (frame_node_t*)old_node);
+        }
     }
 
-    // 入队
-    ctx->queue[ctx->queue_tail] = node;
-    ctx->queue_tail = (ctx->queue_tail + 1) % ctx->queue_size;
-    ctx->queue_count++;
+    // 【重构】入队
+    QueueErr_t qerr = Queue_Put(&ctx->frame_queue, node);
+    if (qerr != QUEUE_OK) {
+        pthread_mutex_unlock(&ctx->queue_lock);
+        return -1;
+    }
 
     // 通知等待者
     pthread_cond_signal(&ctx->queue_not_empty);
@@ -1164,7 +1180,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
-    while (ctx->queue_count == 0 && ctx->running) {
+    while (Queue_IsEmpty(&ctx->frame_queue) && ctx->running) {
         if (timeout_ms == 0) {
             pthread_cond_wait(&ctx->queue_not_empty, &ctx->queue_lock);
         } else {
@@ -1180,15 +1196,14 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
         }
     }
 
-    if (!ctx->running || ctx->queue_count == 0) {
+    if (!ctx->running || Queue_IsEmpty(&ctx->frame_queue)) {
         pthread_mutex_unlock(&ctx->queue_lock);
         return NULL;
     }
 
-    // 出队
-    frame_node_t *node = ctx->queue[ctx->queue_head];
-    ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-    ctx->queue_count--;
+    // 【重构】出队
+    frame_node_t *node = NULL;
+    Queue_Get(&ctx->frame_queue, (void**)&node);
 
     pthread_cond_signal(&ctx->queue_not_full);
     pthread_mutex_unlock(&ctx->queue_lock);
@@ -1197,7 +1212,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 }
 
 // ==========================================================================
-// 【核心修复】采集线程：先检查退出标志，再poll，立即响应退出
+// 采集线程（保持不变）
 // ==========================================================================
 static void* _frame_link_capture_thread(void *arg)
 {
@@ -1213,19 +1228,18 @@ static void* _frame_link_capture_thread(void *arg)
     fds[1].fd = ctx->exit_pipe_read_fd;
     fds[1].events = POLLIN;
 
-    // ============== 修复：先检查全局退出标志，再poll ==============
     while (g_app_ctx.app_running && ctx->running) 
     {
         // poll超时缩短为10ms，极低延迟响应退出
         int poll_ret = poll(fds, 2, 10);
 
-        // ============== 修复：全局退出标志（兜底，最高优先级） ==============
+        // 全局退出标志（兜底，最高优先级）
         if (!g_app_ctx.app_running) {
             LOG_I("Frame Link: Capture thread global exit triggered");
             break;
         }
 
-        // ============== 修复：退出管道事件（立即退出） ==============
+        // 退出管道事件（立即退出）
         if (fds[1].revents & POLLIN) {
             LOG_I("Frame Link: Capture thread received exit pipe signal");
             break;
@@ -1245,12 +1259,17 @@ static void* _frame_link_capture_thread(void *arg)
                 continue;
             }
 
-            // 帧就绪回调
-            if (ctx->frame_ready_cb != NULL) {
-                ctx->frame_ready_cb(&hal_frame, ctx->cb_user_data);
+            // 【重构】从池里分配节点
+            frame_node_t *node = _frame_link_alloc_frame(ctx);
+            if (node != NULL) {
+                // 拷贝HAL帧数据到节点
+                memcpy(&node->frame, &hal_frame, sizeof(video_frame_t));
+                
+                // 入队
+                _frame_link_enqueue(ctx, node);
             }
 
-            // 归还缓冲区
+            // 归还HAL层缓冲区
             video_put_frame(ctx->hal_handle, &hal_frame);
 
             if (++frame_count % 30 == 0) {
@@ -1356,385 +1375,7 @@ int capture_srv_put_frame(capture_srv_handle_t handle,
  */
 int capture_srv_destroy(capture_srv_handle_t handle);
 
-#endif /* CAPTURE_SRV_H */// src/service/capture_srv/src/capture_srv.c
-#include "capture_srv.h"
-#include "frame_link.h"
-#include "module_fsm.h"
-#include "event_bus.h"
-#include "data_bus.h"
-#include "log.h"
-#include <stdlib.h>
-#include <string.h>
-#include <pthread.h>
-#include <time.h>
-#include "main.h"
-// ==========================================================================
-// 【核心】采集服务专属：状态迁移规则表
-// ==========================================================================
-static module_state_trans_t g_capture_srv_trans_table[] = {
-    // 初始化流程
-    {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
-    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
-    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
-    
-    // 启动流程
-    {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
-    {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
-    {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
-    
-    // 停止流程
-    {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
-    {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
-    
-    // 异常流程
-    {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
-    {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
-    
-    // 销毁流程
-    {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_DEINITIALIZING, MODULE_EVENT_DEINIT_OK, MODULE_STATE_DEINIT},
-};
-static const uint32_t g_capture_srv_trans_len = sizeof(g_capture_srv_trans_table) / sizeof(g_capture_srv_trans_table[0]);
-
-// ==========================================================================
-// 内部上下文结构体（完美封装）
-// ==========================================================================
-typedef struct {
-    // 配置与回调
-    capture_srv_config_t config;
-    capture_srv_callbacks_t callbacks;
-    
-    // 下层依赖
-    frame_link_handle_t link_handle;
-    module_fsm_handle_t fsm_handle;
-    
-    // 总线句柄（缓存）
-    event_bus_handle_t evt_bus;
-    data_bus_handle_t data_bus;
-    
-    // 运行时状态
-    bool is_created;
-    pthread_mutex_t lock;
-} capture_srv_ctx_t;
-
-// ==========================================================================
-// 内部辅助函数声明
-// ==========================================================================
-static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data);
-static void _capture_srv_fsm_state_relay(const char *module_name,
-                                          module_state_t old_state,
-                                          module_state_t new_state,
-                                          void *user_data);
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
-static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame);
-
-// ==========================================================================
-// 对外API实现
-// ==========================================================================
-
-int capture_srv_create(const capture_srv_config_t *config,
-                       capture_srv_handle_t *out_handle)
-{
-    if (config == NULL || out_handle == NULL) {
-        return -1;
-    }
-
-    // 1. 分配并清零上下文
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)malloc(sizeof(capture_srv_ctx_t));
-    if (ctx == NULL) {
-        return -1;
-    }
-    memset(ctx, 0, sizeof(capture_srv_ctx_t));
-
-    // 2. 拷贝配置与回调
-    memcpy(&ctx->config, config, sizeof(capture_srv_config_t));
-    memcpy(&ctx->callbacks, &config->callbacks, sizeof(capture_srv_callbacks_t));
-    ctx->evt_bus = config->evt_bus;
-    ctx->data_bus = config->data_bus;
-    pthread_mutex_init(&ctx->lock, NULL);
-
-    // 3. 初始化 Link层
-    LOG_I("Capture Srv: Initializing Link layer...");
-    video_err_t err = frame_link_init(&ctx->config.link_cfg, g_app_ctx.exit_pipe[0], &ctx->link_handle);
-    if (err != VIDEO_OK) {
-        LOG_E("Capture Srv: Failed to init link layer (err=%d)", err);
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
-        return -1;
-    }
-
-    // 4. 注册 Link层 回调
-    frame_link_register_frame_ready_cb(ctx->link_handle, _capture_srv_on_link_frame, ctx);
-
-    // 5. 初始化 Module FSM
-    LOG_I("Capture Srv: Creating Module FSM...");
-    module_fsm_config_t fsm_cfg = {0};
-    fsm_cfg.module_name = "capture_srv";
-    fsm_cfg.trans_table = g_capture_srv_trans_table;
-    fsm_cfg.trans_table_len = g_capture_srv_trans_len;
-    fsm_cfg.event_handler = _capture_srv_fsm_event_handler;
-    fsm_cfg.state_cb = _capture_srv_fsm_state_relay; // 【关键】先中继到自己
-    fsm_cfg.user_data = ctx; // 【关键】user_data 传自己的 ctx
-
-    int ret = module_fsm_create(&fsm_cfg, &ctx->fsm_handle);
-    if (ret != 0) {
-        LOG_E("Capture Srv: Failed to create Module FSM");
-        frame_link_deinit(ctx->link_handle);
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
-        return -1;
-    }
-
-    // 6. 启动初始化流程
-    ctx->is_created = true;
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK); // Link init 同步完成
-
-    // 7. 自动启动（如果配置了）
-    if (ctx->config.auto_start) {
-        LOG_I("Capture Srv: Auto start enabled");
-        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
-    }
-
-    *out_handle = (capture_srv_handle_t)ctx;
-    LOG_I("Capture Srv: Created successfully");
-    return 0;
-}
-
-module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle)
-{
-    if (handle == NULL) return NULL;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-    return ctx->fsm_handle;
-}
-
-int capture_srv_get_frame(capture_srv_handle_t handle,
-                          video_frame_t *frame,
-                          uint32_t timeout_ms)
-{
-    if (handle == NULL || frame == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-
-    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
-    if (state != MODULE_STATE_RUNNING) {
-        LOG_W("Capture Srv: Get frame called in state %s", module_state_to_str(state));
-        return -1;
-    }
-
-    return frame_link_get_frame(ctx->link_handle, frame, timeout_ms);
-}
-
-int capture_srv_put_frame(capture_srv_handle_t handle,
-                          const video_frame_t *frame)
-{
-    if (handle == NULL || frame == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-    return frame_link_put_frame(ctx->link_handle, frame);
-}
-
-int capture_srv_destroy(capture_srv_handle_t handle)
-{
-    if (handle == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-
-    if (!ctx->is_created) {
-        pthread_mutex_unlock(&ctx->lock);
-        return 0;
-    }
-
-    // 1. 投 DEINIT 事件
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
-
-    // 2. 停止并销毁 Link层
-    frame_link_stop(ctx->link_handle);
-    frame_link_deinit(ctx->link_handle);
-
-    // 3. 投 DEINIT_OK
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
-
-    // 4. 销毁 FSM
-    module_fsm_destroy(ctx->fsm_handle);
-
-    ctx->is_created = false;
-    pthread_mutex_unlock(&ctx->lock);
-
-    pthread_mutex_destroy(&ctx->lock);
-    free(ctx);
-    
-    LOG_I("Capture Srv: Destroyed");
-    return 0;
-}
-
-// ==========================================================================
-// 【核心】内部辅助函数实现
-// ==========================================================================
-
-/**
- * @brief FSM 事件处理器（在锁内调用，只做决策，不做耗时操作）
- */
-static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data)
-{
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL) return -1;
-
-    LOG_I("Capture Srv: FSM Event Handler received: %s", module_event_to_str(event));
-    
-    // 这里只做决策，耗时的硬件操作放在 _capture_srv_fsm_state_relay 里（锁外）
-    return 0; // 允许所有迁移
-}
-
-/**
- * @brief 【关键】FSM 状态中继回调
- * 
- * 职责链：
- * Module FSM -> 此回调 -> 1. 执行硬件动作 (Start/Stop Link)
- *                        -> 2. 转发给上层回调 (Global FSM)
- */
-static void _capture_srv_fsm_state_relay(const char *module_name,
-                                          module_state_t old_state,
-                                          module_state_t new_state,
-                                          void *user_data)
-{
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL) return;
-
-    LOG_I("Capture Srv: State changed: %s -> %s", 
-          module_state_to_str(old_state), 
-          module_state_to_str(new_state));
-
-    // 1. 执行硬件动作（根据新状态）
-    if (new_state == MODULE_STATE_STARTING) {
-        LOG_I("Capture Srv: Starting Link layer...");
-        video_err_t err = frame_link_start(ctx->link_handle);
-        if (err == VIDEO_OK) {
-            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
-        } else {
-            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
-        }
-    }
-    else if (new_state == MODULE_STATE_STOPPING) {
-        LOG_I("Capture Srv: Stopping Link layer...");
-        frame_link_stop(ctx->link_handle);
-        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
-    }
-
-    // 2. 【重要】转发给上层回调（Global FSM）
-    if (ctx->callbacks.state_change_cb != NULL) {
-        ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
-    }
-}
-
-/**
- * @brief Link层 帧就绪回调（数据入口）
- * 
- * 【核心逻辑】
- * 1. 收到 Link 层的帧指针
- * 2. 申请 Data Bus Item
- * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
- * 4. 发布 Data Bus Item
- * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
- */
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
-{
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL || frame == NULL) return;
-
-    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
-    if (state != MODULE_STATE_RUNNING) {
-        // ============== 修复：非运行状态必须归还帧 ==============
-        video_put_frame(ctx->link_handle, frame);
-        return;
-    }
-
-    // 申请Data Bus项
-    data_bus_item_handle_t item = NULL;
-    size_t data_size = frame->length;
-    
-    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
-    if (ret != 0 || item == NULL) {
-        // ============== 修复：申请失败必须归还帧 ==============
-        video_put_frame(ctx->link_handle, frame);
-        return;
-    }
-
-    // 拷贝数据
-    void *w_ptr = data_bus_get_writable_ptr(item);
-    if (w_ptr == NULL) {
-        data_bus_release(item);
-        video_put_frame(ctx->link_handle, frame);
-        return;
-    }
-    memcpy(w_ptr, frame->data, data_size);
-
-    // 发布数据
-    ret = data_bus_publish(ctx->data_bus, item);
-    if (ret != 0) {
-        data_bus_release(item);
-        video_put_frame(ctx->link_handle, frame);
-        return;
-    }
-    
-    data_bus_release(item); 
-    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
-
-    // ============== 修复：核心！数据拷贝完成后立即归还帧 ==============
-    video_put_frame(ctx->link_handle, frame);
-}
-
-/**
- * @brief 【核心】推送到双总线
- */
-static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame)
-{
-    if (ctx == NULL || frame == NULL) return -1;
-
-    // 检查总线句柄
-    if (ctx->data_bus == NULL || ctx->evt_bus == NULL) {
-        return -1;
-    }
-
-    // 1. 从 Data Bus 申请 Item
-    data_bus_item_handle_t item = NULL;
-    size_t data_size = frame->length;
-    
-    int ret = data_bus_alloc(ctx->data_bus, 
-                              DATA_TYPE_VIDEO_FRAME, 
-                              data_size, 
-                              "capture_srv", 
-                              &item);
-    if (ret != 0 || item == NULL) {
-        return -1;
-    }
-
-    // 2. 拷贝数据
-    void *w_ptr = data_bus_get_writable_ptr(item);
-    if (w_ptr == NULL) {
-        data_bus_release(item);
-        return -1;
-    }
-    memcpy(w_ptr, frame->data, data_size);
-
-    // 3. 发布到 Data Bus
-    ret = data_bus_publish(ctx->data_bus, item);
-    if (ret != 0) {
-        data_bus_release(item);
-        return -1;
-    }
-    
-    // 【重要】发布成功后，生产者也要释放自己的引用！
-    // 因为 data_bus_publish 后，所有权就交给总线了。
-    // 如果不 release，ref_count 会一直 >= 1，导致 item 永远无法回收！
-    data_bus_release(item); 
-
-    // 4. 发布事件到 Event Bus
-    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
-
-    return 0;
-}
+#endif /* CAPTURE_SRV_H */
 
 
 --- [5/8] 硬件插件 - USB摄像头V4L2 ---
@@ -2940,6 +2581,7 @@ int event_bus_dispatch(event_bus_handle_t handle)
     if (event == NULL) return -1;
 
     // 3. 【核心】执行回调 (逻辑复用旧代码，但在主线程执行)
+    // 在持有 rdlock 时调用用户回调。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
     pthread_rwlock_rdlock(&ctx->rwlock);
 
     #define MAX_TEMP_CALLBACKS 32
@@ -4804,6 +4446,16 @@ log_level_t log_get_level(void)
 #if QUEUE_ENABLE_THREAD_SAFE
 #include <pthread.h>
 #endif
+
+#define QUEUE_STATIC_BUFFER_SIZE(type, count)  (sizeof(type*) * (count))
+/**
+ * @brief 辅助宏：定义队列静态缓冲区
+ * @param name 缓冲区名称
+ * @param type 队列元素类型（指针类型）
+ * @param count 队列容量
+ */
+#define QUEUE_DEFINE_STATIC_BUFFER(name, type, count) \
+    static type* name[count]
 
 // ==========================================================================
 // 队列句柄结构体（通用指针队列）

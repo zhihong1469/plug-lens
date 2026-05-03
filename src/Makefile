@@ -23,6 +23,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/src/service/capture_srv/inc \
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/pool/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/plugins/hal_plugins/video_usb/inc \
