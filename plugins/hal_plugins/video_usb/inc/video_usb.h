@@ -34,5 +34,5 @@ int  _video_usb_detect_capability(video_usb_context_t *ctx);
 int  _video_usb_enum_sizes(video_usb_context_t *ctx, video_format_t fmt, uint32_t (*sizes)[2], uint32_t max_cnt);
 int  _video_usb_enum_fps(video_usb_context_t *ctx, video_format_t fmt, uint32_t w, uint32_t h, uint32_t *fps, uint32_t max_cnt);
 int  _video_usb_dump_yuv(const video_frame_t *frame, const char *path);
-
+int _video_usb_get_fd(video_usb_context_t *ctx);
 #endif /* VIDEO_USB_H */

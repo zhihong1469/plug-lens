@@ -1,6 +1,6 @@
-// plugins/app_plugins/src/demo_app.c
 #include "demo_app.h"
 #include "log.h"
+#include "main.h"   // 引入全局app上下文
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +9,7 @@
 #include <sys/select.h>
 
 // ==========================================================================
-// 内部状态
+// 内部私有上下文
 // ==========================================================================
 typedef struct {
     event_bus_handle_t evt_bus;
@@ -17,8 +17,8 @@ typedef struct {
     global_fsm_handle_t g_fsm;
     capture_srv_handle_t cap_srv;
     
-    bool running;
-    int cap_sub_id; // 采集事件订阅ID
+    int exit_pipe_read_fd;  // 退出管道读端
+    int cap_sub_id;         // 采集事件订阅ID
 } demo_app_ctx_t;
 
 static demo_app_ctx_t g_demo_ctx = {0};
@@ -33,7 +33,6 @@ static void _demo_app_print_help(void);
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
-
 int demo_app_init(const demo_app_config_t *config)
 {
     if (config == NULL) {
@@ -45,11 +44,11 @@ int demo_app_init(const demo_app_config_t *config)
     g_demo_ctx.data_bus = config->data_bus;
     g_demo_ctx.g_fsm = config->g_fsm;
     g_demo_ctx.cap_srv = config->cap_srv;
-    g_demo_ctx.running = false;
+    g_demo_ctx.exit_pipe_read_fd = config->exit_pipe_read_fd;
 
-    // 订阅事件 (注意：现在只是注册，回调不会立即在发布线程执行)
+    // 订阅帧就绪事件
     event_subscriber_t sub = {0};
-    sub.event_type = EVENT_TYPE_CAP_FRAME_READY; // 订阅帧就绪事件
+    sub.event_type = EVENT_TYPE_CAP_FRAME_READY;
     sub.callback = _demo_app_on_event;
     sub.user_data = NULL;
 
@@ -64,15 +63,11 @@ int demo_app_init(const demo_app_config_t *config)
     return 0;
 }
 
-#include <signal.h>
 int demo_app_run(void)
 {
-    g_demo_ctx.running = true;
     LOG_I("Demo App: Running...");
     
-    extern volatile sig_atomic_t g_quit_flag;
-    
-    // 【新增】获取 Event Bus 的等待文件描述符
+    // 获取Event Bus等待fd
     int bus_fd = event_bus_get_wait_fd(g_demo_ctx.evt_bus);
     if (bus_fd < 0) {
         LOG_E("Demo App: Failed to get bus wait fd");
@@ -80,36 +75,55 @@ int demo_app_run(void)
     }
 
     int timeout_count = 0;
-    int max_fd = (STDIN_FILENO > bus_fd) ? STDIN_FILENO : bus_fd;
+    // 计算最大fd：键盘 + 总线 + 退出管道
+    int max_fd = STDIN_FILENO;
+    if(bus_fd > max_fd) max_fd = bus_fd;
+    if(g_demo_ctx.exit_pipe_read_fd > max_fd) max_fd = g_demo_ctx.exit_pipe_read_fd;
 
-    while (g_demo_ctx.running && !g_quit_flag) 
+    // 全局唯一退出标志
+    while (g_app_ctx.app_running) 
     { 
         fd_set read_fds;
         struct timeval timeout;
         
         FD_ZERO(&read_fds);
         FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(bus_fd, &read_fds); // 【新增】监听 Bus FD
+        FD_SET(bus_fd, &read_fds);
+        FD_SET(g_demo_ctx.exit_pipe_read_fd, &read_fds); // 监听退出管道
         
         timeout.tv_sec = 0;
         timeout.tv_usec = 20000; // 20ms 超时
 
-        // 【修改】nfds 必须是最大 fd + 1
         int ret = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
 
+        // ===================== 【正确修复】彻底解决EINTR卡死 =====================
         if (ret < 0) {
-            if (errno == EINTR) continue;
+            // Ctrl+C 触发EINTR：直接检查全局退出标志，不continue！
+            if (errno == EINTR) {
+                // 被信号打断，立即判断是否要退出
+                if (!g_app_ctx.app_running) {
+                    break;
+                }
+                continue;
+            }
             LOG_E("Demo App: select error: %s", strerror(errno));
             break;
-        } 
+        }
+        // ========================================================================
         else if (ret > 0) {
-            // 【优先级1】检查 Event Bus 是否有事件
+            // 优先级1：检测全局退出管道（Ctrl+C 优先响应）
+            if (FD_ISSET(g_demo_ctx.exit_pipe_read_fd, &read_fds)) {
+                LOG_I("Demo App: Receive global exit signal, ready to quit");
+                app_trigger_soft_exit();
+                continue;
+            }
+
+            // 优先级2：Event Bus事件分发
             if (FD_ISSET(bus_fd, &read_fds)) {
-                // 【核心】分发事件，这会执行 _demo_app_on_event
                 event_bus_dispatch(g_demo_ctx.evt_bus);
             }
 
-            // 【优先级2】检查键盘是否有输入
+            // 优先级3：键盘命令解析
             if (FD_ISSET(STDIN_FILENO, &read_fds)) {
                 char cmd = 0;
                 ssize_t nread = read(STDIN_FILENO, &cmd, 1);
@@ -132,7 +146,7 @@ int demo_app_run(void)
                             break;
                         case 'q': case 'Q':
                             LOG_I("Demo App: User pressed QUIT");
-                            g_demo_ctx.running = false; 
+                            app_trigger_soft_exit();
                             break;
                         case 'h': case 'H':
                             _demo_app_print_help();
@@ -144,7 +158,7 @@ int demo_app_run(void)
             }
         }
         else {
-            // 超时逻辑
+            // 超时保活日志
             timeout_count++;
             if (timeout_count % 100 == 0) {
                 LOG_D("Demo App: Main thread alive, select timeout %d times", timeout_count);
@@ -171,15 +185,12 @@ int demo_app_deinit(void)
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
-
 static void _demo_app_on_event(const event_t *event, void *user_data)
 {
     if (event == NULL) return;
 
     switch (event->type) {
         case EVENT_TYPE_CAP_FRAME_READY:
-            // 收到帧就绪事件，去 Data Bus 取帧
-            // 注意：这个函数现在运行在 Main Thread 了！
             _demo_app_process_frame();
             break;
         default:
@@ -190,27 +201,18 @@ static void _demo_app_on_event(const event_t *event, void *user_data)
 static void _demo_app_process_frame(void)
 {
     data_bus_item_handle_t item = NULL;
-    
-    // 获取最新帧
     int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
     if (ret != 0 || item == NULL) {
         return;
     }
 
-    // 获取帧信息
     data_bus_item_info_t info = {0};
     data_bus_get_item_info(item, &info);
 
-    // 这里只是演示，实际项目中可以：
-    // 1. 把帧传给显示服务
-    // 2. 把帧传给 AI 服务
-    // 3. 保存 YUV 文件
-    LOG_D("Demo App: Processed frame (index=%d, ts=%lu, size=%u)", 
-          0, // 实际可以从 data_ptr 里解析
+    LOG_D("Demo App: Processed frame (ts=%lu, size=%u)", 
           (unsigned long)info.timestamp, 
           info.data_size);
 
-    // 释放帧
     data_bus_release(item);
 }
 

@@ -482,3 +482,10 @@ int _video_usb_dump_yuv(const video_frame_t *frame, const char *filepath)
     fclose(fp);
     return 0;
 }
+
+// 新增：获取USB摄像头设备fd
+int _video_usb_get_fd(video_usb_context_t *ctx)
+{
+    if (ctx == NULL) return -1;
+    return ctx->fd;
+}

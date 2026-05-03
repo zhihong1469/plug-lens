@@ -9,7 +9,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-
+#include "main.h"
 // ==========================================================================
 // 【核心】采集服务专属：状态迁移规则表
 // ==========================================================================
@@ -99,7 +99,7 @@ int capture_srv_create(const capture_srv_config_t *config,
 
     // 3. 初始化 Link层
     LOG_I("Capture Srv: Initializing Link layer...");
-    video_err_t err = frame_link_init(&ctx->config.link_cfg, &ctx->link_handle);
+    video_err_t err = frame_link_init(&ctx->config.link_cfg, g_app_ctx.exit_pipe[0], &ctx->link_handle);
     if (err != VIDEO_OK) {
         LOG_E("Capture Srv: Failed to init link layer (err=%d)", err);
         pthread_mutex_destroy(&ctx->lock);

@@ -183,6 +183,9 @@ uint32_t video_enum_fps(video_handle_t handle,
  */
 video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath);
 
+// 新增：获取摄像头设备文件描述符（用于Link层poll监听）
+int video_get_wait_fd(video_handle_t handle);
+
 /**
  * @brief 获取错误描述字符串
  * @param err 错误码
