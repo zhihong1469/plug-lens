@@ -85,8 +85,62 @@ LDFLAGS := \
    | ---------------- | ---------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
    | `q->mutex`互斥锁 | 队列缓冲区 | `Queue_Put()``Queue_Get()``Queue_Peek()``Queue_IsEmpty()``Queue_IsFull()``Queue_GetCount()``Queue_Clear()` | `Queue_Put()``Queue_Get()``Queue_Peek()``Queue_IsEmpty()``Queue_IsFull()``Queue_GetCount()``Queue_Clear()` |
 
+## 通用线程封装使用场景分析
+
+### 1. 直接替换场景（推荐立即使用）
+
+|      现有代码位置       |  替换建议  |                收益                 |
+| :---------------------: | :--------: | :---------------------------------: |
+| `frame_link.c` 采集线程 | ✅ 推荐替换 | 统一线程管理，增加名称 / 优先级配置 |
+|   `demo_app.c` 主循环   | ⚠️ 保持现状 |     主循环是主线程，不需要封装      |
+|    后续新增业务线程     | ✅ 强制使用 | 所有新线程统一使用 `common/thread`  |
+
+### 2. 具体使用示例
+
+```
+// 示例：在 FrameLink 中使用
+#include "thread.h"
+
+// 原采集线程入口函数保持不变
+static void* _frame_link_capture_thread(void *arg) {
+    // ... 原有代码 ...
+}
+
+// 修改 frame_link_start()
+video_err_t frame_link_start(frame_link_handle_t handle) {
+    // ... 原有代码 ...
+    
+    // 【替换】使用通用线程封装
+    thread_attr_t attr;
+    thread_attr_init(&attr);
+    attr.name = "capture_thread";
+    attr.priority = THREAD_PRIORITY_HIGH;
+    attr.stack_size = 128 * 1024; // 128KB 栈
+    
+    thread_err_t terr = thread_create(&ctx->capture_thread_obj,
+                                       &attr,
+                                       _frame_link_capture_thread,
+                                       ctx);
+    if (terr != THREAD_OK) {
+        // 错误处理
+    }
+    
+    // ...
+}
+
+// 修改 frame_link_stop()
+video_err_t frame_link_stop(frame_link_handle_t handle) {
+    // ... 原有代码 ...
+    
+    // 【替换】使用通用线程封装等待
+    thread_join(&ctx->capture_thread_obj, NULL);
+    
+    // ...
+}
+```
 
 ## 潜在风险点总结 & 后续开发规范
+
 ### ✅ 已解决的死锁风险
 1. **Global FSM → Module FSM 调用**：已通过"拷贝临时数组 + 锁外调用"修复
 2. **Module FSM → Global FSM 回调**：已通过"先解锁，后回调"修复

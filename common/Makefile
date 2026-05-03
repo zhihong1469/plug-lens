@@ -7,7 +7,9 @@ SRC_FILES := \
 	log/src/log.c \
 	queue/src/queue.c \
 	plugin/src/plugin_loader.c \
-	pool/src/pool.c
+	pool/src/pool.c \
+	utils/src/utils.c \
+	thread/src/thread.c
 # 2. 头文件路径
 INC_FLAGS := \
 	-I$(TOPDIR)/common/log/inc \
@@ -16,7 +18,9 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/utils/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
-	-I$(TOPDIR)/common/pool/inc
+	-I$(TOPDIR)/common/pool/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/thread/inc
 
 # 3. 生成静态库
 TARGET_NAME := libcom.a

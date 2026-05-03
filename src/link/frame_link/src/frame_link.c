@@ -2,6 +2,7 @@
 #include "video_hal.h"
 #include "pool.h"       // 【新增】引入通用对象池
 #include "queue.h"      // 【新增】引入通用队列
+#include "thread.h"     // 【新增】引入通用线程封装
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -48,8 +49,8 @@ typedef struct {
     pthread_cond_t queue_not_empty;
     pthread_cond_t queue_not_full;
 
-    // 采集线程
-    pthread_t capture_thread;
+    // 【重构】采集线程（使用通用线程封装）
+    thread_t capture_thread;
     bool running;
     bool streaming;
 
@@ -204,18 +205,29 @@ video_err_t frame_link_start(frame_link_handle_t handle)
     
     ctx->streaming = true;
 
-    // 启动采集线程
+    // 【重构】启动采集线程（使用通用线程封装）
     LOG_I("Frame Link: Creating capture thread...");
     ctx->running = true;
-    if (pthread_create(&ctx->capture_thread, NULL, _frame_link_capture_thread, ctx) != 0) {
+    
+    thread_attr_t attr;
+    thread_attr_init(&attr);
+    attr.name = "capture_thread";
+    attr.priority = THREAD_PRIORITY_HIGH;
+    attr.stack_size = 128 * 1024; // 128KB 栈
+    
+    thread_err_t terr = thread_create(&ctx->capture_thread,
+                                       &attr,
+                                       _frame_link_capture_thread,
+                                       ctx);
+    if (terr != THREAD_OK) {
         LOG_E("Frame Link: Failed to create thread");
         video_stop_stream(ctx->hal_handle);
         ctx->streaming = false;
         ctx->running = false;
         return VIDEO_ERR_INVALID_PARAM;
     }
+    
     LOG_I("Frame Link: Capture thread created");
-
     return VIDEO_OK;
 }
 
@@ -238,8 +250,8 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
     pthread_cond_broadcast(&ctx->queue_not_full);
     pthread_mutex_unlock(&ctx->queue_lock);
     
-    // 等待线程安全退出
-    pthread_join(ctx->capture_thread, NULL);
+    // 【重构】等待线程安全退出（使用通用线程封装）
+    thread_join(&ctx->capture_thread, NULL);
 
     // 停止HAL层流
     if (ctx->streaming) {
