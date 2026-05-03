@@ -9,8 +9,8 @@ SRC_FILES := \
 	bus/data_bus/src/data_bus.c \
 	fsm/global_fsm/src/global_fsm.c \
 	fsm/module_fsm/src/module_fsm.c \
-	link/frame_link/src/frame_link.c \
-	service/capture_srv/src/capture_srv.c
+	link/frame_link/src/frame_link.c 
+	
 
 # 2. 头文件路径：所有核心模块的 inc
 INC_FLAGS := \

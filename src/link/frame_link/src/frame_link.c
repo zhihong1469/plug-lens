@@ -419,7 +419,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 }
 
 // ==========================================================================
-// 【核心修复】采集线程：统一全局退出标志 + 强化管道监听
+// 【核心修复】采集线程：先检查退出标志，再poll，立即响应退出
 // ==========================================================================
 static void* _frame_link_capture_thread(void *arg)
 {
@@ -427,7 +427,7 @@ static void* _frame_link_capture_thread(void *arg)
     LOG_I("Frame Link: Capture thread entered loop");
 
     static int frame_count = 0;
-    struct pollfd fds[2];  // 监听两个fd：摄像头 + 退出管道
+    struct pollfd fds[2];  // 监听：摄像头 + 退出管道
 
     // 初始化poll监听集合
     fds[0].fd = ctx->cam_fd;
@@ -435,29 +435,30 @@ static void* _frame_link_capture_thread(void *arg)
     fds[1].fd = ctx->exit_pipe_read_fd;
     fds[1].events = POLLIN;
 
-    // 【核心修复】使用全局唯一退出标志，统一全系统退出
-    while (g_app_ctx.app_running && ctx->running) {
-        // poll超时100ms，避免死等，同时响应退出信号
-        int poll_ret = poll(fds, 2, 100);
+    // ============== 修复：先检查全局退出标志，再poll ==============
+    while (g_app_ctx.app_running && ctx->running) 
+    {
+        // poll超时缩短为10ms，极低延迟响应退出
+        int poll_ret = poll(fds, 2, 10);
 
-        // 1. 【最高优先级】全局退出标志检查（兜底）
+        // ============== 修复：全局退出标志（兜底，最高优先级） ==============
         if (!g_app_ctx.app_running) {
-            LOG_I("Frame Link: Capture thread global exit, quit immediately");
+            LOG_I("Frame Link: Capture thread global exit triggered");
             break;
         }
 
-        // 2. 检测全局退出管道事件
+        // ============== 修复：退出管道事件（立即退出） ==============
         if (fds[1].revents & POLLIN) {
-            LOG_I("Frame Link: Capture thread receive exit pipe signal, quit immediately");
+            LOG_I("Frame Link: Capture thread received exit pipe signal");
             break;
         }
 
-        // 3. poll错误/超时
+        // poll错误/超时
         if (poll_ret <= 0) {
             continue;
         }
 
-        // 4. 摄像头有数据：正常取帧
+        // 摄像头正常取帧
         if (fds[0].revents & POLLIN) {
             video_frame_t hal_frame = {0};
             video_err_t err = video_get_frame(ctx->hal_handle, &hal_frame);
@@ -474,7 +475,6 @@ static void* _frame_link_capture_thread(void *arg)
             // 归还缓冲区
             video_put_frame(ctx->hal_handle, &hal_frame);
 
-            // 保活日志
             if (++frame_count % 30 == 0) {
                 LOG_D("Frame Link: Captured %d frames", frame_count);
             }
