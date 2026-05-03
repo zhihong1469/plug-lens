@@ -1,5 +1,7 @@
 #include "frame_link.h"
 #include "video_hal.h"
+#include "pool.h"       // 【新增】引入通用对象池
+#include "queue.h"      // 【新增】引入通用队列
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -7,7 +9,7 @@
 #include <sched.h>
 #include <sys/poll.h>
 #include "log.h"
-#include "main.h"   // 【新增】引入全局应用上下文
+#include "main.h"
 
 // ==========================================================================
 // 内部宏定义
@@ -16,16 +18,14 @@
 #define FRAME_LINK_MAX_QUEUE_SIZE 16
 
 // ==========================================================================
-// 内部帧节点结构体
+// 内部帧节点结构体（简化，不再需要 in_use/ref_count，由 Pool 管理）
 // ==========================================================================
 typedef struct {
     video_frame_t frame;       // 帧数据
-    bool in_use;               // 是否被占用
-    uint32_t ref_count;        // 引用计数（预留）
 } frame_node_t;
 
 // ==========================================================================
-// 【核心】内部状态结构体（新增退出管道fd）
+// 【核心】内部状态结构体（重构版）
 // ==========================================================================
 typedef struct {
     // HAL层相关
@@ -34,17 +34,16 @@ typedef struct {
     frame_link_config_t config;
     int cam_fd;                // 摄像头设备fd（用于poll）
 
-    // 帧池管理
-    frame_node_t *frame_pool;
-    uint32_t pool_size;
-    pthread_mutex_t pool_lock;
+    // 【重构】通用对象池（替代手写帧池）
+    Pool_t frame_pool;
+    void *pool_memory_buffer;       // 池内存缓冲区
+    void **pool_free_list_buffer;   // 池空闲列表缓冲区
 
-    // 队列管理
-    frame_node_t **queue;
-    uint32_t queue_size;
-    uint32_t queue_head;
-    uint32_t queue_tail;
-    uint32_t queue_count;
+    // 【重构】通用队列（替代手写队列）
+    Queue_t frame_queue;
+    void **queue_buffer;            // 队列缓冲区
+
+    // 队列同步（保留，因为 Queue 组件不做等待）
     pthread_mutex_t queue_lock;
     pthread_cond_t queue_not_empty;
     pthread_cond_t queue_not_full;
@@ -54,10 +53,10 @@ typedef struct {
     bool running;
     bool streaming;
 
-    // 【新增】全局优雅退出管道读端
+    // 全局优雅退出管道读端
     int exit_pipe_read_fd;
 
-    // 【预留】Service层回调
+    // Service层回调
     frame_link_frame_ready_cb frame_ready_cb;
     void *cb_user_data;
 } frame_link_context_t;
@@ -72,10 +71,11 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 static void* _frame_link_capture_thread(void *arg);
 
 // ==========================================================================
-// 对外API：初始化时注入退出管道fd
+// 对外API实现
 // ==========================================================================
+
 video_err_t frame_link_init(const frame_link_config_t *config,
-                            int exit_pipe_read_fd,  // 【新增】注入全局退出管道
+                            int exit_pipe_read_fd,
                             frame_link_handle_t *out_handle)
 {
     if (config == NULL || out_handle == NULL || exit_pipe_read_fd < 0) {
@@ -99,36 +99,61 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     if (ctx->config.queue_size == 0) ctx->config.queue_size = 4;
     if (ctx->config.queue_size > FRAME_LINK_MAX_QUEUE_SIZE) ctx->config.queue_size = FRAME_LINK_MAX_QUEUE_SIZE;
 
-    // 初始化锁
-    pthread_mutex_init(&ctx->pool_lock, NULL);
+    // -------------------------------------------------------------------------
+    // 【重构】1. 分配并初始化通用对象池
+    // -------------------------------------------------------------------------
+    size_t pool_mem_size = sizeof(frame_node_t) * ctx->config.frame_pool_size;
+    size_t pool_flist_size = sizeof(void*) * ctx->config.frame_pool_size;
+    
+    ctx->pool_memory_buffer = malloc(pool_mem_size);
+    ctx->pool_free_list_buffer = malloc(pool_flist_size);
+    
+    if (ctx->pool_memory_buffer == NULL || ctx->pool_free_list_buffer == NULL) {
+        if (ctx->pool_memory_buffer) free(ctx->pool_memory_buffer);
+        if (ctx->pool_free_list_buffer) free(ctx->pool_free_list_buffer);
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    
+    Pool_Init(&ctx->frame_pool, 
+              sizeof(frame_node_t), 
+              ctx->config.frame_pool_size,
+              ctx->pool_memory_buffer,
+              ctx->pool_free_list_buffer);
+
+    // -------------------------------------------------------------------------
+    // 【重构】2. 分配并初始化通用队列
+    // -------------------------------------------------------------------------
+    size_t queue_buf_size = sizeof(void*) * (ctx->config.queue_size + 1); // +1 是环形队列经典设计
+    ctx->queue_buffer = malloc(queue_buf_size);
+    
+    if (ctx->queue_buffer == NULL) {
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        free(ctx);
+        return VIDEO_ERR_INVALID_PARAM;
+    }
+    
+    Queue_Init(&ctx->frame_queue, ctx->queue_buffer, ctx->config.queue_size + 1);
+
+    // -------------------------------------------------------------------------
+    // 3. 初始化队列同步锁和条件变量
+    // -------------------------------------------------------------------------
     pthread_mutex_init(&ctx->queue_lock, NULL);
     pthread_cond_init(&ctx->queue_not_empty, NULL);
     pthread_cond_init(&ctx->queue_not_full, NULL);
 
-    // 分配帧池
-    ctx->pool_size = ctx->config.frame_pool_size;
-    ctx->frame_pool = (frame_node_t*)malloc(ctx->pool_size * sizeof(frame_node_t));
-    if (ctx->frame_pool == NULL) {
-        free(ctx);
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-    memset(ctx->frame_pool, 0, ctx->pool_size * sizeof(frame_node_t));
-
-    // 分配队列
-    ctx->queue_size = ctx->config.queue_size;
-    ctx->queue = (frame_node_t**)malloc(ctx->queue_size * sizeof(frame_node_t*));
-    if (ctx->queue == NULL) {
-        free(ctx->frame_pool);
-        free(ctx);
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-    memset(ctx->queue, 0, ctx->queue_size * sizeof(frame_node_t*));
-
-    // 初始化HAL层
+    // -------------------------------------------------------------------------
+    // 4. 初始化HAL层
+    // -------------------------------------------------------------------------
     video_err_t err = video_open(&ctx->config.hal_config, &ctx->hal_cap, &ctx->hal_handle);
     if (err != VIDEO_OK) {
-        free(ctx->queue);
-        free(ctx->frame_pool);
+        free(ctx->queue_buffer);
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        pthread_mutex_destroy(&ctx->queue_lock);
+        pthread_cond_destroy(&ctx->queue_not_empty);
+        pthread_cond_destroy(&ctx->queue_not_full);
         free(ctx);
         return err;
     }
@@ -137,8 +162,12 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     ctx->cam_fd = video_get_wait_fd(ctx->hal_handle);
     if (ctx->cam_fd < 0) {
         video_close(ctx->hal_handle);
-        free(ctx->queue);
-        free(ctx->frame_pool);
+        free(ctx->queue_buffer);
+        free(ctx->pool_memory_buffer);
+        free(ctx->pool_free_list_buffer);
+        pthread_mutex_destroy(&ctx->queue_lock);
+        pthread_cond_destroy(&ctx->queue_not_empty);
+        pthread_cond_destroy(&ctx->queue_not_full);
         free(ctx);
         return VIDEO_ERR_INVALID_PARAM;
     }
@@ -190,7 +219,6 @@ video_err_t frame_link_start(frame_link_handle_t handle)
     return VIDEO_OK;
 }
 
-// 【修复】线程停止函数：配合全局退出，确保线程退出
 video_err_t frame_link_stop(frame_link_handle_t handle)
 {
     if (handle == NULL) {
@@ -204,9 +232,12 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
 
     // 停止采集线程
     ctx->running = false;
-    // 唤醒所有条件变量 + 依赖全局管道退出，双重保险
+    // 唤醒所有条件变量
+    pthread_mutex_lock(&ctx->queue_lock);
     pthread_cond_broadcast(&ctx->queue_not_empty);
     pthread_cond_broadcast(&ctx->queue_not_full);
+    pthread_mutex_unlock(&ctx->queue_lock);
+    
     // 等待线程安全退出
     pthread_join(ctx->capture_thread, NULL);
 
@@ -218,11 +249,11 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
 
     // 清空队列
     pthread_mutex_lock(&ctx->queue_lock);
-    while (ctx->queue_count > 0) {
-        frame_node_t *node = ctx->queue[ctx->queue_head];
-        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-        ctx->queue_count--;
-        _frame_link_free_frame(ctx, node);
+    void *item = NULL;
+    while (Queue_Get(&ctx->frame_queue, &item) == QUEUE_OK) {
+        if (item != NULL) {
+            _frame_link_free_frame(ctx, (frame_node_t*)item);
+        }
     }
     pthread_mutex_unlock(&ctx->queue_lock);
 
@@ -246,6 +277,10 @@ video_err_t frame_link_get_frame(frame_link_handle_t handle,
 
     // 拷贝帧数据
     memcpy(frame, &node->frame, sizeof(video_frame_t));
+    
+    // 【重要】释放节点（因为我们已经拷贝了数据）
+    _frame_link_free_frame(ctx, node);
+    
     return VIDEO_OK;
 }
 
@@ -257,26 +292,9 @@ video_err_t frame_link_put_frame(frame_link_handle_t handle,
     }
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    // 通过index找到对应的帧节点
-    pthread_mutex_lock(&ctx->pool_lock);
-    frame_node_t *node = NULL;
-    for (uint32_t i = 0; i < ctx->pool_size; i++) {
-        if (ctx->frame_pool[i].frame.index == frame->index) {
-            node = &ctx->frame_pool[i];
-            break;
-        }
-    }
-    pthread_mutex_unlock(&ctx->pool_lock);
-
-    if (node == NULL) {
-        return VIDEO_ERR_INVALID_PARAM;
-    }
-
     // 归还HAL层缓冲区
     video_put_frame(ctx->hal_handle, frame);
-
-    // 释放帧节点
-    _frame_link_free_frame(ctx, node);
+    
     return VIDEO_OK;
 }
 
@@ -311,64 +329,62 @@ video_err_t frame_link_deinit(frame_link_handle_t handle)
     video_close(ctx->hal_handle);
 
     // 释放资源
-    pthread_mutex_destroy(&ctx->pool_lock);
     pthread_mutex_destroy(&ctx->queue_lock);
     pthread_cond_destroy(&ctx->queue_not_empty);
     pthread_cond_destroy(&ctx->queue_not_full);
 
-    free(ctx->queue);
-    free(ctx->frame_pool);
+    // 【重构】释放通用组件缓冲区
+    if (ctx->queue_buffer) free(ctx->queue_buffer);
+    if (ctx->pool_memory_buffer) free(ctx->pool_memory_buffer);
+    if (ctx->pool_free_list_buffer) free(ctx->pool_free_list_buffer);
+
     free(ctx);
 
     return VIDEO_OK;
 }
 
 // ==========================================================================
-// 内部辅助函数实现（无修改）
+// 内部辅助函数实现（重构版）
 // ==========================================================================
+
 static frame_node_t* _frame_link_alloc_frame(frame_link_context_t *ctx)
 {
-    pthread_mutex_lock(&ctx->pool_lock);
     frame_node_t *node = NULL;
-    for (uint32_t i = 0; i < ctx->pool_size; i++) {
-        if (!ctx->frame_pool[i].in_use) {
-            node = &ctx->frame_pool[i];
-            node->in_use = true;
-            node->ref_count = 1;
-            break;
-        }
+    PoolErr_t err = Pool_Acquire(&ctx->frame_pool, (void**)&node);
+    
+    if (err != POOL_OK || node == NULL) {
+        return NULL;
     }
-    pthread_mutex_unlock(&ctx->pool_lock);
+    
+    // 清零节点
+    memset(node, 0, sizeof(frame_node_t));
     return node;
 }
 
 static void _frame_link_free_frame(frame_link_context_t *ctx, frame_node_t *node)
 {
     if (node == NULL) return;
-
-    pthread_mutex_lock(&ctx->pool_lock);
-    node->in_use = false;
-    node->ref_count = 0;
-    memset(&node->frame, 0, sizeof(video_frame_t));
-    pthread_mutex_unlock(&ctx->pool_lock);
+    Pool_Release(&ctx->frame_pool, node);
 }
 
 static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node)
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
-    // 队列满：丢旧帧
-    if (ctx->queue_count >= ctx->queue_size) {
-        frame_node_t *old_node = ctx->queue[ctx->queue_head];
-        ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-        ctx->queue_count--;
-        _frame_link_free_frame(ctx, old_node);
+    // 【重构】队列满：丢旧帧
+    if (Queue_IsFull(&ctx->frame_queue)) {
+        void *old_node = NULL;
+        if (Queue_Get(&ctx->frame_queue, &old_node) == QUEUE_OK && old_node != NULL) {
+            _frame_link_free_frame(ctx, (frame_node_t*)old_node);
+        }
     }
 
-    // 入队
-    ctx->queue[ctx->queue_tail] = node;
-    ctx->queue_tail = (ctx->queue_tail + 1) % ctx->queue_size;
-    ctx->queue_count++;
+    // 【重构】入队
+    QueueErr_t qerr = Queue_Put(&ctx->frame_queue, node);
+    if (qerr != QUEUE_OK) {
+        pthread_mutex_unlock(&ctx->queue_lock);
+        return -1;
+    }
 
     // 通知等待者
     pthread_cond_signal(&ctx->queue_not_empty);
@@ -386,7 +402,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
-    while (ctx->queue_count == 0 && ctx->running) {
+    while (Queue_IsEmpty(&ctx->frame_queue) && ctx->running) {
         if (timeout_ms == 0) {
             pthread_cond_wait(&ctx->queue_not_empty, &ctx->queue_lock);
         } else {
@@ -402,15 +418,14 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
         }
     }
 
-    if (!ctx->running || ctx->queue_count == 0) {
+    if (!ctx->running || Queue_IsEmpty(&ctx->frame_queue)) {
         pthread_mutex_unlock(&ctx->queue_lock);
         return NULL;
     }
 
-    // 出队
-    frame_node_t *node = ctx->queue[ctx->queue_head];
-    ctx->queue_head = (ctx->queue_head + 1) % ctx->queue_size;
-    ctx->queue_count--;
+    // 【重构】出队
+    frame_node_t *node = NULL;
+    Queue_Get(&ctx->frame_queue, (void**)&node);
 
     pthread_cond_signal(&ctx->queue_not_full);
     pthread_mutex_unlock(&ctx->queue_lock);
@@ -419,7 +434,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 }
 
 // ==========================================================================
-// 【核心修复】采集线程：先检查退出标志，再poll，立即响应退出
+// 采集线程（保持不变）
 // ==========================================================================
 static void* _frame_link_capture_thread(void *arg)
 {
@@ -435,19 +450,18 @@ static void* _frame_link_capture_thread(void *arg)
     fds[1].fd = ctx->exit_pipe_read_fd;
     fds[1].events = POLLIN;
 
-    // ============== 修复：先检查全局退出标志，再poll ==============
     while (g_app_ctx.app_running && ctx->running) 
     {
         // poll超时缩短为10ms，极低延迟响应退出
         int poll_ret = poll(fds, 2, 10);
 
-        // ============== 修复：全局退出标志（兜底，最高优先级） ==============
+        // 全局退出标志（兜底，最高优先级）
         if (!g_app_ctx.app_running) {
             LOG_I("Frame Link: Capture thread global exit triggered");
             break;
         }
 
-        // ============== 修复：退出管道事件（立即退出） ==============
+        // 退出管道事件（立即退出）
         if (fds[1].revents & POLLIN) {
             LOG_I("Frame Link: Capture thread received exit pipe signal");
             break;
@@ -467,12 +481,17 @@ static void* _frame_link_capture_thread(void *arg)
                 continue;
             }
 
-            // 帧就绪回调
-            if (ctx->frame_ready_cb != NULL) {
-                ctx->frame_ready_cb(&hal_frame, ctx->cb_user_data);
+            // 【重构】从池里分配节点
+            frame_node_t *node = _frame_link_alloc_frame(ctx);
+            if (node != NULL) {
+                // 拷贝HAL帧数据到节点
+                memcpy(&node->frame, &hal_frame, sizeof(video_frame_t));
+                
+                // 入队
+                _frame_link_enqueue(ctx, node);
             }
 
-            // 归还缓冲区
+            // 归还HAL层缓冲区
             video_put_frame(ctx->hal_handle, &hal_frame);
 
             if (++frame_count % 30 == 0) {
