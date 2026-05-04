@@ -1,0 +1,129 @@
+============ 嵌入式Linux视觉采集终端 - 实际目录结构 ============
+
+
+
+/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal
+├── Makefile
+├── Makefile.build
+├── bsp
+├── common
+│   ├── Makefile
+│   ├── configs
+│   │   ├── main.h
+│   │   └── vision_ai_config.h
+│   ├── img_proc
+│   │   ├── inc
+│   │   │   └── img_proc.h
+│   │   └── src
+│   │       └── img_proc_c.c
+│   ├── log
+│   │   ├── inc
+│   │   │   └── log.h
+│   │   └── src
+│   │       └── log.c
+│   ├── plugin
+│   │   ├── inc
+│   │   │   └── plugin_loader.h
+│   │   └── src
+│   │       └── plugin_loader.c
+│   ├── pool
+│   │   ├── inc
+│   │   │   └── pool.h
+│   │   └── src
+│   │       └── pool.c
+│   ├── queue
+│   │   ├── inc
+│   │   │   └── queue.h
+│   │   └── src
+│   │       └── queue.c
+│   ├── thread
+│   │   ├── inc
+│   │   │   └── thread.h
+│   │   └── src
+│   │       └── thread.c
+│   └── utils
+│       ├── inc
+│       │   └── utils.h
+│       └── src
+│           └── utils.c
+├── documents
+│   └── cur_issue.assets
+├── output
+│   ├── compile_commands.json
+│   └── vision_ai_app
+├── plugins
+│   ├── Makefile
+│   ├── app_plugins
+│   │   ├── inc
+│   │   │   └── demo_app.h
+│   │   └── src
+│   │       └── demo_app.c
+│   ├── hal_plugins
+│   │   └── video_usb
+│   │       ├── inc
+│   │       │   └── video_usb.h
+│   │       └── src
+│   │           ├── video_hal.c
+│   │           └── video_usb.c
+│   └── service_plugins
+│       ├── capture_srv
+│       │   └── src
+│       │       └── capture_srv.c
+│       ├── face_detect_srv
+│       │   ├── inc
+│       │   │   └── ultra_face_mnn.h
+│       │   ├── model
+│       │   └── src
+│       │       ├── face_detect_srv.c
+│       │       └── ultra_face_mnn.c
+│       ├── inc
+│       └── src
+├── src
+│   ├── Makefile
+│   ├── app
+│   │   └── main.c
+│   ├── bus
+│   │   ├── data_bus
+│   │   │   ├── inc
+│   │   │   │   └── data_bus.h
+│   │   │   └── src
+│   │   │       └── data_bus.c
+│   │   └── event_bus
+│   │       ├── inc
+│   │       │   └── event_bus.h
+│   │       └── src
+│   │           └── event_bus.c
+│   ├── fsm
+│   │   ├── global_fsm
+│   │   │   ├── inc
+│   │   │   │   └── global_fsm.h
+│   │   │   └── src
+│   │   │       └── global_fsm.c
+│   │   └── module_fsm
+│   │       ├── inc
+│   │       │   └── module_fsm.h
+│   │       └── src
+│   │           └── module_fsm.c
+│   ├── hal
+│   │   └── video
+│   │       └── inc
+│   │           └── video_hal.h
+│   ├── link
+│   │   ├── audio_link
+│   │   │   ├── inc
+│   │   │   └── src
+│   │   └── frame_link
+│   │       ├── inc
+│   │       │   └── frame_link.h
+│   │       └── src
+│   │           └── frame_link.c
+│   └── service
+│       ├── capture_srv
+│       │   └── inc
+│       │       └── capture_srv.h
+│       └── face_detect_srv
+│           └── inc
+│               └── face_detect_srv.h
+└── third_lib
+
+77 directories, 46 files

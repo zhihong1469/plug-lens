@@ -9,7 +9,9 @@ SRC_FILES := \
 	plugin/src/plugin_loader.c \
 	pool/src/pool.c \
 	utils/src/utils.c \
-	thread/src/thread.c
+	thread/src/thread.c \
+	img_proc/src/img_proc_c.c \
+
 # 2. 头文件路径
 INC_FLAGS := \
 	-I$(TOPDIR)/common/log/inc \
@@ -18,6 +20,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/utils/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
+	-I$(TOPDIR)/common/img_proc/inc \
 	-I$(TOPDIR)/common/pool/inc \
 	-I$(TOPDIR)/common/utils/inc \
 	-I$(TOPDIR)/common/thread/inc

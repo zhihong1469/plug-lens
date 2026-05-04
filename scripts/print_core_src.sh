@@ -38,7 +38,7 @@ echo -e "\n\n" >> "$OUTPUT_FILE"
 # ===================== 4. 采集服务层 =====================
 echo "--- [4/8] 业务服务 - CaptureSrv ---" >> "$OUTPUT_FILE"
 cat "$PROJECT_ROOT/src/service/capture_srv/inc/capture_srv.h" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/src/service/capture_srv/src/capture_srv.c" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/plugins/service_plugins/capture_srv/src/capture_srv.c" >> "$OUTPUT_FILE"
 echo -e "\n\n" >> "$OUTPUT_FILE"
 
 # ===================== 5. USB摄像头HAL驱动 =====================

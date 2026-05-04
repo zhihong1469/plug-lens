@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <termios.h>
 #include "log.h"
 #include "event_bus.h"
 #include "data_bus.h"
@@ -11,11 +12,19 @@
 #include "module_fsm.h"
 #include "capture_srv.h"
 #include "demo_app.h"
-#include "vision_ai_config.h" 
+#include "vision_ai_config.h"
 #include "main.h"
 
 // 全局唯一应用上下文（公共层实例化，无零散全局变量）
 app_context_t g_app_ctx = {0};
+
+// ==========================================================================
+// 内部静态辅助函数声明（仅 main.c 内部使用）
+// ==========================================================================
+static int _main_init_buses(void);
+static int _main_init_global_fsm(void);
+static int _main_init_capture_service(void);
+static int _main_init_demo_application(void);
 
 // ==========================================================================
 // 终端 公共基建实现
@@ -156,6 +165,122 @@ static void _main_on_g_fsm_event(global_event_t event,
 }
 
 // ==========================================================================
+// 3.【封装】双总线初始化（事件总线 + 数据总线）
+// ==========================================================================
+static int _main_init_buses(void)
+{
+    int ret = 0;
+
+    LOG_I("Main: Initializing Event Bus...");
+    event_bus_config_t evt_bus_cfg = {0};
+    evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
+    ret = event_bus_init(&evt_bus_cfg, &g_app_ctx.evt_bus);
+    if (ret != 0) {
+        LOG_E("Main: Failed to init Event Bus");
+        return -1;
+    }
+
+    LOG_I("Main: Initializing Data Bus...");
+    data_bus_config_t data_bus_cfg = {0};
+    data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
+    data_bus_cfg.max_item_size = 2 * 1024 * 1024;
+    ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
+    if (ret != 0) {
+        LOG_E("Main: Failed to init Data Bus");
+        return -1;
+    }
+
+    return 0;
+}
+
+// ==========================================================================
+// 4.【封装】全局状态机初始化
+// ==========================================================================
+static int _main_init_global_fsm(void)
+{
+    int ret = 0;
+    LOG_I("Main: Initializing Global FSM...");
+    
+    global_fsm_config_t g_fsm_cfg = {0};
+    g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
+    g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
+    g_fsm_cfg.event_cb = _main_on_g_fsm_event;
+    g_fsm_cfg.user_data = NULL;
+    
+    ret = global_fsm_init(&g_fsm_cfg, &g_app_ctx.g_fsm);
+    if (ret != 0) {
+        LOG_E("Main: Failed to init Global FSM");
+        return -1;
+    }
+
+    return 0;
+}
+
+// ==========================================================================
+// 5.【封装】采集服务初始化 + 子状态机注册
+// ==========================================================================
+static int _main_init_capture_service(void)
+{
+    int ret = 0;
+    LOG_I("Main: Initializing Capture Service...");
+
+    capture_srv_config_t cap_srv_cfg = {0};
+    cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
+    cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
+    cap_srv_cfg.link_cfg.hal_config.height = CONFIG_CAPTURE_HEIGHT;
+    cap_srv_cfg.link_cfg.hal_config.fps = CONFIG_CAPTURE_FPS;
+    cap_srv_cfg.link_cfg.hal_config.format = CONFIG_CAPTURE_FORMAT;
+    cap_srv_cfg.link_cfg.hal_config.buf_count = CONFIG_CAPTURE_BUF_COUNT;
+    cap_srv_cfg.link_cfg.hal_config.lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE;
+    cap_srv_cfg.link_cfg.hal_config.lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE;
+    cap_srv_cfg.link_cfg.hal_config.lock_gain = CONFIG_CAPTURE_LOCK_GAIN;
+    cap_srv_cfg.link_cfg.frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE;
+    cap_srv_cfg.link_cfg.queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE;
+    
+    cap_srv_cfg.evt_bus = g_app_ctx.evt_bus;
+    cap_srv_cfg.data_bus = g_app_ctx.data_bus;
+    cap_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
+    cap_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
+    cap_srv_cfg.auto_start = false;
+
+    ret = capture_srv_create(&cap_srv_cfg, &g_app_ctx.cap_srv);
+    if (ret != 0) {
+        LOG_E("Main: Failed to create Capture Service");
+        return -1;
+    }
+
+    // 注册子状态机到全局状态机
+    module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_app_ctx.cap_srv);
+    global_fsm_register_module(g_app_ctx.g_fsm, "capture_srv", cap_fsm, true);
+
+    return 0;
+}
+
+// ==========================================================================
+// 6.【封装】Demo App 初始化
+// ==========================================================================
+static int _main_init_demo_application(void)
+{
+    int ret = 0;
+    LOG_I("Main: Initializing Demo App...");
+
+    demo_app_config_t app_cfg = {0};
+    app_cfg.evt_bus = g_app_ctx.evt_bus;
+    app_cfg.data_bus = g_app_ctx.data_bus;
+    app_cfg.g_fsm = g_app_ctx.g_fsm;
+    app_cfg.cap_srv = g_app_ctx.cap_srv;
+    app_cfg.exit_pipe_read_fd = g_app_ctx.exit_pipe[0];
+
+    ret = demo_app_init(&app_cfg);
+    if (ret != 0) {
+        LOG_E("Main: Failed to init Demo App");
+        return -1;
+    }
+
+    return 0;
+}
+
+// ==========================================================================
 // 统一资源清理（基建层收口，顺序可控）
 // ==========================================================================
 static void _cleanup_resources(void)
@@ -163,10 +288,10 @@ static void _cleanup_resources(void)
     LOG_I("Main: Starting resource cleanup...");
 
     _restore_terminal_mode();
-    // ============== 修复：先反初始化业务插件（停止所有线程） ==============
+    // 先反初始化业务插件（停止所有线程）
     demo_app_deinit();
 
-    // ============== 修复：再销毁采集服务（停止硬件采集） ==============
+    // 再销毁采集服务（停止硬件采集）
     if (g_app_ctx.cap_srv) {
         capture_srv_destroy(g_app_ctx.cap_srv);
         g_app_ctx.cap_srv = NULL;
@@ -191,7 +316,7 @@ static void _cleanup_resources(void)
 }
 
 // ==========================================================================
-// 主函数：纯架构流水线，零业务逻辑
+// 主函数：纯架构流水线，零业务逻辑（极致简洁）
 // ==========================================================================
 int main(int argc, char **argv)
 {
@@ -205,94 +330,28 @@ int main(int argc, char **argv)
     LOG_I("Main: Vision AI Application Starting...");
     LOG_I("Main: ========================================");
 
-    // 2. 基建层初始化（信号 -> 管道 -> 终端 顺序固定）
+    // 2. 基建层初始化（信号 -> 管道 -> 终端）
     _init_signal_handling();
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();
 
-    // 3. 初始化双总线
-    LOG_I("Main: Initializing Event Bus...");
-    event_bus_config_t evt_bus_cfg = {0};
-    evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
-    ret = event_bus_init(&evt_bus_cfg, &g_app_ctx.evt_bus);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Event Bus");
-        goto error_exit;
-    }
+    // 3. 初始化双总线（封装函数）
+    if (_main_init_buses() != 0) goto error_exit;
 
-    LOG_I("Main: Initializing Data Bus...");
-    data_bus_config_t data_bus_cfg = {0};
-    data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
-    data_bus_cfg.max_item_size = 2 * 1024 * 1024;
-    ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Data Bus");
-        goto error_exit;
-    }
+    // 4. 初始化全局状态机（封装函数）
+    if (_main_init_global_fsm() != 0) goto error_exit;
 
-    // 4. 初始化全局状态机
-    LOG_I("Main: Initializing Global FSM...");
-    global_fsm_config_t g_fsm_cfg = {0};
-    g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
-    g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
-    g_fsm_cfg.event_cb = _main_on_g_fsm_event;
-    g_fsm_cfg.user_data = NULL;
-    ret = global_fsm_init(&g_fsm_cfg, &g_app_ctx.g_fsm);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Global FSM");
-        goto error_exit;
-    }
+    // 5. 初始化采集服务（封装函数）
+    if (_main_init_capture_service() != 0) goto error_exit;
 
-    // 5. 初始化采集服务
-    LOG_I("Main: Initializing Capture Service...");
-    capture_srv_config_t cap_srv_cfg = {0};
-    cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
-    cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
-    cap_srv_cfg.link_cfg.hal_config.height = CONFIG_CAPTURE_HEIGHT;
-    cap_srv_cfg.link_cfg.hal_config.fps = CONFIG_CAPTURE_FPS;
-    cap_srv_cfg.link_cfg.hal_config.format = CONFIG_CAPTURE_FORMAT;
-    cap_srv_cfg.link_cfg.hal_config.buf_count = CONFIG_CAPTURE_BUF_COUNT;
-    cap_srv_cfg.link_cfg.hal_config.lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE;
-    cap_srv_cfg.link_cfg.hal_config.lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE;
-    cap_srv_cfg.link_cfg.hal_config.lock_gain = CONFIG_CAPTURE_LOCK_GAIN;
-    cap_srv_cfg.link_cfg.frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE;
-    cap_srv_cfg.link_cfg.queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE;
-    
-    cap_srv_cfg.evt_bus = g_app_ctx.evt_bus;
-    cap_srv_cfg.data_bus = g_app_ctx.data_bus;
-    cap_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
-    cap_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
-    cap_srv_cfg.auto_start = false;
+    // 6. 初始化业务应用（封装函数）
+    if (_main_init_demo_application() != 0) goto error_exit;
 
-    ret = capture_srv_create(&cap_srv_cfg, &g_app_ctx.cap_srv);
-    if (ret != 0) {
-        LOG_E("Main: Failed to create Capture Service");
-        goto error_exit;
-    }
-
-    module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_app_ctx.cap_srv);
-    global_fsm_register_module(g_app_ctx.g_fsm, "capture_srv", cap_fsm, true);
-
-    // 6. 初始化业务插件（注入顶层上下文+管道读端）
-    LOG_I("Main: Initializing Demo App...");
-    demo_app_config_t app_cfg = {0};
-    app_cfg.evt_bus = g_app_ctx.evt_bus;
-    app_cfg.data_bus = g_app_ctx.data_bus;
-    app_cfg.g_fsm = g_app_ctx.g_fsm;
-    app_cfg.cap_srv = g_app_ctx.cap_srv;
-    app_cfg.exit_pipe_read_fd = g_app_ctx.exit_pipe[0]; // 注入管道读端
-
-    ret = demo_app_init(&app_cfg);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Demo App");
-        goto error_exit;
-    }
-
-    // 7. 进入业务主循环
+    // 7. 启动业务主循环
     LOG_I("Main: Entering main loop...");
     demo_app_run();
 
-    // 8. 正常退出流程
+    // 8. 正常退出
     LOG_I("Main: ========================================");
     LOG_I("Main: Application exited normally");
     LOG_I("Main: ========================================");
