@@ -14,6 +14,16 @@
 #include <pthread.h>
 #endif
 
+#define QUEUE_STATIC_BUFFER_SIZE(type, count)  (sizeof(type*) * (count))
+/**
+ * @brief 辅助宏：定义队列静态缓冲区
+ * @param name 缓冲区名称
+ * @param type 队列元素类型（指针类型）
+ * @param count 队列容量
+ */
+#define QUEUE_DEFINE_STATIC_BUFFER(name, type, count) \
+    static type* name[count]
+
 // ==========================================================================
 // 队列句柄结构体（通用指针队列）
 // ==========================================================================

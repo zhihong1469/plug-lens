@@ -1,4 +1,3 @@
-// src/link/frame_link/inc/frame_link.h
 #ifndef FRAME_LINK_H
 #define FRAME_LINK_H
 
