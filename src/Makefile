@@ -10,9 +10,8 @@ SRC_FILES := \
 	fsm/global_fsm/src/global_fsm.c \
 	fsm/module_fsm/src/module_fsm.c \
 	link/frame_link/src/frame_link.c 
-	
 
-# 2. 头文件路径：所有核心模块的 inc
+# 2. 头文件路径（修正：只包含目录，不包含具体 .h 文件）
 INC_FLAGS := \
 	-I$(TOPDIR)/src/hal/video/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
@@ -23,6 +22,9 @@ INC_FLAGS := \
 	-I$(TOPDIR)/src/service/capture_srv/inc \
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/pool/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/plugins/hal_plugins/video_usb/inc \
