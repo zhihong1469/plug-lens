@@ -1,0 +1,38 @@
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version-RFB/RFB-320-quant-ADMM-32.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.265346 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：48
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version-RFB/RFB-320-quant-KL-5792.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.275642 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：47
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version- ./imgs/1.jpg
+imgs/
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version-slim/slim-320.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.319285 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：48
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version-slim/slim-320-quant-ADMM-50.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.224787 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：1
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/version-RFB/RFB-320.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.396443 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：46
+[root@100ask:/mnt/run_on_board]# ./Ultra-face-mnn ./model/quant/RFB-320_my_int8.mnn ./imgs/1.jpg
+The device support dot:0, support fp16:0, support i8mm: 0
+Processing ./imgs/1.jpg
+inference time:0.274274 s
+检测完成！结果已保存：result.jpg
+发现人脸数量：39
