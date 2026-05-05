@@ -8,7 +8,7 @@
 #include "data_bus.h"
 #include "global_fsm.h"
 #include "capture_srv.h"
-
+#include "face_detect_srv.h"
 // ==========================================================================
 // 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
 // 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
@@ -21,7 +21,7 @@ typedef struct {
     // 状态机 & 业务服务句柄
     global_fsm_handle_t     g_fsm;
     capture_srv_handle_t    cap_srv;
-
+    face_detect_srv_handle_t face_detect_srv;
     // 优雅退出：内核管道（替代全局quit_flag，线程安全、事件驱动）
     int                     exit_pipe[2];     // [0]读端 / [1]写端
 

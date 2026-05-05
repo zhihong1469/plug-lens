@@ -49,6 +49,7 @@ third_lib/face_detector/model/quant/*.json
 # 放行【预编译的第三方依赖库】（ARM版MNN+OpenCV，用户必备）
 !/third_lib/opencv_lib/lib/**
 !/third_lib/opencv_lib/include/**
-!/third_lib/face_detector/libMNN.so
+!/third_lib/face_detector/mnn/lib/**
+!/third_lib/face_detector/mnn/include/**
 # 放行AI模型文件（核心资源，必须提交）
 !*.mnn
