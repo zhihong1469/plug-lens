@@ -1,33 +1,43 @@
 #include "UltraFace.hpp"
 #include <iostream>
-#include <vector>
 #include <opencv2/opencv.hpp>
 
-int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::cout << "Usage: " << argv[0] << " <model.mnn> <image_path>" << std::endl;
+using namespace std;
+
+int main(int argc, char **argv) {
+    if (argc <= 2) {
+        fprintf(stderr, "Usage: %s <mnn .mnn> [image files...]\n", argv[0]);
         return 1;
     }
 
-    // 初始化模型
-    UltraFace ultraface(argv[1], 320, 240, 1, 0.65f, 0.5f);
+    string mnn_path = argv[1];
+    // 🔥 修复：单核CPU，线程数必须改为 1
+    UltraFace ultraface(mnn_path, 320, 240, 1, 0.65); 
 
-    // 读取图片
-    cv::Mat img = cv::imread(argv[2]);
-    if (img.empty()) {
-        std::cout << "Failed to read image!" << std::endl;
-        return -1;
+    for (int i = 2; i < argc; i++) {
+        string image_file = argv[i];
+        cout << "Processing " << argv[i] << endl;
+
+        cv::Mat frame = cv::imread(image_file);
+        vector<FaceInfo> face_info;
+        
+        try {
+            ultraface.detect(frame, face_info);
+        } catch (...) {
+            cout << "Detect error" << endl;
+            continue;
+        }
+
+        // 绘制框
+        for (auto face : face_info) {
+            cv::rectangle(frame, cv::Point(face.x1, face.y1), cv::Point(face.x2, face.y2), cv::Scalar(0,255,0), 2);
+        }
+
+        // 保存结果，不显示
+        string result_name = "result.jpg";
+        cv::imwrite(result_name, frame);
+        cout << "检测完成！结果已保存：" << result_name << endl;
+        cout << "发现人脸数量：" << face_info.size() << endl;
     }
-
-    // 人脸检测
-    std::vector<FaceInfo> face_list;
-    ultraface.detect(img, face_list);
-
-    // 打印结果
-    std::cout << "Detect " << face_list.size() << " faces" << std::endl;
-    for (auto& face : face_list) {
-        std::cout << "Face: [" << face.x1 << "," << face.y1 << "," << face.x2 << "," << face.y2 << "] score: " << face.score << std::endl;
-    }
-
     return 0;
 }

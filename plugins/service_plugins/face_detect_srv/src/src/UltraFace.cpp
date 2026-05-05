@@ -1,6 +1,10 @@
+//  Created by Linzaer on 2019/11/15.
+//  Copyright © 2019 Linzaer. All rights reserved.
+
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
+
 #include "UltraFace.hpp"
-#include <cstdlib> // 新增malloc头文件
+
 using namespace std;
 
 UltraFace::UltraFace(const std::string &mnn_path,
@@ -20,10 +24,11 @@ UltraFace::UltraFace(const std::string &mnn_path,
         }
         featuremap_size.push_back(fm_item);
     }
+
     for (auto size : w_h_list) {
         shrinkage_size.push_back(strides);
     }
-
+    /* generate prior anchors */
     for (int index = 0; index < num_featuremap; index++) {
         float scale_w = in_w / shrinkage_size[0][index];
         float scale_h = in_h / shrinkage_size[1][index];
@@ -31,6 +36,7 @@ UltraFace::UltraFace(const std::string &mnn_path,
             for (int i = 0; i < featuremap_size[0][index]; i++) {
                 float x_center = (i + 0.5) / scale_w;
                 float y_center = (j + 0.5) / scale_h;
+
                 for (float k : min_boxes[index]) {
                     float w = k / in_w;
                     float h = k / in_h;
@@ -39,16 +45,21 @@ UltraFace::UltraFace(const std::string &mnn_path,
             }
         }
     }
+    /* generate prior anchors finished */
+
     num_anchors = priors.size();
 
     ultraface_interpreter = std::shared_ptr<MNN::Interpreter>(MNN::Interpreter::createFromFile(mnn_path.c_str()));
     MNN::ScheduleConfig config;
-    config.numThread = 1;
+    config.numThread = num_thread;
     MNN::BackendConfig backendConfig;
-    backendConfig.precision = MNN::BackendConfig::PrecisionMode(2);
+    backendConfig.precision = (MNN::BackendConfig::PrecisionMode) 2;
     config.backendConfig = &backendConfig;
+
     ultraface_session = ultraface_interpreter->createSession(config);
+
     input_tensor = ultraface_interpreter->getSessionInput(ultraface_session, nullptr);
+
 }
 
 UltraFace::~UltraFace() {
@@ -56,68 +67,54 @@ UltraFace::~UltraFace() {
     ultraface_interpreter->releaseSession(ultraface_session);
 }
 
-void UltraFace::yuyv_to_rgb(const unsigned char* yuyv, unsigned char* rgb, int w, int h) {
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x += 2) {
-            int idx = (y * w + x) * 2;
-            unsigned char Y0 = yuyv[idx];
-            unsigned char U  = yuyv[idx+1];
-            unsigned char Y1 = yuyv[idx+2];
-            unsigned char V  = yuyv[idx+3];
-
-            int R0 = Y0 + 1.402f * (V - 128);
-            int G0 = Y0 - 0.344f * (U - 128) - 0.714f * (V - 128);
-            int B0 = Y0 + 1.772f * (U - 128);
-            int R1 = Y1 + 1.402f * (V - 128);
-            int G1 = Y1 - 0.344f * (U - 128) - 0.714f * (V - 128);
-            int B1 = Y1 + 1.772f * (U - 128);
-
-            R0 = std::max(0, std::min(255, R0));
-            G0 = std::max(0, std::min(255, G0));
-            B0 = std::max(0, std::min(255, B0));
-            R1 = std::max(0, std::min(255, R1));
-            G1 = std::max(0, std::min(255, G1));
-            B1 = std::max(0, std::min(255, B1));
-
-            int pos = (y * w + x) * 3;
-            rgb[pos]   = R0; rgb[pos+1] = G0; rgb[pos+2] = B0;
-            rgb[pos+3] = R1; rgb[pos+4] = G1; rgb[pos+5] = B1;
-        }
+int UltraFace::detect(cv::Mat &raw_image, std::vector<FaceInfo> &face_list) {
+    if (raw_image.empty()) {
+        std::cout << "image is empty ,please check!" << std::endl;
+        return -1;
     }
-}
 
-int UltraFace::detect(const unsigned char* yuyv_320x240, std::vector<FaceInfo> &face_list) {
-    image_w = in_w;
-    image_h = in_h;
+    image_h = raw_image.rows;
+    image_w = raw_image.cols;
+    cv::Mat image;
+    cv::resize(raw_image, image, cv::Size(in_w, in_h));
 
-    // ✅ 修复：堆分配RGB数据，彻底解决栈溢出
-    unsigned char* rgb_data = (unsigned char*)malloc(320*240*3);
-    yuyv_to_rgb(yuyv_320x240, rgb_data, 320, 240);
-
-    ultraface_interpreter->resizeTensor(input_tensor, {1, 3, in_h, in_w});
+    // ultraface_interpreter->resizeTensor(input_tensor, {1, 3, in_h, in_w});
     ultraface_interpreter->resizeSession(ultraface_session);
+    std::shared_ptr<MNN::CV::ImageProcess> pretreat(
+            MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, mean_vals, 3,
+                                          norm_vals, 3));
+    pretreat->convert(image.data, in_w, in_h, image.step[0], input_tensor);
 
-    float* input_ptr = input_tensor->host<float>();
-    for (int i = 0; i < 320*240*3; i++) {
-        input_ptr[i] = (rgb_data[i] - mean_vals[i%3]) * norm_vals[i%3];
-    }
+    auto start = chrono::steady_clock::now();
 
+
+    // run network
     ultraface_interpreter->runSession(ultraface_session);
 
-    MNN::Tensor *tensor_scores = ultraface_interpreter->getSessionOutput(ultraface_session, "scores");
-    MNN::Tensor *tensor_boxes = ultraface_interpreter->getSessionOutput(ultraface_session, "boxes");
+    // get output data
+
+    string scores = "scores";
+    string boxes = "boxes";
+    MNN::Tensor *tensor_scores = ultraface_interpreter->getSessionOutput(ultraface_session, scores.c_str());
+    MNN::Tensor *tensor_boxes = ultraface_interpreter->getSessionOutput(ultraface_session, boxes.c_str());
 
     MNN::Tensor tensor_scores_host(tensor_scores, tensor_scores->getDimensionType());
+
     tensor_scores->copyToHostTensor(&tensor_scores_host);
+
     MNN::Tensor tensor_boxes_host(tensor_boxes, tensor_boxes->getDimensionType());
+
     tensor_boxes->copyToHostTensor(&tensor_boxes_host);
 
     std::vector<FaceInfo> bbox_collection;
+
+
+    auto end = chrono::steady_clock::now();
+    chrono::duration<double> elapsed = end - start;
+    cout << "inference time:" << elapsed.count() << " s" << endl;
+
     generateBBox(bbox_collection, tensor_scores, tensor_boxes);
     nms(bbox_collection, face_list);
-
-    // ✅ 修复：释放堆内存
-    free(rgb_data);
     return 0;
 }
 
@@ -142,48 +139,83 @@ void UltraFace::generateBBox(std::vector<FaceInfo> &bbox_collection, MNN::Tensor
 
 void UltraFace::nms(std::vector<FaceInfo> &input, std::vector<FaceInfo> &output, int type) {
     std::sort(input.begin(), input.end(), [](const FaceInfo &a, const FaceInfo &b) { return a.score > b.score; });
+
     int box_num = input.size();
+
     std::vector<int> merged(box_num, 0);
 
     for (int i = 0; i < box_num; i++) {
-        if (merged[i]) continue;
+        if (merged[i])
+            continue;
         std::vector<FaceInfo> buf;
-        buf.push_back(input[i]); merged[i] = 1;
+
+        buf.push_back(input[i]);
+        merged[i] = 1;
+
         float h0 = input[i].y2 - input[i].y1 + 1;
         float w0 = input[i].x2 - input[i].x1 + 1;
+
         float area0 = h0 * w0;
 
         for (int j = i + 1; j < box_num; j++) {
-            if (merged[j]) continue;
-            float inner_x0 = std::max(input[i].x1, input[j].x1);
-            float inner_y0 = std::max(input[i].y1, input[j].y1);
-            float inner_x1 = std::min(input[i].x2, input[j].x2);
-            float inner_y1 = std::min(input[i].y2, input[j].y2);
+            if (merged[j])
+                continue;
+
+            float inner_x0 = input[i].x1 > input[j].x1 ? input[i].x1 : input[j].x1;
+            float inner_y0 = input[i].y1 > input[j].y1 ? input[i].y1 : input[j].y1;
+
+            float inner_x1 = input[i].x2 < input[j].x2 ? input[i].x2 : input[j].x2;
+            float inner_y1 = input[i].y2 < input[j].y2 ? input[i].y2 : input[j].y2;
+
             float inner_h = inner_y1 - inner_y0 + 1;
             float inner_w = inner_x1 - inner_x0 + 1;
 
-            if (inner_h <= 0 || inner_w <= 0) continue;
+            if (inner_h <= 0 || inner_w <= 0)
+                continue;
+
             float inner_area = inner_h * inner_w;
+
             float h1 = input[j].y2 - input[j].y1 + 1;
             float w1 = input[j].x2 - input[j].x1 + 1;
+
             float area1 = h1 * w1;
-            float iou = inner_area / (area0 + area1 - inner_area);
 
-            if (iou > iou_threshold) { merged[j] = 1; buf.push_back(input[j]); }
-        }
+            float score;
 
-        if (type == hard_nms) output.push_back(buf[0]);
-        if (type == blending_nms) {
-            float total = 0;
-            for (auto &b : buf) total += exp(b.score);
-            FaceInfo rects = {0};
-            for (auto &b : buf) {
-                float rate = exp(b.score) / total;
-                rects.x1 += b.x1 * rate; rects.y1 += b.y1 * rate;
-                rects.x2 += b.x2 * rate; rects.y2 += b.y2 * rate;
-                rects.score += b.score * rate;
+            score = inner_area / (area0 + area1 - inner_area);
+
+            if (score > iou_threshold) {
+                merged[j] = 1;
+                buf.push_back(input[j]);
             }
-            output.push_back(rects);
+        }
+        switch (type) {
+            case hard_nms: {
+                output.push_back(buf[0]);
+                break;
+            }
+            case blending_nms: {
+                float total = 0;
+                for (int i = 0; i < buf.size(); i++) {
+                    total += exp(buf[i].score);
+                }
+                FaceInfo rects;
+                memset(&rects, 0, sizeof(rects));
+                for (int i = 0; i < buf.size(); i++) {
+                    float rate = exp(buf[i].score) / total;
+                    rects.x1 += buf[i].x1 * rate;
+                    rects.y1 += buf[i].y1 * rate;
+                    rects.x2 += buf[i].x2 * rate;
+                    rects.y2 += buf[i].y2 * rate;
+                    rects.score += buf[i].score * rate;
+                }
+                output.push_back(rects);
+                break;
+            }
+            default: {
+                printf("wrong type of nms.");
+                exit(-1);
+            }
         }
     }
 }
