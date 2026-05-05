@@ -47,7 +47,9 @@
 │       └── src
 │           └── utils.c
 ├── documents
-│   └── cur_issue.assets
+│   ├── cur_issue.assets
+│   ├── design
+│   └── flowchart.js
 ├── output
 │   ├── compile_commands.json
 │   └── vision_ai_app
@@ -126,4 +128,4 @@
 │               └── face_detect_srv.h
 └── third_lib
 
-77 directories, 46 files
+78 directories, 47 files

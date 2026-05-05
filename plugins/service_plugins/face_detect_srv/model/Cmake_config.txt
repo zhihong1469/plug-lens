@@ -1,0 +1,21 @@
+cmake .. \
+-DCMAKE_SYSTEM_NAME=Linux \
+-DCMAKE_SYSTEM_PROCESSOR=armv7-a \
+-DCMAKE_C_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gcc \
+-DCMAKE_CXX_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-g++ \
+-DCMAKE_BUILD_TYPE=Release \
+-DMNN_BUILD_MINI=OFF \
+-DMNN_SEP_BUILD=OFF \
+-DMNN_ARM82=OFF \
+-DMNN_KLEIDIAI=OFF \
+-DMNN_SUPPORT_QUANT_EXTEND=ON \
+-DMNN_BUILD_SHARED_LIBS=ON \
+-DMNN_BUILD_TEST=OFF \
+-DMNN_BUILD_TOOLS=OFF \
+-DMNN_BUILD_DEMO=OFF \
+-DMNN_BUILD_PROTOBUFFER=OFF \
+-DMNN_OPENMP=OFF \
+-DMNN_USE_THREAD_POOL=ON \
+-DCMAKE_C_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
+-DCMAKE_CXX_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon"
+# 正常编译约2.6MB---以上配置约3.4---arm-buildroot-linux-gnueabihf-strip libMNN.so---极限2.7mb
