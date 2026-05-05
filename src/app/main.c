@@ -4,17 +4,12 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
-#include <termios.h>
 #include "log.h"
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
 #include "module_fsm.h"
-#include "capture_srv.h"
 #include "demo_app.h"
 #include "vision_ai_config.h"
 #include "main.h"
-
+#include "face_detect_srv.h"
 // 全局唯一应用上下文（公共层实例化，无零散全局变量）
 app_context_t g_app_ctx = {0};
 
@@ -25,6 +20,7 @@ static int _main_init_buses(void);
 static int _main_init_global_fsm(void);
 static int _main_init_capture_service(void);
 static int _main_init_demo_application(void);
+static int _main_init_face_detect_service(void);
 
 // ==========================================================================
 // 终端 公共基建实现
@@ -255,7 +251,47 @@ static int _main_init_capture_service(void)
 
     return 0;
 }
+// ==========================================================================
+// 【封装】人脸检测服务初始化 + 子状态机注册
+// ==========================================================================
+static int _main_init_face_detect_service(void)
+{
+    int ret = 0;
+    LOG_I("Main: Initializing Face Detect Service...");
 
+    face_detect_srv_config_t face_srv_cfg = {0};
+    
+    // AI模型配置
+    face_srv_cfg.model_path = "/usr/share/vision_ai/RFB-320-quant-KL-5792.mnn"; // 你的模型路径
+    face_srv_cfg.ai_input_w = DEFAULT_AI_W;  // 320
+    face_srv_cfg.ai_input_h = DEFAULT_AI_H;  // 240
+    face_srv_cfg.score_threshold = DEFAULT_SCORE_THRESH; // 0.65
+    face_srv_cfg.iou_threshold = DEFAULT_IOU_THRESH;     // 0.3
+    
+    // 总线句柄
+    face_srv_cfg.evt_bus = g_app_ctx.evt_bus;
+    face_srv_cfg.data_bus = g_app_ctx.data_bus;
+    
+    // 回调（给全局FSM）
+    face_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
+    face_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
+    
+    // 自动启动
+    face_srv_cfg.auto_start = false;
+
+    // 创建服务
+    ret = face_detect_srv_create(&face_srv_cfg, &g_app_ctx.face_detect_srv);
+    if (ret != 0) {
+        LOG_E("Main: Failed to create Face Detect Service");
+        return -1;
+    }
+
+    // 注册子状态机到全局状态机
+    module_fsm_handle_t face_fsm = face_detect_srv_get_fsm(g_app_ctx.face_detect_srv);
+    global_fsm_register_module(g_app_ctx.g_fsm, "face_detect_srv", face_fsm, true);
+
+    return 0;
+}
 // ==========================================================================
 // 6.【封装】Demo App 初始化
 // ==========================================================================
@@ -296,7 +332,11 @@ static void _cleanup_resources(void)
         capture_srv_destroy(g_app_ctx.cap_srv);
         g_app_ctx.cap_srv = NULL;
     }
-    
+    // 销毁人脸检测服务
+    if (g_app_ctx.face_detect_srv) {
+        face_detect_srv_destroy(g_app_ctx.face_detect_srv);
+        g_app_ctx.face_detect_srv = NULL;
+    }
     // 最后销毁核心组件
     if (g_app_ctx.g_fsm) {
         global_fsm_deinit(g_app_ctx.g_fsm);
@@ -343,6 +383,7 @@ int main(int argc, char **argv)
 
     // 5. 初始化采集服务（封装函数）
     if (_main_init_capture_service() != 0) goto error_exit;
+    if (_main_init_face_detect_service() != 0) goto error_exit;
 
     // 6. 初始化业务应用（封装函数）
     if (_main_init_demo_application() != 0) goto error_exit;

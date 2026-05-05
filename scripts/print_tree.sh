@@ -17,7 +17,7 @@ echo "============ 嵌入式Linux视觉采集终端 - 实际目录结构 =======
 echo -e "\n\n" >> "$OUTPUT_FILE"
 
 # 导出目录树（过滤编译/构建/临时文件）
-tree -I "build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags" "$PROJECT_ROOT" >> "$OUTPUT_FILE"
+tree -I "build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags|third_lib" "$PROJECT_ROOT" >> "$OUTPUT_FILE"
 
 # 完成提示
 echo -e "\033[32m ✅ 项目目录树已导出：$OUTPUT_FILE \033[0m"
