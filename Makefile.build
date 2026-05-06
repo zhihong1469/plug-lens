@@ -1,5 +1,5 @@
 # ==========================================================================
-# Makefile.build：通用编译规则（支持C/C++混合）
+# Makefile.build：通用编译规则（支持C/C++混合）【修复版】
 # ==========================================================================
 
 # 1. 接收传入的参数
@@ -14,6 +14,13 @@ OBJS_C   := $(patsubst %.c, $(OBJ_DIR)/%.o, $(filter %.c, $(SRC_FILES)))
 OBJS_CPP := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(filter %.cpp, $(SRC_FILES)))
 OBJS     := $(OBJS_C) $(OBJS_CPP)
 DEPS     := $(OBJS:.o=.d)
+
+# ===================== 【修复1】提前判断链接器（Makefile 语法写在规则外）=====================
+ifeq ($(OBJS_CPP),)
+LINKER := $(CC)
+else
+LINKER := $(CXX)
+endif
 
 # 4. 追加头文件路径和编译标志
 CFLAGS   += $(INC_FLAGS) 
@@ -34,19 +41,14 @@ $(TARGET): $(OBJS)
 ifeq ($(TARGET_TYPE), LIB)
 	$(AR) rcs $@ $(OBJS)
 else
-	# 【关键】如果有C++文件，用g++链接；否则用gcc
-	ifneq ($(OBJS_CPP),)
-		$(CXX) $(OBJS) -o $@ $(LDFLAGS)
-	else
-		$(CC) $(OBJS) -o $@ $(LDFLAGS)
-	endif
+	$(LINKER) $(OBJS) -o $@ $(LDFLAGS)
 endif
 	@echo "Built: $@"
 else
 all: $(OBJS)
 endif
 
-# 6.1 核心编译规则：.c -> .o + 生成 .d + 追加 compile_commands.json
+# 6.1 C 文件编译
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	@echo "Compiling C   : $<"
@@ -58,7 +60,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
 	@echo '  },' >> $(COMPILE_COMMANDS)
 
-# 6.2 【新增】C++文件编译规则
+# 6.2 C++ 文件编译
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	@echo "Compiling C++ : $<"
@@ -70,7 +72,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
 	@echo '  },' >> $(COMPILE_COMMANDS)
 
-# 7. 包含依赖文件（第一次编译没有 .d，用 -include 忽略错误）
+# 7. 包含依赖
 -include $(DEPS)
 
 .PHONY: all
