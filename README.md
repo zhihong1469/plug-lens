@@ -1,9 +1,14 @@
 # 快速上手（示例或长命令便携）
 编译（环境自行配置）：
  make clean && make
+传输到开发板（示例）：
+cp output/vision_ai_app ~/nfs/run_on_board/
+[root@100ask:/mnt/run_on_board]# export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
+[root@100ask:/mnt/run_on_board]# export LD_LIBRARY_PATH=/mnt/run_on_board/install_arm/lib/:$Ld_LIBRARY_PATH
+
 GDB调试：
- arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
-  开发板运行：./gdbserver :12345 ./vision_ai_app
+arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
+[root@100ask:/mnt/run_on_board]# ./gdbserver :12345 ./vision_ai_app
   target remote 192.168.5.9:12345
   thread apply all bt
 

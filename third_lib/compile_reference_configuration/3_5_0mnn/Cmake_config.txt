@@ -105,7 +105,4 @@ cp -rf /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.t
 
 cp -rf  /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/face_detector ~/nfs
 
-[root@100ask:/mnt/run_on_board]# export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
-[root@100ask:/mnt/run_on_board]# export LD_LIBRARY_PATH=/mnt/run_on_board/install_arm/lib/:$Ld_LIBRARY_PATH
 
-cp /home/luo/nfs/result.jpg ~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/output/

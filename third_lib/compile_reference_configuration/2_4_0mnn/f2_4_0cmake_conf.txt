@@ -71,7 +71,7 @@ cmake .. \
 -DCMAKE_BUILD_TYPE=Release \
 -DCMAKE_C_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
 -DCMAKE_CXX_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
--DMNN_BUILD_MINI=ON \
+-DMNN_BUILD_MINI=OFF \
 -DMNN_SEP_BUILD=OFF \
 -DMNN_ARM82=OFF \
 -DMNN_BUILD_SHARED_LIBS=ON \
@@ -88,7 +88,7 @@ make -j12
 ls -lh
 # 以上配置：
 # DMNN_BUILD_MINI---关正常编译约3.0mb---arm-buildroot-linux-gnueabihf-strip libMNN.so---极限2404k
-# DMNN_BUILD_MINI---开约2.2mb---arm-buildroot-linux-gnueabihf-strip libMNN.so---极限1750k
+# DMNN_BUILD_MINI---开约2.2mb---arm-buildroot-linux-gnueabihf-strip libMNN.so---极限1750k ——int8不可用
 
 cp -f libMNN.so /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/Ultra-Light-Fast-Generic-Face-Detector-1MB-master/MNN/mnn/lib/
 
