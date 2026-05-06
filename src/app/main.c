@@ -19,8 +19,8 @@ app_context_t g_app_ctx = {0};
 static int _main_init_buses(void);
 static int _main_init_global_fsm(void);
 static int _main_init_capture_service(void);
-static int _main_init_demo_application(void);
 static int _main_init_face_detect_service(void);
+static int _main_init_demo_application(void);
 
 // ==========================================================================
 // 终端 公共基建实现
@@ -180,6 +180,7 @@ static int _main_init_buses(void)
     data_bus_config_t data_bus_cfg = {0};
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
     data_bus_cfg.max_item_size = 2 * 1024 * 1024;
+    data_bus_cfg.max_subscribers = 16;
     ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
@@ -213,7 +214,7 @@ static int _main_init_global_fsm(void)
 }
 
 // ==========================================================================
-// 5.【封装】采集服务初始化 + 子状态机注册
+// 5.1【封装】采集服务初始化 + 子状态机注册
 // ==========================================================================
 static int _main_init_capture_service(void)
 {
@@ -251,8 +252,9 @@ static int _main_init_capture_service(void)
 
     return 0;
 }
+
 // ==========================================================================
-// 【封装】人脸检测服务初始化 + 子状态机注册
+// 5.2【封装】人脸检测服务初始化 + 子状态机注册
 // ==========================================================================
 static int _main_init_face_detect_service(void)
 {
@@ -260,38 +262,30 @@ static int _main_init_face_detect_service(void)
     LOG_I("Main: Initializing Face Detect Service...");
 
     face_detect_srv_config_t face_srv_cfg = {0};
+    face_srv_cfg.model_path = CONFIG_AI_MODEL_PATH;
+    face_srv_cfg.ai_input_w = CONFIG_AI_INPUT_W;
+    face_srv_cfg.ai_input_h = CONFIG_AI_INPUT_H;
+    face_srv_cfg.score_threshold = CONFIG_AI_SCORE_THRESH;
+    face_srv_cfg.iou_threshold = CONFIG_AI_IOU_THRESH;
     
-    // AI模型配置
-    face_srv_cfg.model_path = "/usr/share/vision_ai/RFB-320-quant-KL-5792.mnn"; // 你的模型路径
-    face_srv_cfg.ai_input_w = DEFAULT_AI_W;  // 320
-    face_srv_cfg.ai_input_h = DEFAULT_AI_H;  // 240
-    face_srv_cfg.score_threshold = DEFAULT_SCORE_THRESH; // 0.65
-    face_srv_cfg.iou_threshold = DEFAULT_IOU_THRESH;     // 0.3
-    
-    // 总线句柄
     face_srv_cfg.evt_bus = g_app_ctx.evt_bus;
     face_srv_cfg.data_bus = g_app_ctx.data_bus;
-    
-    // 回调（给全局FSM）
     face_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
     face_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
-    
-    // 自动启动
     face_srv_cfg.auto_start = false;
 
-    // 创建服务
     ret = face_detect_srv_create(&face_srv_cfg, &g_app_ctx.face_detect_srv);
     if (ret != 0) {
         LOG_E("Main: Failed to create Face Detect Service");
         return -1;
     }
 
-    // 注册子状态机到全局状态机
     module_fsm_handle_t face_fsm = face_detect_srv_get_fsm(g_app_ctx.face_detect_srv);
     global_fsm_register_module(g_app_ctx.g_fsm, "face_detect_srv", face_fsm, true);
 
     return 0;
 }
+
 // ==========================================================================
 // 6.【封装】Demo App 初始化
 // ==========================================================================
@@ -324,20 +318,18 @@ static void _cleanup_resources(void)
     LOG_I("Main: Starting resource cleanup...");
 
     _restore_terminal_mode();
-    // 先反初始化业务插件（停止所有线程）
     demo_app_deinit();
 
-    // 再销毁采集服务（停止硬件采集）
-    if (g_app_ctx.cap_srv) {
-        capture_srv_destroy(g_app_ctx.cap_srv);
-        g_app_ctx.cap_srv = NULL;
-    }
-    // 销毁人脸检测服务
+    // 必须先销毁生成服务，再销毁消费服务，然后是总线和全局状态机，确保正确的销毁顺序（服务依赖总线和状态机）
     if (g_app_ctx.face_detect_srv) {
         face_detect_srv_destroy(g_app_ctx.face_detect_srv);
         g_app_ctx.face_detect_srv = NULL;
     }
-    // 最后销毁核心组件
+    if (g_app_ctx.cap_srv) {
+        capture_srv_destroy(g_app_ctx.cap_srv);
+        g_app_ctx.cap_srv = NULL;
+    }
+
     if (g_app_ctx.g_fsm) {
         global_fsm_deinit(g_app_ctx.g_fsm);
         g_app_ctx.g_fsm = NULL;

@@ -1,4 +1,3 @@
-// src/service/capture_srv/src/capture_srv.c
 #include "capture_srv.h"
 #include "frame_link.h"
 #include "module_fsm.h"
@@ -10,6 +9,7 @@
 #include <pthread.h>
 #include <time.h>
 #include "main.h"
+
 // ==========================================================================
 // 【核心】采集服务专属：状态迁移规则表
 // ==========================================================================
@@ -70,7 +70,6 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
                                           module_state_t new_state,
                                           void *user_data);
 static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
-static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame);
 
 // ==========================================================================
 // 对外API实现
@@ -248,7 +247,7 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
           module_state_to_str(old_state), 
           module_state_to_str(new_state));
 
-    // 1. 执行硬件动作（根据新状态）
+    // 1. 执行硬件动作
     if (new_state == MODULE_STATE_STARTING) {
         LOG_I("Capture Srv: Starting Link layer...");
         video_err_t err = frame_link_start(ctx->link_handle);
@@ -264,7 +263,7 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
         module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
     }
 
-    // 2. 【重要】转发给上层回调（Global FSM）
+    // 2. 转发给上层回调（Global FSM）
     if (ctx->callbacks.state_change_cb != NULL) {
         ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
     }
@@ -285,10 +284,10 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
     if (ctx == NULL || frame == NULL) return;
 
+    // 非运行状态直接归还帧
     module_state_t state = module_fsm_get_state(ctx->fsm_handle);
     if (state != MODULE_STATE_RUNNING) {
-        // ============== 修复：非运行状态必须归还帧 ==============
-        video_put_frame(ctx->link_handle, frame);
+        frame_link_put_frame(ctx->link_handle, frame); // 【修复1】正确的Link层归还接口
         return;
     }
 
@@ -298,82 +297,32 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
     
     int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
     if (ret != 0 || item == NULL) {
-        // ============== 修复：申请失败必须归还帧 ==============
-        video_put_frame(ctx->link_handle, frame);
+        frame_link_put_frame(ctx->link_handle, frame);
         return;
     }
 
-    // 拷贝数据
+    // 拷贝数据到总线
     void *w_ptr = data_bus_get_writable_ptr(item);
     if (w_ptr == NULL) {
         data_bus_release(item);
-        video_put_frame(ctx->link_handle, frame);
+        frame_link_put_frame(ctx->link_handle, frame);
         return;
     }
     memcpy(w_ptr, frame->data, data_size);
 
-    // 发布数据
+    // 发布数据到总线
     ret = data_bus_publish(ctx->data_bus, item);
     if (ret != 0) {
         data_bus_release(item);
-        video_put_frame(ctx->link_handle, frame);
+        frame_link_put_frame(ctx->link_handle, frame);
         return;
     }
     
+    // 释放生产者引用
     data_bus_release(item); 
+    // 发布帧就绪事件
     event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
 
-    // ============== 修复：核心！数据拷贝完成后立即归还帧 ==============
-    video_put_frame(ctx->link_handle, frame);
-}
-
-/**
- * @brief 【核心】推送到双总线
- */
-static int _capture_srv_feed_bus(capture_srv_ctx_t *ctx, const video_frame_t *frame)
-{
-    if (ctx == NULL || frame == NULL) return -1;
-
-    // 检查总线句柄
-    if (ctx->data_bus == NULL || ctx->evt_bus == NULL) {
-        return -1;
-    }
-
-    // 1. 从 Data Bus 申请 Item
-    data_bus_item_handle_t item = NULL;
-    size_t data_size = frame->length;
-    
-    int ret = data_bus_alloc(ctx->data_bus, 
-                              DATA_TYPE_VIDEO_FRAME, 
-                              data_size, 
-                              "capture_srv", 
-                              &item);
-    if (ret != 0 || item == NULL) {
-        return -1;
-    }
-
-    // 2. 拷贝数据
-    void *w_ptr = data_bus_get_writable_ptr(item);
-    if (w_ptr == NULL) {
-        data_bus_release(item);
-        return -1;
-    }
-    memcpy(w_ptr, frame->data, data_size);
-
-    // 3. 发布到 Data Bus
-    ret = data_bus_publish(ctx->data_bus, item);
-    if (ret != 0) {
-        data_bus_release(item);
-        return -1;
-    }
-    
-    // 【重要】发布成功后，生产者也要释放自己的引用！
-    // 因为 data_bus_publish 后，所有权就交给总线了。
-    // 如果不 release，ref_count 会一直 >= 1，导致 item 永远无法回收！
-    data_bus_release(item); 
-
-    // 4. 发布事件到 Event Bus
-    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
-
-    return 0;
+    // 【修复2】立即归还帧给Link层（摄像头核心！）
+    frame_link_put_frame(ctx->link_handle, frame);
 }
