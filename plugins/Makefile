@@ -29,6 +29,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/queue/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
+	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
 # 3. 生成插件静态库

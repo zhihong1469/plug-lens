@@ -40,7 +40,7 @@
 // ==========================================================================
 // 【新增】AI模型配置
 // ==========================================================================
-#define CONFIG_AI_MODEL_PATH "/usr/share/vision_ai/RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
 #define CONFIG_AI_INPUT_W    320
 #define CONFIG_AI_INPUT_H    240
 #define CONFIG_AI_SCORE_THRESH 0.65f

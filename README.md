@@ -8,7 +8,7 @@ cp output/vision_ai_app ~/nfs/run_on_board/
 
 GDB调试：
 arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
-[root@100ask:/mnt/run_on_board]# ./gdbserver :12345 ./vision_ai_app
+[root@100ask:/mnt/run_on_board]# ./gdbserver --once :12345 ./vision_ai_app
   target remote 192.168.5.9:12345
   thread apply all bt
 

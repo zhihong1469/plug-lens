@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Remote GDB (ARM) 命令行同款",
+      "name": "Remote GDB (ARM) 完美退出版",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/output/vision_ai_app",
@@ -12,9 +12,21 @@
       "miDebuggerPath": "/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gdb",
       "miDebuggerServerAddress": "192.168.5.9:12345",
       "useExtendedRemote": true,
+      
+      // 【核心新增】程序退出时自动终止调试会话
+      "terminateAtExit": true,
+      
+      // 【核心新增】过滤 stderr 冗余日志，避免干扰
+      "filterStderr": true,
+      
       "setupCommands": [
         { "text": "-enable-pretty-printing", "ignoreFailures": true },
         { "text": "set architecture arm", "ignoreFailures": true },
+        
+        // 【核心新增】多进程调试：子进程退出后自动分离，避免卡主
+        { "text": "set detach-on-fork on", "ignoreFailures": true },
+        { "text": "set follow-fork-mode parent", "ignoreFailures": true },
+        
         // 自动设置库路径，消除警告
         { "text": "set sysroot /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot", "ignoreFailures": true },
         { "text": "set solib-search-path ${workspaceFolder}/third_lib/face_detector/mnn/lib:${workspaceFolder}/third_lib/opencv_lib/lib", "ignoreFailures": true }

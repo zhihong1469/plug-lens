@@ -3,36 +3,24 @@
 #include "module_fsm.h"
 #include "event_bus.h"
 #include "data_bus.h"
+#include "thread.h"
 #include "log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <time.h>
 #include "main.h"
 
-// ==========================================================================
-// 【核心】采集服务专属：状态迁移规则表
-// ==========================================================================
 static module_state_trans_t g_capture_srv_trans_table[] = {
-    // 初始化流程
     {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
     {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
     {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
-    
-    // 启动流程
     {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
     {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
     {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
-    
-    // 停止流程
     {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
     {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
-    
-    // 异常流程
     {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
     {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
-    
-    // 销毁流程
     {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
     {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
     {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
@@ -40,40 +28,30 @@ static module_state_trans_t g_capture_srv_trans_table[] = {
 };
 static const uint32_t g_capture_srv_trans_len = sizeof(g_capture_srv_trans_table) / sizeof(g_capture_srv_trans_table[0]);
 
-// ==========================================================================
-// 内部上下文结构体（完美封装）
-// ==========================================================================
 typedef struct {
-    // 配置与回调
     capture_srv_config_t config;
     capture_srv_callbacks_t callbacks;
     
-    // 下层依赖
     frame_link_handle_t link_handle;
     module_fsm_handle_t fsm_handle;
     
-    // 总线句柄（缓存）
     event_bus_handle_t evt_bus;
     data_bus_handle_t data_bus;
     
-    // 运行时状态
+    thread_t capture_thread;
+    bool thread_running;
+    
     bool is_created;
     pthread_mutex_t lock;
 } capture_srv_ctx_t;
 
-// ==========================================================================
-// 内部辅助函数声明
-// ==========================================================================
+static void* _capture_srv_async_thread(void *arg);
 static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data);
 static void _capture_srv_fsm_state_relay(const char *module_name,
                                           module_state_t old_state,
                                           module_state_t new_state,
                                           void *user_data);
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
-
-// ==========================================================================
-// 对外API实现
-// ==========================================================================
+static int _capture_srv_process_and_publish_frame(capture_srv_ctx_t *ctx, const video_frame_t *frame);
 
 int capture_srv_create(const capture_srv_config_t *config,
                        capture_srv_handle_t *out_handle)
@@ -82,21 +60,19 @@ int capture_srv_create(const capture_srv_config_t *config,
         return -1;
     }
 
-    // 1. 分配并清零上下文
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)malloc(sizeof(capture_srv_ctx_t));
     if (ctx == NULL) {
         return -1;
     }
     memset(ctx, 0, sizeof(capture_srv_ctx_t));
 
-    // 2. 拷贝配置与回调
     memcpy(&ctx->config, config, sizeof(capture_srv_config_t));
     memcpy(&ctx->callbacks, &config->callbacks, sizeof(capture_srv_callbacks_t));
     ctx->evt_bus = config->evt_bus;
     ctx->data_bus = config->data_bus;
     pthread_mutex_init(&ctx->lock, NULL);
+    ctx->thread_running = false;
 
-    // 3. 初始化 Link层
     LOG_I("Capture Srv: Initializing Link layer...");
     video_err_t err = frame_link_init(&ctx->config.link_cfg, g_app_ctx.exit_pipe[0], &ctx->link_handle);
     if (err != VIDEO_OK) {
@@ -106,18 +82,14 @@ int capture_srv_create(const capture_srv_config_t *config,
         return -1;
     }
 
-    // 4. 注册 Link层 回调
-    frame_link_register_frame_ready_cb(ctx->link_handle, _capture_srv_on_link_frame, ctx);
-
-    // 5. 初始化 Module FSM
     LOG_I("Capture Srv: Creating Module FSM...");
     module_fsm_config_t fsm_cfg = {0};
     fsm_cfg.module_name = "capture_srv";
     fsm_cfg.trans_table = g_capture_srv_trans_table;
     fsm_cfg.trans_table_len = g_capture_srv_trans_len;
     fsm_cfg.event_handler = _capture_srv_fsm_event_handler;
-    fsm_cfg.state_cb = _capture_srv_fsm_state_relay; // 【关键】先中继到自己
-    fsm_cfg.user_data = ctx; // 【关键】user_data 传自己的 ctx
+    fsm_cfg.state_cb = _capture_srv_fsm_state_relay;
+    fsm_cfg.user_data = ctx;
 
     int ret = module_fsm_create(&fsm_cfg, &ctx->fsm_handle);
     if (ret != 0) {
@@ -128,12 +100,10 @@ int capture_srv_create(const capture_srv_config_t *config,
         return -1;
     }
 
-    // 6. 启动初始化流程
     ctx->is_created = true;
     module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK); // Link init 同步完成
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK);
 
-    // 7. 自动启动（如果配置了）
     if (ctx->config.auto_start) {
         LOG_I("Capture Srv: Auto start enabled");
         module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
@@ -187,17 +157,15 @@ int capture_srv_destroy(capture_srv_handle_t handle)
         return 0;
     }
 
-    // 1. 投 DEINIT 事件
+    if (ctx->thread_running) {
+        ctx->thread_running = false;
+        thread_join(&ctx->capture_thread, NULL);
+    }
+
     module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
-
-    // 2. 停止并销毁 Link层
-    frame_link_stop(ctx->link_handle);
+    frame_link_stop_stream(ctx->link_handle);
     frame_link_deinit(ctx->link_handle);
-
-    // 3. 投 DEINIT_OK
     module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
-
-    // 4. 销毁 FSM
     module_fsm_destroy(ctx->fsm_handle);
 
     ctx->is_created = false;
@@ -210,31 +178,41 @@ int capture_srv_destroy(capture_srv_handle_t handle)
     return 0;
 }
 
-// ==========================================================================
-// 【核心】内部辅助函数实现
-// ==========================================================================
+static void* _capture_srv_async_thread(void *arg)
+{
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)arg;
+    LOG_I("Capture Srv: Async capture thread started");
 
-/**
- * @brief FSM 事件处理器（在锁内调用，只做决策，不做耗时操作）
- */
+    while (g_app_ctx.app_running && ctx->thread_running)
+    {
+        if (module_fsm_get_state(ctx->fsm_handle) != MODULE_STATE_RUNNING) {
+            thread_sleep_ms(10);
+            continue;
+        }
+
+        video_frame_t frame;
+        video_err_t err = frame_link_get_frame(ctx->link_handle, &frame, 100);
+        if (err != VIDEO_OK) {
+            continue;
+        }
+
+        _capture_srv_process_and_publish_frame(ctx, &frame);
+        frame_link_put_frame(ctx->link_handle, &frame);
+    }
+
+    LOG_I("Capture Srv: Async capture thread exited");
+    return NULL;
+}
+
 static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data)
 {
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
     if (ctx == NULL) return -1;
 
     LOG_I("Capture Srv: FSM Event Handler received: %s", module_event_to_str(event));
-    
-    // 这里只做决策，耗时的硬件操作放在 _capture_srv_fsm_state_relay 里（锁外）
-    return 0; // 允许所有迁移
+    return 0;
 }
 
-/**
- * @brief 【关键】FSM 状态中继回调
- * 
- * 职责链：
- * Module FSM -> 此回调 -> 1. 执行硬件动作 (Start/Stop Link)
- *                        -> 2. 转发给上层回调 (Global FSM)
- */
 static void _capture_srv_fsm_state_relay(const char *module_name,
                                           module_state_t old_state,
                                           module_state_t new_state,
@@ -247,82 +225,79 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
           module_state_to_str(old_state), 
           module_state_to_str(new_state));
 
-    // 1. 执行硬件动作
     if (new_state == MODULE_STATE_STARTING) {
-        LOG_I("Capture Srv: Starting Link layer...");
-        video_err_t err = frame_link_start(ctx->link_handle);
-        if (err == VIDEO_OK) {
+        LOG_I("Capture Srv: Starting HAL stream...");
+        video_err_t err = frame_link_start_stream(ctx->link_handle);
+        if (err != VIDEO_OK) {
+            LOG_E("Capture Srv: Failed to start HAL stream");
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
+            return;
+        }
+
+        thread_attr_t attr;
+        thread_attr_init(&attr);
+        attr.name = "capture_thread";
+        attr.priority = THREAD_PRIORITY_HIGH;
+        attr.stack_size = 128 * 1024;
+        attr.joinable = true;
+        attr.detached = false;
+
+        ctx->thread_running = true;
+        thread_err_t terr = thread_create(&ctx->capture_thread, &attr, _capture_srv_async_thread, ctx);
+        if (terr == THREAD_OK) {
+            LOG_I("Capture Srv: Capture thread created");
             module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
         } else {
+            LOG_E("Capture Srv: Failed to create capture thread");
+            frame_link_stop_stream(ctx->link_handle);
+            ctx->thread_running = false;
             module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
         }
     }
     else if (new_state == MODULE_STATE_STOPPING) {
-        LOG_I("Capture Srv: Stopping Link layer...");
-        frame_link_stop(ctx->link_handle);
+        LOG_I("Capture Srv: Stopping capture thread...");
+        
+        if (ctx->thread_running) {
+            ctx->thread_running = false;
+            thread_join(&ctx->capture_thread, NULL);
+        }
+
+        frame_link_stop_stream(ctx->link_handle);
         module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
     }
 
-    // 2. 转发给上层回调（Global FSM）
     if (ctx->callbacks.state_change_cb != NULL) {
         ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
     }
 }
 
-/**
- * @brief Link层 帧就绪回调（数据入口）
- * 
- * 【核心逻辑】
- * 1. 收到 Link 层的帧指针
- * 2. 申请 Data Bus Item
- * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
- * 4. 发布 Data Bus Item
- * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
- */
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
+static int _capture_srv_process_and_publish_frame(capture_srv_ctx_t *ctx, const video_frame_t *frame)
 {
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL || frame == NULL) return;
+    if (ctx == NULL || frame == NULL) return -1;
 
-    // 非运行状态直接归还帧
-    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
-    if (state != MODULE_STATE_RUNNING) {
-        frame_link_put_frame(ctx->link_handle, frame); // 【修复1】正确的Link层归还接口
-        return;
-    }
-
-    // 申请Data Bus项
     data_bus_item_handle_t item = NULL;
     size_t data_size = frame->length;
     
     int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
     if (ret != 0 || item == NULL) {
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
+        return -1;
     }
 
-    // 拷贝数据到总线
     void *w_ptr = data_bus_get_writable_ptr(item);
     if (w_ptr == NULL) {
         data_bus_release(item);
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
+        return -1;
     }
     memcpy(w_ptr, frame->data, data_size);
 
-    // 发布数据到总线
     ret = data_bus_publish(ctx->data_bus, item);
     if (ret != 0) {
         data_bus_release(item);
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
+        return -1;
     }
     
-    // 释放生产者引用
     data_bus_release(item); 
-    // 发布帧就绪事件
     event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
 
-    // 【修复2】立即归还帧给Link层（摄像头核心！）
-    frame_link_put_frame(ctx->link_handle, frame);
+    return 0;
 }

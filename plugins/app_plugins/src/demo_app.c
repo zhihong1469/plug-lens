@@ -92,7 +92,7 @@ int demo_app_run(void)
         FD_SET(g_demo_ctx.exit_pipe_read_fd, &read_fds);
         
         timeout.tv_sec = 0;
-        timeout.tv_usec = 20000; // 20ms超时
+        timeout.tv_usec = 50000; // 20ms超时
 
         int ret = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
 
@@ -155,7 +155,7 @@ int demo_app_run(void)
         else {
             // 超时保活
             timeout_count++;
-            if (timeout_count % 100 == 0) {
+            if (timeout_count % 200 == 0) {
                 LOG_D("Demo App: Main thread alive");
             }
         }
