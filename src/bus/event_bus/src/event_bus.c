@@ -271,8 +271,8 @@ int event_bus_dispatch(event_bus_handle_t handle)
 
     pthread_rwlock_unlock(&ctx->rwlock);
 
-    // ✅ 优化5：分发时打印事件（调试专用，可开关）
-    LOG_D("Event Bus: Dispatch event: %s", event_type_to_str(event->type));
+    // 优化5：分发时打印事件（调试专用，可开关）
+    // LOG_D("Event Bus: Dispatch event: %s", event_type_to_str(event->type));
 
     for (int i = 0; i < temp_count; i++) {
         if (temp_callbacks[i].cb) {

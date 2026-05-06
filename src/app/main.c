@@ -10,6 +10,7 @@
 #include "vision_ai_config.h"
 #include "main.h"
 #include "face_detect_srv.h"
+
 // 全局唯一应用上下文（公共层实例化，无零散全局变量）
 app_context_t g_app_ctx = {0};
 
@@ -21,6 +22,7 @@ static int _main_init_global_fsm(void);
 static int _main_init_capture_service(void);
 static int _main_init_face_detect_service(void);
 static int _main_init_demo_application(void);
+static void _safe_stop_all_services(void); // 【新增】安全停止所有服务
 
 // ==========================================================================
 // 终端 公共基建实现
@@ -92,13 +94,30 @@ void app_exit_pipe_deinit(void)
 }
 
 // ==========================================================================
-// 信号处理（纯异步信号安全，仅触发管道写入）
+// 【核心完善】信号处理（新增 SIGABRT/SIGSEGV 捕获）
 // ==========================================================================
 static void _signal_handler(int sig)
 {
     (void)sig;
     // 唯一操作：触发全局软退出，无任何不安全调用
     app_trigger_soft_exit();
+}
+
+// 【新增】崩溃信号专用处理（安全打印+清理）
+static void _crash_signal_handler(int sig)
+{
+    // 异步信号安全：仅使用 write() 和 _exit()
+    const char *msg = "\n[Fatal] Main: Received crash signal, cleaning up...\n";
+    (void)write(STDERR_FILENO, msg, strlen(msg));
+    
+    // 触发软退出
+    app_trigger_soft_exit();
+    
+    // 给系统一点时间清理（非信号安全，但为了调试日志）
+    usleep(100000); 
+    
+    // 强制退出，避免递归崩溃
+    _exit(1);
 }
 
 static void _init_signal_handling(void)
@@ -109,6 +128,7 @@ static void _init_signal_handling(void)
     sa.sa_flags = 0;
     sigfillset(&sa.sa_mask);
 
+    // 正常退出信号
     if (sigaction(SIGINT, &sa, NULL) != 0) {
         LOG_E("Main: Failed to register SIGINT handler");
     } else {
@@ -119,6 +139,25 @@ static void _init_signal_handling(void)
         LOG_E("Main: Failed to register SIGTERM handler");
     } else {
         LOG_I("Main: SIGTERM(kill) handler registered");
+    }
+
+    // 【新增】崩溃信号捕获
+    struct sigaction sa_crash;
+    memset(&sa_crash, 0, sizeof(sa_crash));
+    sa_crash.sa_handler = _crash_signal_handler;
+    sa_crash.sa_flags = 0;
+    sigfillset(&sa_crash.sa_mask);
+
+    if (sigaction(SIGABRT, &sa_crash, NULL) != 0) {
+        LOG_W("Main: Failed to register SIGABRT handler (non-fatal)");
+    } else {
+        LOG_I("Main: SIGABRT(crash) handler registered");
+    }
+
+    if (sigaction(SIGSEGV, &sa_crash, NULL) != 0) {
+        LOG_W("Main: Failed to register SIGSEGV handler (non-fatal)");
+    } else {
+        LOG_I("Main: SIGSEGV(segfault) handler registered");
     }
 }
 
@@ -311,6 +350,25 @@ static int _main_init_demo_application(void)
 }
 
 // ==========================================================================
+// 【新增】安全停止所有服务（避免状态机 invalid transition）
+// ==========================================================================
+static void _safe_stop_all_services(void)
+{
+    LOG_I("Main: Safely stopping all services...");
+    
+    // 1. 先通过 Global FSM 发送 STOP 事件（让服务从 RUNNING -> READY）
+    if (g_app_ctx.g_fsm) {
+        global_state_t current_state = global_fsm_get_state(g_app_ctx.g_fsm);
+        if (current_state == GLOBAL_STATE_RUNNING || current_state == GLOBAL_STATE_DEGRADED) {
+            LOG_I("Main: Posting SYSTEM_STOP to Global FSM...");
+            global_fsm_post_event(g_app_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
+            // 给一点时间让状态机流转（非阻塞，仅为了日志完整）
+            usleep(200000); 
+        }
+    }
+}
+
+// ==========================================================================
 // 统一资源清理（基建层收口，顺序可控）
 // ==========================================================================
 static void _cleanup_resources(void)
@@ -320,7 +378,11 @@ static void _cleanup_resources(void)
     _restore_terminal_mode();
     demo_app_deinit();
 
-    // 必须先销毁生成服务，再销毁消费服务，然后是总线和全局状态机，确保正确的销毁顺序（服务依赖总线和状态机）
+    // 【新增】第一步：安全停止服务（RUNNING -> READY）
+    _safe_stop_all_services();
+
+    // 第二步：销毁服务（READY -> DEINIT）
+    // 必须先销毁生成服务，再销毁消费服务，然后是总线和全局状态机
     if (g_app_ctx.face_detect_srv) {
         face_detect_srv_destroy(g_app_ctx.face_detect_srv);
         g_app_ctx.face_detect_srv = NULL;
@@ -352,7 +414,6 @@ static void _cleanup_resources(void)
 // ==========================================================================
 int main(int argc, char **argv)
 {
-    int ret = 0;
     memset(&g_app_ctx, 0, sizeof(g_app_ctx));
     g_app_ctx.app_running = true;
 
