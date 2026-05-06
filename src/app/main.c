@@ -375,7 +375,7 @@ int main(int argc, char **argv)
 
     // 5. 初始化采集服务（封装函数）
     if (_main_init_capture_service() != 0) goto error_exit;
-    if (_main_init_face_detect_service() != 0) goto error_exit;
+    // if (_main_init_face_detect_service() != 0) goto error_exit;
 
     // 6. 初始化业务应用（封装函数）
     if (_main_init_demo_application() != 0) goto error_exit;

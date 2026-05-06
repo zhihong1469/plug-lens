@@ -2,27 +2,22 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Remote GDB (ARM)",
+      "name": "Remote GDB (ARM) 命令行同款",
       "type": "cppdbg",
       "request": "launch",
-      // 本地【带调试信息】的可执行文件（和目标板一致）
       "program": "${workspaceFolder}/output/vision_ai_app",
-      "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
-      "environment": [],
-      "externalConsole": false,
       "MIMode": "gdb",
-      // 本地交叉 GDB 路径（关键！）
       "miDebuggerPath": "/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gdb",
-      // 目标板 IP:端口
       "miDebuggerServerAddress": "192.168.5.9:12345",
+      "useExtendedRemote": true,
       "setupCommands": [
-        {
-          "description": "Enable pretty-printing",
-          "text": "-enable-pretty-printing",
-          "ignoreFailures": true
-        }
+        { "text": "-enable-pretty-printing", "ignoreFailures": true },
+        { "text": "set architecture arm", "ignoreFailures": true },
+        // 自动设置库路径，消除警告
+        { "text": "set sysroot /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot", "ignoreFailures": true },
+        { "text": "set solib-search-path ${workspaceFolder}/third_lib/face_detector/mnn/lib:${workspaceFolder}/third_lib/opencv_lib/lib", "ignoreFailures": true }
       ]
     }
   ]

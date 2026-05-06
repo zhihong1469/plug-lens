@@ -175,7 +175,6 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
                 LOG_W("Global FSM: Cannot start, current state %s", global_state_to_str(current));
                 return -1;
             }
-            
             // ===================== 【修复开始】=====================
             // 1. 先在锁里拷贝模块句柄到临时数组
             module_fsm_handle_t *temp_modules = NULL;
