@@ -36,10 +36,19 @@
 // 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
+
+// ==========================================================================
+// 【新增】AI模型配置
+// ==========================================================================
+#define CONFIG_AI_MODEL_PATH "/usr/share/vision_ai/RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_INPUT_W    320
+#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_SCORE_THRESH 0.65f
+#define CONFIG_AI_IOU_THRESH   0.3f
+
 // 只保留类型别名，方便使用
 typedef void* event_bus_handle_t;
 typedef void* data_bus_handle_t;
 typedef void* global_fsm_handle_t;
-
 
 #endif /* VISION_AI_CONFIG_H */

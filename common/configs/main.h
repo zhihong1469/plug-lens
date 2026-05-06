@@ -8,6 +8,7 @@
 #include "data_bus.h"
 #include "global_fsm.h"
 #include "capture_srv.h"
+#include "vision_ai_config.h"
 #include "face_detect_srv.h"
 // ==========================================================================
 // 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
