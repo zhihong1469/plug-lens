@@ -39,6 +39,13 @@ $(TARGET): $(OBJS)
 	$(info OBJS = $(OBJS))
 	@echo "Linking $@"
 ifeq ($(TARGET_TYPE), LIB)
+$(TARGET): $(OBJS)
+else
+$(TARGET): $(OBJS) $(OUTPUTDIR)/libcom.a $(OUTPUTDIR)/libplug.a
+endif
+	$(info OBJS = $(OBJS))
+	@echo "Linking $@"
+ifeq ($(TARGET_TYPE), LIB)
 	$(AR) rcs $@ $(OBJS)
 else
 	$(LINKER) $(OBJS) -o $@ $(LDFLAGS)

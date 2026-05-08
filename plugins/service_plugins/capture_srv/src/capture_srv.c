@@ -126,6 +126,7 @@ int capture_srv_get_frame(capture_srv_handle_t handle,
                           uint32_t timeout_ms)
 {
     if (handle == NULL || frame == NULL) return -1;
+    // 【修复编译错误】修正指针强制类型转换
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
 
     module_state_t state = module_fsm_get_state(ctx->fsm_handle);
@@ -141,6 +142,7 @@ int capture_srv_put_frame(capture_srv_handle_t handle,
                           const video_frame_t *frame)
 {
     if (handle == NULL || frame == NULL) return -1;
+    // 【修复编译错误】修正指针强制类型转换
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
     return frame_link_put_frame(ctx->link_handle, frame);
 }
@@ -181,22 +183,45 @@ int capture_srv_destroy(capture_srv_handle_t handle)
 static void* _capture_srv_async_thread(void *arg)
 {
     capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)arg;
-    LOG_I("Capture Srv: Async capture thread started");
+    int ret = 0;
 
     while (g_app_ctx.app_running && ctx->thread_running)
     {
-        if (module_fsm_get_state(ctx->fsm_handle) != MODULE_STATE_RUNNING) {
+
+        if (!g_app_ctx.app_running || !ctx->thread_running) {
+            break;
+        }
+
+        module_state_t state = module_fsm_get_state(ctx->fsm_handle);
+        if (state != MODULE_STATE_RUNNING) {
             thread_sleep_ms(10);
             continue;
         }
 
         video_frame_t frame;
-        video_err_t err = frame_link_get_frame(ctx->link_handle, &frame, 100);
-        if (err != VIDEO_OK) {
+        ret = frame_link_get_frame(ctx->link_handle, &frame, 50);
+        if (ret)
+        {
+            LOG_D("Capture Srv: Failed frame_link_get_frame ret=%d", ret);
+        }
+        else 
+        {
+            LOG_D("Capture Srv: Got frame, ts=%llu, len=%u", 
+                  frame.timestamp, frame.length);
+        }
+        if (ret != VIDEO_OK) {
+            if (!g_app_ctx.app_running || !ctx->thread_running) {
+                break;
+            }
             continue;
         }
-
-        _capture_srv_process_and_publish_frame(ctx, &frame);
+        ret = _capture_srv_process_and_publish_frame(ctx, &frame);
+        // ============== 【新增调试日志5】发布完成 ==============
+        if (ret)
+        {
+            LOG_D("Capture Srv: Frame published Failed:%d", ret);
+        }
+        
         frame_link_put_frame(ctx->link_handle, &frame);
     }
 
@@ -259,10 +284,11 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
         
         if (ctx->thread_running) {
             ctx->thread_running = false;
+            frame_link_stop_stream(ctx->link_handle);
             thread_join(&ctx->capture_thread, NULL);
+        } else {
+            frame_link_stop_stream(ctx->link_handle);
         }
-
-        frame_link_stop_stream(ctx->link_handle);
         module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
     }
 
@@ -274,17 +300,19 @@ static void _capture_srv_fsm_state_relay(const char *module_name,
 static int _capture_srv_process_and_publish_frame(capture_srv_ctx_t *ctx, const video_frame_t *frame)
 {
     if (ctx == NULL || frame == NULL) return -1;
-
+    int ret = 0;
     data_bus_item_handle_t item = NULL;
     size_t data_size = frame->length;
     
-    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
+    ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
     if (ret != 0 || item == NULL) {
+        LOG_E("Capture Srv: Failed to alloc data bus item, ret=%d", ret);
         return -1;
     }
 
     void *w_ptr = data_bus_get_writable_ptr(item);
     if (w_ptr == NULL) {
+        LOG_E("Capture Srv: Failed to get writable ptr");
         data_bus_release(item);
         return -1;
     }
@@ -292,6 +320,7 @@ static int _capture_srv_process_and_publish_frame(capture_srv_ctx_t *ctx, const 
 
     ret = data_bus_publish(ctx->data_bus, item);
     if (ret != 0) {
+        LOG_E("Capture Srv: Failed to publish data bus, ret=%d", ret);
         data_bus_release(item);
         return -1;
     }
