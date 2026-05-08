@@ -10,8 +10,11 @@
 #include "log.h"
 #include "main.h"
 
-#define FRAME_LINK_MAX_POOL_SIZE 32
-#define FRAME_LINK_MAX_QUEUE_SIZE 16
+// ===================== 【优化：实时处理，大幅缩容】=====================
+// 不做视频回放，内存池/队列无需大容量！
+// 依据：摄像头硬件缓冲4个 + 处理线程预留，8个完全足够
+#define FRAME_LINK_MAX_POOL_SIZE 8
+#define FRAME_LINK_MAX_QUEUE_SIZE 8
 
 typedef struct {
     video_frame_t frame;
@@ -35,6 +38,7 @@ typedef struct {
     pthread_cond_t queue_not_full;
 
     bool streaming;
+    bool running;
     int exit_pipe_read_fd;
 } frame_link_context_t;
 
@@ -61,6 +65,7 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     memcpy(&ctx->config, config, sizeof(frame_link_config_t));
     ctx->exit_pipe_read_fd = exit_pipe_read_fd;
 
+    // 默认值优化：实时处理，小容量足够
     if (ctx->config.frame_pool_size == 0) ctx->config.frame_pool_size = 8;
     if (ctx->config.frame_pool_size > FRAME_LINK_MAX_POOL_SIZE) ctx->config.frame_pool_size = FRAME_LINK_MAX_POOL_SIZE;
     if (ctx->config.queue_size == 0) ctx->config.queue_size = 4;
@@ -127,6 +132,7 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     }
 
     ctx->streaming = false;
+    ctx->running = false;
     *out_handle = (frame_link_handle_t)ctx;
     return VIDEO_OK;
 }
@@ -151,6 +157,7 @@ video_err_t frame_link_start_stream(frame_link_handle_t handle)
     }
     
     ctx->streaming = true;
+    ctx->running = true;
     LOG_I("Frame Link: HAL stream started");
     return VIDEO_OK;
 }
@@ -167,6 +174,13 @@ video_err_t frame_link_stop_stream(frame_link_handle_t handle)
     }
 
     LOG_I("Frame Link: Stopping HAL layer stream...");
+    
+    ctx->running = false;
+    pthread_mutex_lock(&ctx->queue_lock);
+    pthread_cond_broadcast(&ctx->queue_not_empty);
+    pthread_cond_broadcast(&ctx->queue_not_full);
+    pthread_mutex_unlock(&ctx->queue_lock);
+
     video_err_t err = video_stop_stream(ctx->hal_handle);
     if (err == VIDEO_OK) {
         ctx->streaming = false;
@@ -193,6 +207,10 @@ video_err_t frame_link_get_frame(frame_link_handle_t handle,
         return VIDEO_ERR_INVALID_PARAM;
     }
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
+
+    if (!ctx->running) {
+        return VIDEO_ERR_POLL;
+    }
 
     _frame_link_poll_and_capture(ctx, timeout_ms > 0 ? timeout_ms : 10);
 
@@ -266,6 +284,13 @@ static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node)
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
+    if (!ctx->running) {
+        pthread_mutex_unlock(&ctx->queue_lock);
+        _frame_link_free_frame(ctx, node);
+        return -1;
+    }
+
+    // 环形队列核心：满了自动丢弃最老帧，释放内存池
     if (Queue_IsFull(&ctx->frame_queue)) {
         void *old_node = NULL;
         if (Queue_Get(&ctx->frame_queue, &old_node) == QUEUE_OK && old_node != NULL) {
@@ -276,6 +301,7 @@ static int _frame_link_enqueue(frame_link_context_t *ctx, frame_node_t *node)
     QueueErr_t qerr = Queue_Put(&ctx->frame_queue, node);
     if (qerr != QUEUE_OK) {
         pthread_mutex_unlock(&ctx->queue_lock);
+        _frame_link_free_frame(ctx, node);
         return -1;
     }
 
@@ -288,7 +314,7 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
 {
     pthread_mutex_lock(&ctx->queue_lock);
 
-    while (Queue_IsEmpty(&ctx->frame_queue)) {
+    while (Queue_IsEmpty(&ctx->frame_queue) && ctx->running) {
         if (timeout_ms == 0) {
             pthread_cond_wait(&ctx->queue_not_empty, &ctx->queue_lock);
         } else {
@@ -304,6 +330,11 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
         }
     }
 
+    if (!ctx->running || Queue_IsEmpty(&ctx->frame_queue)) {
+        pthread_mutex_unlock(&ctx->queue_lock);
+        return NULL;
+    }
+
     frame_node_t *node = NULL;
     Queue_Get(&ctx->frame_queue, (void**)&node);
 
@@ -313,7 +344,6 @@ static frame_node_t* _frame_link_dequeue(frame_link_context_t *ctx, uint32_t tim
     return node;
 }
 
-// 【核心修复】已删除内部的 video_put_frame，避免双重释放
 static int _frame_link_poll_and_capture(frame_link_context_t *ctx, uint32_t timeout_ms)
 {
     static int frame_count = 0;
@@ -326,7 +356,7 @@ static int _frame_link_poll_and_capture(frame_link_context_t *ctx, uint32_t time
 
     int poll_ret = poll(fds, 2, timeout_ms);
 
-    if (!g_app_ctx.app_running || (fds[1].revents & POLLIN)) {
+    if (!g_app_ctx.app_running || !ctx->running || (fds[1].revents & POLLIN)) {
         return -1;
     }
 
@@ -343,12 +373,15 @@ static int _frame_link_poll_and_capture(frame_link_context_t *ctx, uint32_t time
         }
 
         frame_node_t *node = _frame_link_alloc_frame(ctx);
-        if (node != NULL) {
-            memcpy(&node->frame, &hal_frame, sizeof(video_frame_t));
-            _frame_link_enqueue(ctx, node);
+        // ===================== 【核心修复：永不泄漏摄像头缓冲】=====================
+        if (node == NULL) {
+            LOG_W("Frame Link: Pool full, drop frame and return buffer to camera!");
+            video_put_frame(ctx->hal_handle, &hal_frame);
+            return 0;
         }
 
-        // ====================== 已彻底删除此处的 video_put_frame ======================
+        memcpy(&node->frame, &hal_frame, sizeof(video_frame_t));
+        _frame_link_enqueue(ctx, node);
 
         if (++frame_count % 30 == 0) {
             LOG_D("Frame Link: Captured %d frames", frame_count);

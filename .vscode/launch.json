@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Remote GDB (ARM) 完美退出版",
+      "name": "Remote GDB (ARM)",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/output/vision_ai_app",

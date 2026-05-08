@@ -154,8 +154,6 @@ int event_bus_subscribe(event_bus_handle_t handle,
         LOG_E("Event Bus: No more subscriber slots");
         return -1;
     }
-
-    // ✅ 优化3：打印事件名称，而非数字
     LOG_I("Event Bus: Subscribed (id=%d, event=%s)", 
           id, event_type_to_str(subscriber->event_type));
     return id;
