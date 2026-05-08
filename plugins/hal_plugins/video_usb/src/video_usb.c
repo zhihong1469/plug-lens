@@ -404,7 +404,7 @@ int _video_usb_qbuf(video_usb_context_t *ctx, uint32_t index)
 
     ret = ioctl(ctx->fd, VIDIOC_QBUF, &buf);
     if (ret < 0) {
-        LOG_E("Video USB: qbuf index=%u failed, errno=%d", index, errno);
+        // LOG_E("Video USB: qbuf index=%u failed, errno=%d", index, errno);
         return -1;
     }
     LOG_D("Video USB: qbuf success, index=%u", index);
