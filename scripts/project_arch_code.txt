@@ -1,0 +1,396 @@
+=============================================
+  嵌入式Linux视觉采集终端 - 工程构建架构文件
+  仅包含：Makefile + 全局配置 + 工程架构
+=============================================
+
+
+
+=============================================
+【顶层构建】Makefile (项目总编译入口)
+=============================================
+# ==========================================================================
+# 顶层 Makefile：修复版
+# 核心改动：
+# 1. 明确编译顺序：common → plugins → src
+# 2. 修复路径处理逻辑
+# 3. 支持 src/ 下多子模块编译
+# ==========================================================================
+
+# 0. 编译工具链：本地编译测试用，交叉编译时请取消注释上面的
+# CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
+CROSS_COMPILE ?=
+CC 			:= $(CROSS_COMPILE)gcc
+LD 			:= $(CROSS_COMPILE)ld
+AR 			:= $(CROSS_COMPILE)ar
+OBJCOPY 	:= $(CROSS_COMPILE)objcopy
+OBJDUMP 	:= $(CROSS_COMPILE)objdump
+
+# 自动获取交叉编译器 sysroot自动适配，无需手动填写
+SYSROOT := $(shell $(CC) -print-sysroot)
+# 标准系统头文件编译选项GCC/Clangd 通用
+SYSROOT_CFLAGS := -isystem $(SYSROOT)/usr/include --sysroot=$(SYSROOT)
+# 导出给子 Makefile.build 使用
+export SYSROOT_CFLAGS
+
+# 1. 定义目录路径 (绝对路径，防止混乱)
+TOPDIR 		:= $(shell pwd)
+SRCDIR 		:= $(TOPDIR)
+BUILDDIR 	:= $(TOPDIR)/build
+OUTPUTDIR 	:= $(TOPDIR)/output
+
+# 定义 compile_commands.json 路径（放 output 目录，不污染源码）
+COMPILE_COMMANDS := $(OUTPUTDIR)/compile_commands.json
+
+# 导出变量，让子 Makefile.build 也能用到
+export CC LD AR OBJCOPY OBJDUMP
+export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
+
+# 2. 必须明确指定编译顺序（不自动扫描，避免顺序混乱）
+# 顺序：common（公共库）→ plugins（插件）→ src（核心框架）
+SUBDIRS := common plugins src
+
+# 3. 目标列表
+TARGETS := $(patsubst %, build-%, $(SUBDIRS))
+
+# 默认目标
+all: $(OUTPUTDIR) $(BUILDDIR) init_compile_commands $(TARGETS) finalize_compile_commands
+	@echo "=========================================="
+	@echo "Build complete! Output: $(OUTPUTDIR)"
+	@echo "=========================================="
+
+# 创建输出目录
+$(OUTPUTDIR):
+	mkdir -p $@
+
+# 创建构建根目录
+$(BUILDDIR):
+	mkdir -p $@
+
+# 初始化 compile_commands.json（清空旧文件，写入 [ 开头）
+init_compile_commands: $(OUTPUTDIR)
+	@echo "[" > $(COMPILE_COMMANDS)
+
+# 收尾 compile_commands.json（去掉最后一个逗号，写入 ] 结尾）
+finalize_compile_commands:
+	@sed -i '$$s/,$$//' $(COMPILE_COMMANDS)
+	@echo "]" >> $(COMPILE_COMMANDS)
+	@echo "Generated: $(COMPILE_COMMANDS)"
+
+# 4. 核心编译规则
+$(TARGETS): build-%:
+	@mkdir -p $(BUILDDIR)/$*
+	@echo "=========================================="
+	@echo "Building : $*"
+	@echo "=========================================="
+	@make -C $(BUILDDIR)/$* -f $(TOPDIR)/Makefile.build CUR_DIR=$*
+
+# 清理规则
+clean:
+	rm -rf $(BUILDDIR) $(OUTPUTDIR)
+
+# 声明伪目标
+.PHONY: all clean $(TARGETS) init_compile_commands finalize_compile_commands
+
+
+=============================================
+【顶层构建】Makefile.build (通用编译规则)
+=============================================
+# ==========================================================================
+# Makefile.build：通用编译规则（被顶层 Makefile 调用）
+# 功能：编译 .c -> .o + 生成 .d 依赖 + 追加 compile_commands.json
+# ==========================================================================
+
+# 1. 接收传入的参数（CUR_DIR 是从顶层传下来的，比如 "app" 或 "lib"）
+SRC_DIR := $(TOPDIR)/$(CUR_DIR)
+OBJ_DIR := $(BUILDDIR)/$(CUR_DIR)
+
+# 2. 包含当前模块的 Makefile（也就是 app/Makefile 或 lib/Makefile）
+include $(SRC_DIR)/Makefile
+
+# 3. 定义生成的目标文件路径
+OBJS := $(patsubst %.c, $(OBJ_DIR)/%.o, $(SRC_FILES))
+DEPS := $(OBJS:.o=.d)
+
+# 4. 追加头文件路径和编译标志
+CFLAGS += $(INC_FLAGS)
+CFLAGS += $(SYSROOT_CFLAGS)  # 自动带上系统头文件路径
+CFLAGS += -Wall -O0 -g -MMD -MP  # 默认开启警告、优化、调试信息、生成依赖 -O2
+
+# 5. 最终目标规则
+ifdef TARGET_NAME
+TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
+
+all: $(TARGET)
+
+# 链接规则
+$(TARGET): $(OBJS)
+	$(info OBJS = $(OBJS))
+	@echo "Linking $@"
+ifeq ($(TARGET_TYPE), LIB)
+	$(AR) rcs $@ $(OBJS)  # 打包静态库
+else
+	$(CC) $(OBJS) -o $@ $(LDFLAGS)  # 链接可执行文件
+endif
+	@echo "Built: $@"
+else
+all: $(OBJS)  # 没有定义目标名，只编译不链接
+endif
+
+# 6. 核心编译规则：.c -> .o + 生成 .d + 追加 compile_commands.json
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	@echo "Compiling $<"
+	# 执行编译
+	$(CC) $(CFLAGS) -c $< -o $@
+	$(eval COMPILE_CMD := $(CC) $(CFLAGS) -c $< -o $@)
+	@echo '  {' >> $(COMPILE_COMMANDS)
+	@echo '    "directory": "$(TOPDIR)",' >> $(COMPILE_COMMANDS)
+	@echo '    "command": "$(subst ",\",$(COMPILE_CMD))",' >> $(COMPILE_COMMANDS)
+	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
+	@echo '  },' >> $(COMPILE_COMMANDS)
+
+# 7. 包含依赖文件（第一次编译没有 .d，用 -include 忽略错误）
+-include $(DEPS)
+
+.PHONY: all
+
+
+=============================================
+【公共层】common/Makefile
+=============================================
+# ==========================================================================
+# common/Makefile：公共组件库
+# ==========================================================================
+
+# 1. 源文件（相对于 common/ 目录，直接写子路径）
+SRC_FILES := \
+	log/src/log.c \
+	queue/src/queue.c \
+	plugin/src/plugin_loader.c \
+	pool/src/pool.c \
+	utils/src/utils.c \
+	thread/src/thread.c \
+	img_proc/src/img_proc_c.c \
+
+# 2. 头文件路径
+INC_FLAGS := \
+	-I$(TOPDIR)/common/log/inc \
+	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/thread/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/plugin/inc \
+	-I$(TOPDIR)/common/configs \
+	-I$(TOPDIR)/common/img_proc/inc \
+	-I$(TOPDIR)/common/pool/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/thread/inc
+
+# 3. 生成静态库
+TARGET_NAME := libcom.a
+TARGET_TYPE := LIB
+
+LDFLAGS :=
+
+
+=============================================
+【公共层】common/configs/main.h (主配置头)
+=============================================
+#ifndef MAIN_H
+#define MAIN_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <termios.h>
+#include "event_bus.h"
+#include "data_bus.h"
+#include "global_fsm.h"
+#include "capture_srv.h"
+#include "face_detect_srv.h"
+// ==========================================================================
+// 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
+// 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
+// ==========================================================================
+typedef struct {
+    // 核心总线句柄
+    event_bus_handle_t      evt_bus;
+    data_bus_handle_t       data_bus;
+
+    // 状态机 & 业务服务句柄
+    global_fsm_handle_t     g_fsm;
+    capture_srv_handle_t    cap_srv;
+    face_detect_srv_handle_t face_detect_srv;
+    // 优雅退出：内核管道（替代全局quit_flag，线程安全、事件驱动）
+    int                     exit_pipe[2];     // [0]读端 / [1]写端
+
+    // 终端模式保存（基础设施）
+    struct termios          old_termios;
+    bool                    termios_saved;
+
+    // 全局运行标记（可选，作为兜底，优先用Pipe事件）
+    volatile bool           app_running;
+} app_context_t;
+
+// ==========================================================================
+// 全局唯一应用上下文实例（公共层统一实例化，无零散全局变量）
+// ==========================================================================
+extern app_context_t g_app_ctx;
+
+// ==========================================================================
+// 公共基建函数声明（main.c实现，插件可调用）
+// ==========================================================================
+// 初始化退出管道
+int app_exit_pipe_init(void);
+// 触发全局优雅退出（写管道，所有线程感知）
+void app_trigger_soft_exit(void);
+// 销毁退出管道
+void app_exit_pipe_deinit(void);
+
+// 终端基础设施
+void app_set_terminal_noncanonical(void);
+void app_restore_terminal_safe(void);
+
+#endif /* MAIN_H */
+
+
+
+=============================================
+【公共层】common/configs/vision_ai_config.h (全局AI配置)
+=============================================
+// common/configs/vision_ai_config.h
+#ifndef VISION_AI_CONFIG_H
+#define VISION_AI_CONFIG_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+// ==========================================================================
+// 配置集中管理
+// ==========================================================================
+#define CONFIG_APP_NAME "Vision AI Demo"
+#define CONFIG_AUTO_START true
+
+// 双总线配置
+#define CONFIG_EVENT_BUS_MAX_SUBSCRIBERS 64
+#define CONFIG_EVENT_BUS_MAX_QUEUE 256
+#define CONFIG_EVENT_BUS_ENABLE_STATS true
+
+#define CONFIG_DATA_BUS_MAX_FRAMES 128
+#define CONFIG_DATA_BUS_ENABLE_STATS true
+
+// 全局FSM配置
+#define CONFIG_GLOBAL_FSM_MAX_MODULES 16
+
+// 采集服务配置
+#define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
+#define CONFIG_CAPTURE_WIDTH 640
+#define CONFIG_CAPTURE_HEIGHT 360
+#define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
+#define CONFIG_CAPTURE_FPS 3
+#define CONFIG_CAPTURE_BUF_COUNT 4
+#define CONFIG_CAPTURE_LOCK_EXPOSURE true
+#define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
+#define CONFIG_CAPTURE_LOCK_GAIN true
+
+// 帧链路配置
+#define CONFIG_FRAME_LINK_POOL_SIZE 8
+#define CONFIG_FRAME_LINK_QUEUE_SIZE 4
+// 只保留类型别名，方便使用
+typedef void* event_bus_handle_t;
+typedef void* data_bus_handle_t;
+typedef void* global_fsm_handle_t;
+
+
+#endif /* VISION_AI_CONFIG_H */
+
+
+=============================================
+【源码层】src/Makefile
+=============================================
+# ==========================================================================
+# src/Makefile：核心框架模块
+# ==========================================================================
+
+# 1. 源文件：所有核心框架的 .c
+SRC_FILES := \
+	app/main.c \
+	bus/event_bus/src/event_bus.c \
+	bus/data_bus/src/data_bus.c \
+	fsm/global_fsm/src/global_fsm.c \
+	fsm/module_fsm/src/module_fsm.c \
+	link/frame_link/src/frame_link.c 
+
+# 2. 头文件路径（修正：只包含目录，不包含具体 .h 文件）
+INC_FLAGS := \
+	-I$(TOPDIR)/src/hal/video/inc \
+	-I$(TOPDIR)/src/bus/event_bus/inc \
+	-I$(TOPDIR)/src/bus/data_bus/inc \
+	-I$(TOPDIR)/src/fsm/global_fsm/inc \
+	-I$(TOPDIR)/src/fsm/module_fsm/inc \
+	-I$(TOPDIR)/src/link/frame_link/inc \
+	-I$(TOPDIR)/src/service/capture_srv/inc \
+	-I$(TOPDIR)/common/log/inc \
+	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/pool/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/thread/inc \
+	-I$(TOPDIR)/common/plugin/inc \
+	-I$(TOPDIR)/common/configs \
+	-I$(TOPDIR)/plugins/hal_plugins/video_usb/inc \
+	-I$(TOPDIR)/plugins/app_plugins/inc
+
+# 3. 生成最终可执行文件
+TARGET_NAME := vision_ai_app
+TARGET_TYPE := EXE
+
+# 4. 链接所有库：必须先libplug.a+再libcom.a+ pthread
+LDFLAGS := \
+	-L$(OUTPUTDIR) \
+	-lplug \
+	-lcom \
+	-pthread
+
+
+=============================================
+【插件层】plugins/Makefile
+=============================================
+# ==========================================================================
+# plugins/Makefile：插件模块
+# ==========================================================================
+
+# 1. 源文件（相对于 plugins/ 目录）
+SRC_FILES := \
+	hal_plugins/video_usb/src/video_hal.c \
+	hal_plugins/video_usb/src/video_usb.c \
+	app_plugins/src/demo_app.c \
+	service_plugins/capture_srv/src/capture_srv.c
+
+# 2. 头文件路径
+INC_FLAGS := \
+	-I$(TOPDIR)/src/hal/video/inc \
+	-I$(TOPDIR)/src/link/frame_link/inc \
+	-I$(TOPDIR)/src/bus/data_bus/inc \
+	-I$(TOPDIR)/src/bus/event_bus/inc \
+	-I$(TOPDIR)/src/fsm/global_fsm/inc \
+	-I$(TOPDIR)/src/fsm/module_fsm/inc \
+	-I$(TOPDIR)/src/service/capture_srv/inc \
+	-I$(TOPDIR)/plugins/hal_plugins/video_usb/inc \
+	-I$(TOPDIR)/plugins/app_plugins/inc \
+	-I$(TOPDIR)/common/log/inc \
+	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/plugin/inc \
+	-I$(TOPDIR)/common/configs
+
+# 3. 生成插件静态库
+TARGET_NAME := libplug.a
+TARGET_TYPE := LIB
+
+# 4. 链接 
+LDFLAGS := \
+	-L$(OUTPUTDIR) \
+	-lcom \
+	-pthread
+
+
+=============================================
+  工程架构文件导出完成！
+=============================================
