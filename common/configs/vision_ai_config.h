@@ -24,22 +24,31 @@
 
 // 采集服务配置
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
-#define CONFIG_CAPTURE_WIDTH 320
-#define CONFIG_CAPTURE_HEIGHT 240
+#define CONFIG_CAPTURE_WIDTH 640
+#define CONFIG_CAPTURE_HEIGHT 360
 #define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
-#define CONFIG_CAPTURE_FPS 30
+#define CONFIG_CAPTURE_FPS 4
 #define CONFIG_CAPTURE_BUF_COUNT 4
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 // 帧链路配置
-#define CONFIG_FRAME_LINK_POOL_SIZE 8
-#define CONFIG_FRAME_LINK_QUEUE_SIZE 4
+#define CONFIG_FRAME_LINK_POOL_SIZE 4
+#define CONFIG_FRAME_LINK_QUEUE_SIZE 2
+
+// ==========================================================================
+// 【新增】AI模型配置
+// ==========================================================================
+#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_INPUT_W    320
+#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_SCORE_THRESH 0.65f
+#define CONFIG_AI_IOU_THRESH   0.3f
+
 // 只保留类型别名，方便使用
 typedef void* event_bus_handle_t;
 typedef void* data_bus_handle_t;
 typedef void* global_fsm_handle_t;
-
 
 #endif /* VISION_AI_CONFIG_H */

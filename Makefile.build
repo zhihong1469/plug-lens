@@ -1,23 +1,32 @@
 # ==========================================================================
-# Makefile.build：通用编译规则（被顶层 Makefile 调用）
-# 功能：编译 .c -> .o + 生成 .d 依赖 + 追加 compile_commands.json
+# Makefile.build：通用编译规则（支持C/C++混合）【修复版】
 # ==========================================================================
 
-# 1. 接收传入的参数（CUR_DIR 是从顶层传下来的，比如 "app" 或 "lib"）
+# 1. 接收传入的参数
 SRC_DIR := $(TOPDIR)/$(CUR_DIR)
 OBJ_DIR := $(BUILDDIR)/$(CUR_DIR)
 
-# 2. 包含当前模块的 Makefile（也就是 app/Makefile 或 lib/Makefile）
+# 2. 包含当前模块的 Makefile
 include $(SRC_DIR)/Makefile
 
-# 3. 定义生成的目标文件路径
-OBJS := $(patsubst %.c, $(OBJ_DIR)/%.o, $(SRC_FILES))
-DEPS := $(OBJS:.o=.d)
+# 3. 定义生成的目标文件路径（分离C和C++）
+OBJS_C   := $(patsubst %.c, $(OBJ_DIR)/%.o, $(filter %.c, $(SRC_FILES)))
+OBJS_CPP := $(patsubst %.cpp, $(OBJ_DIR)/%.o, $(filter %.cpp, $(SRC_FILES)))
+OBJS     := $(OBJS_C) $(OBJS_CPP)
+DEPS     := $(OBJS:.o=.d)
+
+# ===================== 【修复1】提前判断链接器（Makefile 语法写在规则外）=====================
+ifeq ($(OBJS_CPP),)
+LINKER := $(CC)
+else
+LINKER := $(CXX)
+endif
 
 # 4. 追加头文件路径和编译标志
-CFLAGS += $(INC_FLAGS)
-CFLAGS += $(SYSROOT_CFLAGS)  # 自动带上系统头文件路径
-CFLAGS += -Wall -O0 -g -MMD -MP  # 默认开启警告、优化、调试信息、生成依赖 -O2
+CFLAGS   += $(INC_FLAGS) 
+CFLAGS   += $(SYSROOT_CFLAGS) # 自动带上系统头文件路径
+CFLAGS   += -Wall -O0 -g -MMD -MP # 默认开启警告、优化、调试信息、生成依赖 -O2
+CXXFLAGS += $(INC_FLAGS) $(SYSROOT_CFLAGS) -Wall -O0 -g -MMD -MP -std=c++11
 
 # 5. 最终目标规则
 ifdef TARGET_NAME
@@ -25,25 +34,31 @@ TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
 
 all: $(TARGET)
 
-# 链接规则
+# 链接规则（用g++链接，因为有C++库）
 $(TARGET): $(OBJS)
 	$(info OBJS = $(OBJS))
 	@echo "Linking $@"
 ifeq ($(TARGET_TYPE), LIB)
-	$(AR) rcs $@ $(OBJS)  # 打包静态库
+$(TARGET): $(OBJS)
 else
-	$(CC) $(OBJS) -o $@ $(LDFLAGS)  # 链接可执行文件
+$(TARGET): $(OBJS) $(OUTPUTDIR)/libcom.a $(OUTPUTDIR)/libplug.a
+endif
+	$(info OBJS = $(OBJS))
+	@echo "Linking $@"
+ifeq ($(TARGET_TYPE), LIB)
+	$(AR) rcs $@ $(OBJS)
+else
+	$(LINKER) $(OBJS) -o $@ $(LDFLAGS)
 endif
 	@echo "Built: $@"
 else
-all: $(OBJS)  # 没有定义目标名，只编译不链接
+all: $(OBJS)
 endif
 
-# 6. 核心编译规则：.c -> .o + 生成 .d + 追加 compile_commands.json
+# 6.1 C 文件编译
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
-	@echo "Compiling $<"
-	# 执行编译
+	@echo "Compiling C   : $<"
 	$(CC) $(CFLAGS) -c $< -o $@
 	$(eval COMPILE_CMD := $(CC) $(CFLAGS) -c $< -o $@)
 	@echo '  {' >> $(COMPILE_COMMANDS)
@@ -52,7 +67,19 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
 	@echo '  },' >> $(COMPILE_COMMANDS)
 
-# 7. 包含依赖文件（第一次编译没有 .d，用 -include 忽略错误）
+# 6.2 C++ 文件编译
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	@echo "Compiling C++ : $<"
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(eval COMPILE_CMD := $(CXX) $(CXXFLAGS) -c $< -o $@)
+	@echo '  {' >> $(COMPILE_COMMANDS)
+	@echo '    "directory": "$(TOPDIR)",' >> $(COMPILE_COMMANDS)
+	@echo '    "command": "$(subst ",\",$(COMPILE_CMD))",' >> $(COMPILE_COMMANDS)
+	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
+	@echo '  },' >> $(COMPILE_COMMANDS)
+
+# 7. 包含依赖
 -include $(DEPS)
 
 .PHONY: all

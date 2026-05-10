@@ -2,7 +2,7 @@
 
 
 
---- [1/8] 应用入口层 ---
+--- [1/9] 应用入口层 ---
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -10,17 +10,22 @@
 #include <string.h>
 #include <errno.h>
 #include "log.h"
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
 #include "module_fsm.h"
-#include "capture_srv.h"
 #include "demo_app.h"
-#include "vision_ai_config.h" 
+#include "vision_ai_config.h"
 #include "main.h"
-
+#include "face_detect_srv.h"
 // 全局唯一应用上下文（公共层实例化，无零散全局变量）
 app_context_t g_app_ctx = {0};
+
+// ==========================================================================
+// 内部静态辅助函数声明（仅 main.c 内部使用）
+// ==========================================================================
+static int _main_init_buses(void);
+static int _main_init_global_fsm(void);
+static int _main_init_capture_service(void);
+static int _main_init_face_detect_service(void);
+static int _main_init_demo_application(void);
 
 // ==========================================================================
 // 终端 公共基建实现
@@ -161,95 +166,66 @@ static void _main_on_g_fsm_event(global_event_t event,
 }
 
 // ==========================================================================
-// 统一资源清理（基建层收口，顺序可控）
+// 3.【封装】双总线初始化（事件总线 + 数据总线）
 // ==========================================================================
-static void _cleanup_resources(void)
-{
-    LOG_I("Main: Starting resource cleanup...");
-
-    _restore_terminal_mode();
-    // ============== 修复：先反初始化业务插件（停止所有线程） ==============
-    demo_app_deinit();
-
-    // ============== 修复：再销毁采集服务（停止硬件采集） ==============
-    if (g_app_ctx.cap_srv) {
-        capture_srv_destroy(g_app_ctx.cap_srv);
-        g_app_ctx.cap_srv = NULL;
-    }
-    
-    // 最后销毁核心组件
-    if (g_app_ctx.g_fsm) {
-        global_fsm_deinit(g_app_ctx.g_fsm);
-        g_app_ctx.g_fsm = NULL;
-    }
-    if (g_app_ctx.data_bus) {
-        data_bus_deinit(g_app_ctx.data_bus);
-        g_app_ctx.data_bus = NULL;
-    }
-    if (g_app_ctx.evt_bus) {
-        event_bus_deinit(g_app_ctx.evt_bus);
-        g_app_ctx.evt_bus = NULL;
-    }
-
-    app_exit_pipe_deinit();
-    LOG_I("Main: Resource cleanup complete");
-}
-
-// ==========================================================================
-// 主函数：纯架构流水线，零业务逻辑
-// ==========================================================================
-int main(int argc, char **argv)
+static int _main_init_buses(void)
 {
     int ret = 0;
-    memset(&g_app_ctx, 0, sizeof(g_app_ctx));
-    g_app_ctx.app_running = true;
 
-    // 1. 日志初始化
-    log_init(LOG_LEVEL_DEBUG);
-    LOG_I("Main: ========================================");
-    LOG_I("Main: Vision AI Application Starting...");
-    LOG_I("Main: ========================================");
-
-    // 2. 基建层初始化（信号 -> 管道 -> 终端 顺序固定）
-    _init_signal_handling();
-    if(app_exit_pipe_init() < 0) goto error_exit;
-    app_set_terminal_noncanonical();
-
-    // 3. 初始化双总线
     LOG_I("Main: Initializing Event Bus...");
     event_bus_config_t evt_bus_cfg = {0};
     evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
     ret = event_bus_init(&evt_bus_cfg, &g_app_ctx.evt_bus);
     if (ret != 0) {
         LOG_E("Main: Failed to init Event Bus");
-        goto error_exit;
+        return -1;
     }
 
     LOG_I("Main: Initializing Data Bus...");
     data_bus_config_t data_bus_cfg = {0};
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
     data_bus_cfg.max_item_size = 2 * 1024 * 1024;
+    data_bus_cfg.max_subscribers = 16;
     ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
-        goto error_exit;
+        return -1;
     }
 
-    // 4. 初始化全局状态机
+    return 0;
+}
+
+// ==========================================================================
+// 4.【封装】全局状态机初始化
+// ==========================================================================
+static int _main_init_global_fsm(void)
+{
+    int ret = 0;
     LOG_I("Main: Initializing Global FSM...");
+    
     global_fsm_config_t g_fsm_cfg = {0};
     g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
     g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
     g_fsm_cfg.event_cb = _main_on_g_fsm_event;
     g_fsm_cfg.user_data = NULL;
+    
     ret = global_fsm_init(&g_fsm_cfg, &g_app_ctx.g_fsm);
     if (ret != 0) {
         LOG_E("Main: Failed to init Global FSM");
-        goto error_exit;
+        return -1;
     }
 
-    // 5. 初始化采集服务
+    return 0;
+}
+
+// ==========================================================================
+// 5.1【封装】采集服务初始化 + 子状态机注册
+// ==========================================================================
+static int _main_init_capture_service(void)
+{
+    int ret = 0;
     LOG_I("Main: Initializing Capture Service...");
+
     capture_srv_config_t cap_srv_cfg = {0};
     cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
     cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
@@ -272,32 +248,148 @@ int main(int argc, char **argv)
     ret = capture_srv_create(&cap_srv_cfg, &g_app_ctx.cap_srv);
     if (ret != 0) {
         LOG_E("Main: Failed to create Capture Service");
-        goto error_exit;
+        return -1;
     }
 
+    // 注册子状态机到全局状态机
     module_fsm_handle_t cap_fsm = capture_srv_get_fsm(g_app_ctx.cap_srv);
     global_fsm_register_module(g_app_ctx.g_fsm, "capture_srv", cap_fsm, true);
 
-    // 6. 初始化业务插件（注入顶层上下文+管道读端）
+    return 0;
+}
+
+// ==========================================================================
+// 5.2【封装】人脸检测服务初始化 + 子状态机注册
+// ==========================================================================
+static int _main_init_face_detect_service(void)
+{
+    int ret = 0;
+    LOG_I("Main: Initializing Face Detect Service...");
+
+    face_detect_srv_config_t face_srv_cfg = {0};
+    face_srv_cfg.model_path = CONFIG_AI_MODEL_PATH;
+    face_srv_cfg.ai_input_w = CONFIG_AI_INPUT_W;
+    face_srv_cfg.ai_input_h = CONFIG_AI_INPUT_H;
+    face_srv_cfg.score_threshold = CONFIG_AI_SCORE_THRESH;
+    face_srv_cfg.iou_threshold = CONFIG_AI_IOU_THRESH;
+    
+    face_srv_cfg.evt_bus = g_app_ctx.evt_bus;
+    face_srv_cfg.data_bus = g_app_ctx.data_bus;
+    face_srv_cfg.callbacks.state_change_cb = global_fsm_on_module_state_change;
+    face_srv_cfg.callbacks.user_data = g_app_ctx.g_fsm;
+    face_srv_cfg.auto_start = false;
+
+    ret = face_detect_srv_create(&face_srv_cfg, &g_app_ctx.face_detect_srv);
+    if (ret != 0) {
+        LOG_E("Main: Failed to create Face Detect Service");
+        return -1;
+    }
+
+    module_fsm_handle_t face_fsm = face_detect_srv_get_fsm(g_app_ctx.face_detect_srv);
+    global_fsm_register_module(g_app_ctx.g_fsm, "face_detect_srv", face_fsm, true);
+
+    return 0;
+}
+
+// ==========================================================================
+// 6.【封装】Demo App 初始化
+// ==========================================================================
+static int _main_init_demo_application(void)
+{
+    int ret = 0;
     LOG_I("Main: Initializing Demo App...");
+
     demo_app_config_t app_cfg = {0};
     app_cfg.evt_bus = g_app_ctx.evt_bus;
     app_cfg.data_bus = g_app_ctx.data_bus;
     app_cfg.g_fsm = g_app_ctx.g_fsm;
     app_cfg.cap_srv = g_app_ctx.cap_srv;
-    app_cfg.exit_pipe_read_fd = g_app_ctx.exit_pipe[0]; // 注入管道读端
+    app_cfg.exit_pipe_read_fd = g_app_ctx.exit_pipe[0];
 
     ret = demo_app_init(&app_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Demo App");
-        goto error_exit;
+        return -1;
     }
 
-    // 7. 进入业务主循环
+    return 0;
+}
+
+// ==========================================================================
+// 统一资源清理（基建层收口，顺序可控）
+// ==========================================================================
+static void _cleanup_resources(void)
+{
+    LOG_I("Main: Starting resource cleanup...");
+
+    _restore_terminal_mode();
+    demo_app_deinit();
+
+    // 必须先销毁生成服务，再销毁消费服务，然后是总线和全局状态机，确保正确的销毁顺序（服务依赖总线和状态机）
+    if (g_app_ctx.face_detect_srv) {
+        face_detect_srv_destroy(g_app_ctx.face_detect_srv);
+        g_app_ctx.face_detect_srv = NULL;
+    }
+    if (g_app_ctx.cap_srv) {
+        capture_srv_destroy(g_app_ctx.cap_srv);
+        g_app_ctx.cap_srv = NULL;
+    }
+
+    if (g_app_ctx.g_fsm) {
+        global_fsm_deinit(g_app_ctx.g_fsm);
+        g_app_ctx.g_fsm = NULL;
+    }
+    if (g_app_ctx.data_bus) {
+        data_bus_deinit(g_app_ctx.data_bus);
+        g_app_ctx.data_bus = NULL;
+    }
+    if (g_app_ctx.evt_bus) {
+        event_bus_deinit(g_app_ctx.evt_bus);
+        g_app_ctx.evt_bus = NULL;
+    }
+
+    app_exit_pipe_deinit();
+    LOG_I("Main: Resource cleanup complete");
+}
+
+// ==========================================================================
+// 主函数：纯架构流水线，零业务逻辑（极致简洁）
+// ==========================================================================
+int main(int argc, char **argv)
+{
+    int ret = 0;
+    memset(&g_app_ctx, 0, sizeof(g_app_ctx));
+    g_app_ctx.app_running = true;
+
+    // 1. 日志初始化
+    log_init(LOG_LEVEL_DEBUG);
+    LOG_I("Main: ========================================");
+    LOG_I("Main: Vision AI Application Starting...");
+    LOG_I("Main: ========================================");
+
+    // 2. 基建层初始化（信号 -> 管道 -> 终端）
+    _init_signal_handling();
+    if(app_exit_pipe_init() < 0) goto error_exit;
+    app_set_terminal_noncanonical();
+
+    // 3. 初始化双总线（封装函数）
+    if (_main_init_buses() != 0) goto error_exit;
+
+    // 4. 初始化全局状态机（封装函数）
+    if (_main_init_global_fsm() != 0) goto error_exit;
+
+    // 5. 初始化采集服务（封装函数）
+    if (_main_init_capture_service() != 0) goto error_exit;
+    if (_main_init_face_detect_service() != 0) goto error_exit;
+
+    // 6. 初始化业务应用（封装函数）
+    if (_main_init_demo_application() != 0) goto error_exit;
+
+    // 7. 启动业务主循环
     LOG_I("Main: Entering main loop...");
     demo_app_run();
 
-    // 8. 正常退出流程
+    // 8. 正常退出
     LOG_I("Main: ========================================");
     LOG_I("Main: Application exited normally");
     LOG_I("Main: ========================================");
@@ -322,7 +414,8 @@ error_exit:
 #include "data_bus.h"
 #include "global_fsm.h"
 #include "capture_srv.h"
-
+#include "vision_ai_config.h"
+#include "face_detect_srv.h"
 // ==========================================================================
 // 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
 // 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
@@ -335,7 +428,7 @@ typedef struct {
     // 状态机 & 业务服务句柄
     global_fsm_handle_t     g_fsm;
     capture_srv_handle_t    cap_srv;
-
+    face_detect_srv_handle_t face_detect_srv;
     // 优雅退出：内核管道（替代全局quit_flag，线程安全、事件驱动）
     int                     exit_pipe[2];     // [0]读端 / [1]写端
 
@@ -393,10 +486,10 @@ void app_restore_terminal_safe(void);
 
 // 采集服务配置
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
-#define CONFIG_CAPTURE_WIDTH 320
-#define CONFIG_CAPTURE_HEIGHT 240
+#define CONFIG_CAPTURE_WIDTH 640
+#define CONFIG_CAPTURE_HEIGHT 360
 #define CONFIG_CAPTURE_FORMAT 0  // 0=VIDEO_PIX_FMT_YUYV 1=VIDEO_PIX_FMT_NV12  2=VIDEO_PIX_FMT_MJPEG
-#define CONFIG_CAPTURE_FPS 30
+#define CONFIG_CAPTURE_FPS 3
 #define CONFIG_CAPTURE_BUF_COUNT 4
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
@@ -405,16 +498,25 @@ void app_restore_terminal_safe(void);
 // 帧链路配置
 #define CONFIG_FRAME_LINK_POOL_SIZE 8
 #define CONFIG_FRAME_LINK_QUEUE_SIZE 4
+
+// ==========================================================================
+// 【新增】AI模型配置
+// ==========================================================================
+#define CONFIG_AI_MODEL_PATH "/usr/share/vision_ai/RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_INPUT_W    320
+#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_SCORE_THRESH 0.65f
+#define CONFIG_AI_IOU_THRESH   0.3f
+
 // 只保留类型别名，方便使用
 typedef void* event_bus_handle_t;
 typedef void* data_bus_handle_t;
 typedef void* global_fsm_handle_t;
 
-
 #endif /* VISION_AI_CONFIG_H */
 
 
---- [2/8] 应用插件 - DemoApp（select阻塞问题） ---
+--- [2/9] 应用插件 - DemoApp ---
 #ifndef DEMO_APP_H
 #define DEMO_APP_H   
 #include "global_fsm.h"   
@@ -673,7 +775,7 @@ static void _demo_app_print_help(void)
 }
 
 
---- [3/8] 帧链路 - FrameLink（子线程poll退出） ---
+--- [3/9] 帧链路 - FrameLink（视频流处理） ---
 #ifndef FRAME_LINK_H
 #define FRAME_LINK_H
 
@@ -1295,7 +1397,127 @@ static void* _frame_link_capture_thread(void *arg)
 }
 
 
---- [4/8] 业务服务 - CaptureSrv ---
+--- [4/9] AI模型链路 - AiModelLink（MNN推理） ---
+#ifndef AI_MODEL_LINK_H
+#define AI_MODEL_LINK_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// 错误码定义
+#define MNN_FACE_OK             0
+#define MNN_FACE_ERR_INIT       -1
+#define MNN_FACE_ERR_MODEL      -2
+#define MNN_FACE_ERR_INPUT      -3
+#define MNN_FACE_ERR_INFER      -4
+
+// AI模型默认配置
+#define DEFAULT_AI_W            320
+#define DEFAULT_AI_H            240
+#define DEFAULT_SCORE_THRESH    0.65f
+#define DEFAULT_IOU_THRESH      0.3f
+
+// 纯C人脸结构体
+typedef struct {
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+    float score;
+} FaceInfo_C;
+
+// 【修复】统一函数名为 ai_model_link_*
+int ai_model_link_init(const char* model_path, 
+                       int ai_w, 
+                       int ai_h,
+                       float score_threshold,
+                       float iou_threshold);
+
+int ai_model_link_infer(const uint8_t* yuyv_data, int cam_w, int cam_h,
+                       FaceInfo_C* out_faces, int max_faces, int* out_face_num);
+
+void ai_model_link_map_face(FaceInfo_C* face, int ai_w, int ai_h, int cam_w, int cam_h);
+void ai_model_link_get_ai_size(int* w, int* h);
+bool ai_model_link_is_ready(void);
+void ai_model_link_deinit(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // AI_MODEL_LINK_H#include "ai_model_link.h"
+#include "ai_model_mnn.hpp"
+
+// 全局单例AI对象
+static UltraFaceMNN g_ultra_face;
+// 保存实际初始化的AI分辨率
+static int g_ai_w = DEFAULT_AI_W;
+static int g_ai_h = DEFAULT_AI_H;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int ai_model_link_init(const char* model_path, int ai_w, int ai_h,
+                       float score_threshold, float iou_threshold) {
+    g_ai_w = ai_w;
+    g_ai_h = ai_h;
+    return g_ultra_face.init(model_path, ai_w, ai_h, score_threshold, iou_threshold);
+}
+
+int ai_model_link_infer(const uint8_t* yuyv_data, int cam_w, int cam_h,
+                       FaceInfo_C* out_faces, int max_faces, int* out_face_num) {
+    if (!out_faces || !out_face_num || max_faces <= 0) return MNN_FACE_ERR_INPUT;
+
+    // 【修复】使用 FaceInfo_MNN
+    std::vector<FaceInfo_MNN> faces;
+    int ret = g_ultra_face.detect(yuyv_data, cam_w, cam_h, faces);
+    if (ret != MNN_FACE_OK) return ret;
+
+    *out_face_num = std::min((int)faces.size(), max_faces);
+    for (int i = 0; i < *out_face_num; i++) {
+        out_faces[i].x1 = faces[i].x1;
+        out_faces[i].y1 = faces[i].y1;
+        out_faces[i].x2 = faces[i].x2;
+        out_faces[i].y2 = faces[i].y2;
+        out_faces[i].score = faces[i].score;
+    }
+    return MNN_FACE_OK;
+}
+
+void ai_model_link_map_face(FaceInfo_C* face, int ai_w, int ai_h, int cam_w, int cam_h) {
+    if (!face) return;
+    float sw = (float)cam_w / ai_w;
+    float sh = (float)cam_h / ai_h;
+    face->x1 *= sw;
+    face->y1 *= sh;
+    face->x2 *= sw;
+    face->y2 *= sh;
+}
+
+void ai_model_link_get_ai_size(int* w, int* h) {
+    if (w) *w = g_ai_w;
+    if (h) *h = g_ai_h;
+}
+
+bool ai_model_link_is_ready(void) {
+    return g_ultra_face.is_ready();
+}
+
+void ai_model_link_deinit(void) {
+    g_ultra_face.deinit();
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+
+--- [5/9] 业务服务 - 采集服务+人脸检测服务 ---
 // src/service/capture_srv/inc/capture_srv.h
 #ifndef CAPTURE_SRV_H
 #define CAPTURE_SRV_H
@@ -1387,10 +1609,691 @@ int capture_srv_put_frame(capture_srv_handle_t handle,
  */
 int capture_srv_destroy(capture_srv_handle_t handle);
 
-#endif /* CAPTURE_SRV_H */
+#endif /* CAPTURE_SRV_H */#include "capture_srv.h"
+#include "frame_link.h"
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
+#include "log.h"
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <time.h>
+#include "main.h"
+
+// ==========================================================================
+// 【核心】采集服务专属：状态迁移规则表
+// ==========================================================================
+static module_state_trans_t g_capture_srv_trans_table[] = {
+    // 初始化流程
+    {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
+    
+    // 启动流程
+    {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
+    
+    // 停止流程
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
+    {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
+    
+    // 异常流程
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
+    
+    // 销毁流程
+    {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_DEINITIALIZING, MODULE_EVENT_DEINIT_OK, MODULE_STATE_DEINIT},
+};
+static const uint32_t g_capture_srv_trans_len = sizeof(g_capture_srv_trans_table) / sizeof(g_capture_srv_trans_table[0]);
+
+// ==========================================================================
+// 内部上下文结构体（完美封装）
+// ==========================================================================
+typedef struct {
+    // 配置与回调
+    capture_srv_config_t config;
+    capture_srv_callbacks_t callbacks;
+    
+    // 下层依赖
+    frame_link_handle_t link_handle;
+    module_fsm_handle_t fsm_handle;
+    
+    // 总线句柄（缓存）
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+    
+    // 运行时状态
+    bool is_created;
+    pthread_mutex_t lock;
+} capture_srv_ctx_t;
+
+// ==========================================================================
+// 内部辅助函数声明
+// ==========================================================================
+static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data);
+static void _capture_srv_fsm_state_relay(const char *module_name,
+                                          module_state_t old_state,
+                                          module_state_t new_state,
+                                          void *user_data);
+static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
+
+// ==========================================================================
+// 对外API实现
+// ==========================================================================
+
+int capture_srv_create(const capture_srv_config_t *config,
+                       capture_srv_handle_t *out_handle)
+{
+    if (config == NULL || out_handle == NULL) {
+        return -1;
+    }
+
+    // 1. 分配并清零上下文
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)malloc(sizeof(capture_srv_ctx_t));
+    if (ctx == NULL) {
+        return -1;
+    }
+    memset(ctx, 0, sizeof(capture_srv_ctx_t));
+
+    // 2. 拷贝配置与回调
+    memcpy(&ctx->config, config, sizeof(capture_srv_config_t));
+    memcpy(&ctx->callbacks, &config->callbacks, sizeof(capture_srv_callbacks_t));
+    ctx->evt_bus = config->evt_bus;
+    ctx->data_bus = config->data_bus;
+    pthread_mutex_init(&ctx->lock, NULL);
+
+    // 3. 初始化 Link层
+    LOG_I("Capture Srv: Initializing Link layer...");
+    video_err_t err = frame_link_init(&ctx->config.link_cfg, g_app_ctx.exit_pipe[0], &ctx->link_handle);
+    if (err != VIDEO_OK) {
+        LOG_E("Capture Srv: Failed to init link layer (err=%d)", err);
+        pthread_mutex_destroy(&ctx->lock);
+        free(ctx);
+        return -1;
+    }
+
+    // 4. 注册 Link层 回调
+    frame_link_register_frame_ready_cb(ctx->link_handle, _capture_srv_on_link_frame, ctx);
+
+    // 5. 初始化 Module FSM
+    LOG_I("Capture Srv: Creating Module FSM...");
+    module_fsm_config_t fsm_cfg = {0};
+    fsm_cfg.module_name = "capture_srv";
+    fsm_cfg.trans_table = g_capture_srv_trans_table;
+    fsm_cfg.trans_table_len = g_capture_srv_trans_len;
+    fsm_cfg.event_handler = _capture_srv_fsm_event_handler;
+    fsm_cfg.state_cb = _capture_srv_fsm_state_relay; // 【关键】先中继到自己
+    fsm_cfg.user_data = ctx; // 【关键】user_data 传自己的 ctx
+
+    int ret = module_fsm_create(&fsm_cfg, &ctx->fsm_handle);
+    if (ret != 0) {
+        LOG_E("Capture Srv: Failed to create Module FSM");
+        frame_link_deinit(ctx->link_handle);
+        pthread_mutex_destroy(&ctx->lock);
+        free(ctx);
+        return -1;
+    }
+
+    // 6. 启动初始化流程
+    ctx->is_created = true;
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK); // Link init 同步完成
+
+    // 7. 自动启动（如果配置了）
+    if (ctx->config.auto_start) {
+        LOG_I("Capture Srv: Auto start enabled");
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
+    }
+
+    *out_handle = (capture_srv_handle_t)ctx;
+    LOG_I("Capture Srv: Created successfully");
+    return 0;
+}
+
+module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle)
+{
+    if (handle == NULL) return NULL;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+    return ctx->fsm_handle;
+}
+
+int capture_srv_get_frame(capture_srv_handle_t handle,
+                          video_frame_t *frame,
+                          uint32_t timeout_ms)
+{
+    if (handle == NULL || frame == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+
+    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
+    if (state != MODULE_STATE_RUNNING) {
+        LOG_W("Capture Srv: Get frame called in state %s", module_state_to_str(state));
+        return -1;
+    }
+
+    return frame_link_get_frame(ctx->link_handle, frame, timeout_ms);
+}
+
+int capture_srv_put_frame(capture_srv_handle_t handle,
+                          const video_frame_t *frame)
+{
+    if (handle == NULL || frame == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+    return frame_link_put_frame(ctx->link_handle, frame);
+}
+
+int capture_srv_destroy(capture_srv_handle_t handle)
+{
+    if (handle == NULL) return -1;
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
+
+    pthread_mutex_lock(&ctx->lock);
+
+    if (!ctx->is_created) {
+        pthread_mutex_unlock(&ctx->lock);
+        return 0;
+    }
+
+    // 1. 投 DEINIT 事件
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
+
+    // 2. 停止并销毁 Link层
+    frame_link_stop(ctx->link_handle);
+    frame_link_deinit(ctx->link_handle);
+
+    // 3. 投 DEINIT_OK
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
+
+    // 4. 销毁 FSM
+    module_fsm_destroy(ctx->fsm_handle);
+
+    ctx->is_created = false;
+    pthread_mutex_unlock(&ctx->lock);
+
+    pthread_mutex_destroy(&ctx->lock);
+    free(ctx);
+    
+    LOG_I("Capture Srv: Destroyed");
+    return 0;
+}
+
+// ==========================================================================
+// 【核心】内部辅助函数实现
+// ==========================================================================
+
+/**
+ * @brief FSM 事件处理器（在锁内调用，只做决策，不做耗时操作）
+ */
+static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data)
+{
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL) return -1;
+
+    LOG_I("Capture Srv: FSM Event Handler received: %s", module_event_to_str(event));
+    
+    // 这里只做决策，耗时的硬件操作放在 _capture_srv_fsm_state_relay 里（锁外）
+    return 0; // 允许所有迁移
+}
+
+/**
+ * @brief 【关键】FSM 状态中继回调
+ * 
+ * 职责链：
+ * Module FSM -> 此回调 -> 1. 执行硬件动作 (Start/Stop Link)
+ *                        -> 2. 转发给上层回调 (Global FSM)
+ */
+static void _capture_srv_fsm_state_relay(const char *module_name,
+                                          module_state_t old_state,
+                                          module_state_t new_state,
+                                          void *user_data)
+{
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL) return;
+
+    LOG_I("Capture Srv: State changed: %s -> %s", 
+          module_state_to_str(old_state), 
+          module_state_to_str(new_state));
+
+    // 1. 执行硬件动作
+    if (new_state == MODULE_STATE_STARTING) {
+        LOG_I("Capture Srv: Starting Link layer...");
+        video_err_t err = frame_link_start(ctx->link_handle);
+        if (err == VIDEO_OK) {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
+        } else {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
+        }
+    }
+    else if (new_state == MODULE_STATE_STOPPING) {
+        LOG_I("Capture Srv: Stopping Link layer...");
+        frame_link_stop(ctx->link_handle);
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
+    }
+
+    // 2. 转发给上层回调（Global FSM）
+    if (ctx->callbacks.state_change_cb != NULL) {
+        ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
+    }
+}
+
+/**
+ * @brief Link层 帧就绪回调（数据入口）
+ * 
+ * 【核心逻辑】
+ * 1. 收到 Link 层的帧指针
+ * 2. 申请 Data Bus Item
+ * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
+ * 4. 发布 Data Bus Item
+ * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
+ */
+static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
+{
+    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
+    if (ctx == NULL || frame == NULL) return;
+
+    // 非运行状态直接归还帧
+    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
+    if (state != MODULE_STATE_RUNNING) {
+        frame_link_put_frame(ctx->link_handle, frame); // 【修复1】正确的Link层归还接口
+        return;
+    }
+
+    // 申请Data Bus项
+    data_bus_item_handle_t item = NULL;
+    size_t data_size = frame->length;
+    
+    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
+    if (ret != 0 || item == NULL) {
+        frame_link_put_frame(ctx->link_handle, frame);
+        return;
+    }
+
+    // 拷贝数据到总线
+    void *w_ptr = data_bus_get_writable_ptr(item);
+    if (w_ptr == NULL) {
+        data_bus_release(item);
+        frame_link_put_frame(ctx->link_handle, frame);
+        return;
+    }
+    memcpy(w_ptr, frame->data, data_size);
+
+    // 发布数据到总线
+    ret = data_bus_publish(ctx->data_bus, item);
+    if (ret != 0) {
+        data_bus_release(item);
+        frame_link_put_frame(ctx->link_handle, frame);
+        return;
+    }
+    
+    // 释放生产者引用
+    data_bus_release(item); 
+    // 发布帧就绪事件
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
+
+    // 【修复2】立即归还帧给Link层（摄像头核心！）
+    frame_link_put_frame(ctx->link_handle, frame);
+}#ifndef FACE_DETECT_SRV_H
+#define FACE_DETECT_SRV_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "module_fsm.h"
+#include "event_bus.h"
+#include "data_bus.h"
+
+// 不透明句柄
+typedef void* face_detect_srv_handle_t;
+
+// 回调函数类型
+typedef void (*face_detect_state_cb_t)(const char *module_name,
+                                       module_state_t old_state,
+                                       module_state_t new_state,
+                                       void *user_data);
+
+// 回调集合
+typedef struct {
+    face_detect_state_cb_t state_change_cb;
+    void *user_data;
+} face_detect_srv_callbacks_t;
+
+// 服务配置
+typedef struct {
+    event_bus_handle_t evt_bus;          // 事件总线句柄
+    data_bus_handle_t data_bus;          // 数据总线句柄
+    const char *model_path;              // AI模型路径
+    int ai_input_w;                      // AI模型输入宽
+    int ai_input_h;                      // AI模型输入高
+    float score_threshold;               // 置信度阈值
+    float iou_threshold;                 // IOU阈值
+    bool auto_start;                     // 自动启动
+    face_detect_srv_callbacks_t callbacks; // 回调
+} face_detect_srv_config_t;
+
+// 对外API
+int face_detect_srv_create(const face_detect_srv_config_t *config,
+                           face_detect_srv_handle_t *out_handle);
+int face_detect_srv_destroy(face_detect_srv_handle_t handle);
+module_fsm_handle_t face_detect_srv_get_fsm(face_detect_srv_handle_t handle);
+
+#endif // FACE_DETECT_SRV_H#include "face_detect_srv.h"
+#include "log.h"
+#include "main.h"
+#include "ai_model_link.h"
+#include "data_bus.h"
+#include "event_bus.h"    // 【修复1】补全缺失头文件
+#include "module_fsm.h"
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+
+// 视频帧元数据（和采集服务对齐）
+typedef struct {
+    int width;
+    int height;
+    int format;
+    int stride;
+} video_frame_meta_t;
+
+// ==========================================================================
+// 状态迁移表
+// ==========================================================================
+static module_state_trans_t g_face_detect_srv_trans_table[] = {
+    {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
+    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
+    {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
+    {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
+    {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
+    {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
+    {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
+    {MODULE_STATE_DEINITIALIZING, MODULE_EVENT_DEINIT_OK, MODULE_STATE_DEINIT},
+};
+static const uint32_t g_face_detect_srv_trans_len =
+    sizeof(g_face_detect_srv_trans_table) / sizeof(module_state_trans_t);
+
+// ==========================================================================
+// 内部上下文
+// ==========================================================================
+typedef struct {
+    face_detect_srv_config_t config;
+    bool ai_initialized;
+    module_fsm_handle_t fsm_handle;
+    event_bus_handle_t evt_bus;
+    data_bus_handle_t data_bus;
+
+    data_bus_subscription_t data_sub;
+    bool data_subscribed;
+    int event_sub_id;
+    bool event_subscribed;
+
+    bool is_created;
+    pthread_mutex_t lock;
+} face_detect_srv_ctx_t;
+
+// ==========================================================================
+// 内部函数声明
+// ==========================================================================
+static int _face_detect_srv_fsm_event_handler(module_event_t event, void *user_data);
+static void _face_detect_srv_fsm_state_relay(const char *module_name,
+                                              module_state_t old_state,
+                                              module_state_t new_state,
+                                              void *user_data);
+static void _face_detect_srv_event_cb(const event_t *event, void *user_data);
+static void _face_detect_srv_data_cb(data_bus_item_handle_t item, void *user_data);
+static int _face_detect_process_frame(face_detect_srv_ctx_t *ctx, const uint8_t *data,
+                                      int w, int h);
+
+// ==========================================================================
+// 对外API
+// ==========================================================================
+int face_detect_srv_create(const face_detect_srv_config_t *config,
+                           face_detect_srv_handle_t *out_handle)
+{
+    if (!config || !out_handle || !config->evt_bus || !config->data_bus) {
+        LOG_E("FaceDetect: Invalid params");
+        return -1;
+    }
+
+    face_detect_srv_ctx_t *ctx = calloc(1, sizeof(face_detect_srv_ctx_t));
+    if (!ctx) return -1;
+
+    // 拷贝配置
+    memcpy(&ctx->config, config, sizeof(face_detect_srv_config_t));
+    ctx->evt_bus = config->evt_bus;
+    ctx->data_bus = config->data_bus;
+    pthread_mutex_init(&ctx->lock, NULL);
+
+    // 初始化状态机
+    module_fsm_config_t fsm_cfg = {0};
+    fsm_cfg.module_name = "face_detect_srv";
+    fsm_cfg.trans_table = g_face_detect_srv_trans_table;
+    fsm_cfg.trans_table_len = g_face_detect_srv_trans_len;
+    fsm_cfg.event_handler = _face_detect_srv_fsm_event_handler;
+    fsm_cfg.state_cb = _face_detect_srv_fsm_state_relay;
+    fsm_cfg.user_data = ctx;
+
+    if (module_fsm_create(&fsm_cfg, &ctx->fsm_handle) != 0) {
+        LOG_E("FaceDetect: FSM create failed");
+        pthread_mutex_destroy(&ctx->lock);
+        free(ctx);
+        return -1;
+    }
+
+    ctx->is_created = true;
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
+
+    // 自动启动
+    if (ctx->config.auto_start) {
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
+    }
+
+    *out_handle = ctx;
+    LOG_I("FaceDetect: Create success");
+    return 0;
+}
+
+module_fsm_handle_t face_detect_srv_get_fsm(face_detect_srv_handle_t handle)
+{
+    return handle ? ((face_detect_srv_ctx_t*)handle)->fsm_handle : NULL;
+}
+
+int face_detect_srv_destroy(face_detect_srv_handle_t handle)
+{
+    if (!handle) return -1;
+    face_detect_srv_ctx_t *ctx = handle;
+
+    pthread_mutex_lock(&ctx->lock);
+    if (!ctx->is_created) {
+        pthread_mutex_unlock(&ctx->lock);
+        return 0;
+    }
+
+    // 取消事件总线订阅
+    if (ctx->event_subscribed) {
+        event_bus_unsubscribe(ctx->evt_bus, ctx->event_sub_id);
+        ctx->event_subscribed = false;
+    }
+
+    // 取消数据总线订阅
+    if (ctx->data_subscribed) {
+        data_bus_unsubscribe(ctx->data_bus, &ctx->data_sub);
+        ctx->data_subscribed = false;
+    }
+
+    // 释放AI模型
+    if (ctx->ai_initialized) {
+        ai_model_link_deinit();
+        ctx->ai_initialized = false;
+    }
+
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
+    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
+    module_fsm_destroy(ctx->fsm_handle);
+
+    ctx->is_created = false;
+    pthread_mutex_unlock(&ctx->lock);
+
+    pthread_mutex_destroy(&ctx->lock);
+    free(ctx);
+    LOG_I("FaceDetect: Destroyed");
+    return 0;
+}
+
+// ==========================================================================
+// 内部实现
+// ==========================================================================
+static int _face_detect_srv_fsm_event_handler(module_event_t event, void *user_data)
+{
+    return 0;
+}
+
+// 状态机回调 + 总线订阅/发布
+static void _face_detect_srv_fsm_state_relay(const char *module_name,
+                                              module_state_t old_state,
+                                              module_state_t new_state,
+                                              void *user_data)
+{
+    face_detect_srv_ctx_t *ctx = user_data;
+    if (!ctx) return;
+
+    LOG_I("FaceDetect: %s -> %s", module_state_to_str(old_state), module_state_to_str(new_state));
+
+    // 1. 初始化AI模型
+    if (new_state == MODULE_STATE_INITIALIZING) {
+        int ret = ai_model_link_init(ctx->config.model_path,
+                                    ctx->config.ai_input_w,
+                                    ctx->config.ai_input_h,
+                                    ctx->config.score_threshold,
+                                    ctx->config.iou_threshold);
+        if (ret == MNN_FACE_OK) {
+            ctx->ai_initialized = true;
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK);
+            // 订阅事件总线
+            event_subscriber_t sub = {0};
+            sub.event_type = EVENT_TYPE_INVALID;
+            sub.callback = _face_detect_srv_event_cb;
+            sub.user_data = ctx;
+            ctx->event_sub_id = event_bus_subscribe(ctx->evt_bus, &sub);
+            ctx->event_subscribed = (ctx->event_sub_id > 0);
+            LOG_I("FaceDetect: Subscribe event bus: %d", ctx->event_sub_id);
+        } else {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_FAIL);
+        }
+    }
+
+    // 2. 启动：订阅数据总线
+    if (new_state == MODULE_STATE_STARTING) {
+        int ret = data_bus_subscribe(ctx->data_bus,
+                                    DATA_TYPE_VIDEO_FRAME,
+                                    _face_detect_srv_data_cb,
+                                    ctx,
+                                    &ctx->data_sub);
+        if (ret == 0) {
+            ctx->data_subscribed = true;
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
+            event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_AI_START, "face_detect_srv");
+        } else {
+            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
+        }
+    }
+
+    // 3. 停止：取消数据总线订阅
+    if (new_state == MODULE_STATE_STOPPING) {
+        if (ctx->data_subscribed) {
+            data_bus_unsubscribe(ctx->data_bus, &ctx->data_sub);
+            ctx->data_subscribed = false;
+        }
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
+        event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_AI_STOP, "face_detect_srv");
+    }
+
+    // 发布模块状态事件
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_MOD_STATE_CHANGED, "face_detect_srv");
+
+    // 上层回调
+    if (ctx->config.callbacks.state_change_cb) {
+        ctx->config.callbacks.state_change_cb(module_name, old_state, new_state,
+                                             ctx->config.callbacks.user_data);
+    }
+}
+
+// 事件总线回调
+static void _face_detect_srv_event_cb(const event_t *event, void *user_data)
+{
+    face_detect_srv_ctx_t *ctx = user_data;
+    if (!ctx || !event) return;
+
+    if (event->type == EVENT_TYPE_SYS_STOP) {
+        LOG_I("FaceDetect: Receive system stop event");
+        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP);
+    }
+}
+
+// 【修复2】数据总线回调（修正所有接口错误）
+static void _face_detect_srv_data_cb(data_bus_item_handle_t item, void *user_data)
+{
+    face_detect_srv_ctx_t *ctx = user_data;
+    if (!ctx || !item) return;
+
+    // 状态校验
+    if (module_fsm_get_state(ctx->fsm_handle) != MODULE_STATE_RUNNING) {
+        data_bus_release(item); // 【修复】必须释放，防止内存泄漏
+        return;
+    }
+
+    // 【修复3】函数名修正：readable → readonly
+    const uint8_t *data = (const uint8_t*)data_bus_get_readonly_ptr(item);
+    if (!data) {
+        data_bus_release(item);
+        return;
+    }
+
+    // 【修复4】使用采集服务配置的分辨率（兼容当前数据总线架构）
+    // 后续采集服务发布帧时，可将宽高写入数据总线，这里临时用宏定义兼容
+    _face_detect_process_frame(ctx, data, CONFIG_CAPTURE_WIDTH, CONFIG_CAPTURE_HEIGHT);
+    
+    // 【修复5】释放数据项：release_item → 正确接口 data_bus_release
+    data_bus_release(item);
+}
+
+// 帧处理 + 事件发布
+static int _face_detect_process_frame(face_detect_srv_ctx_t *ctx, const uint8_t *data, int w, int h)
+{
+    FaceInfo_C faces[10];
+    int face_num = 0;
+
+    int ret = ai_model_link_infer(data, w, h, faces, 10, &face_num);
+    if (ret != MNN_FACE_OK) return -1;
+
+    // 坐标映射
+    int ai_w, ai_h;
+    ai_model_link_get_ai_size(&ai_w, &ai_h);
+    for (int i = 0; i < face_num; i++) {
+        ai_model_link_map_face(&faces[i], ai_w, ai_h, w, h);
+    }
+
+    LOG_I("FaceDetect: Detected %d faces", face_num);
+
+    // 发布AI结果事件
+    if (face_num > 0) {
+        event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_FACE_DETECTED, "face_detect_srv");
+    }
+    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_AI_RESULT_READY, "face_detect_srv");
+
+    return 0;
+}
 
 
---- [5/8] 硬件插件 - USB摄像头V4L2 ---
+--- [6/9] 硬件插件 - USB摄像头V4L2 + MNN AI模型 ---
 // plugins/hal_plugins/video_usb/inc/video_usb.h
 #ifndef VIDEO_USB_H
 #define VIDEO_USB_H
@@ -2140,10 +3043,193 @@ int video_get_wait_fd(video_handle_t handle)
     if (handle == NULL) return -1;
     video_usb_context_t *ctx = (video_usb_context_t*)handle;
     return _video_usb_get_fd(ctx);
+}#include "ai_model_mnn.hpp"
+#include <string.h>
+#include <algorithm>
+#include <math.h>
+
+#define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
+
+UltraFaceMNN::UltraFaceMNN() 
+    : m_session(nullptr), m_input_tensor(nullptr), m_ready(false),
+      m_num_thread(DEFAULT_NUM_THREAD), 
+      m_score_thresh(DEFAULT_SCORE_THRESH),
+      m_iou_thresh(DEFAULT_IOU_THRESH)
+{
+    m_min_boxes = {{10.0f,16.0f,24.0f}, {32.0f,48.0f}, {64.0f,96.0f}, {128.0f,192.0f,256.0f}};
+    m_strides = {8.0f, 16.0f, 32.0f, 64.0f};
+}
+
+UltraFaceMNN::~UltraFaceMNN() {
+    deinit();
+}
+
+int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
+                       float score_threshold, float iou_threshold) {
+    if (!model_path) return MNN_FACE_ERR_INPUT;
+
+    m_ai_w = ai_w;
+    m_ai_h = ai_h;
+    m_score_thresh = score_threshold;
+    m_iou_thresh = iou_threshold;
+
+    m_interpreter.reset(MNN::Interpreter::createFromFile(model_path));
+    if (!m_interpreter) return MNN_FACE_ERR_MODEL;
+
+    MNN::ScheduleConfig config;
+    config.numThread = m_num_thread;
+    MNN::BackendConfig backend_config;
+    backend_config.precision = MNN::BackendConfig::Precision_Low;
+    config.backendConfig = &backend_config;
+
+    m_session = m_interpreter->createSession(config);
+    m_input_tensor = m_interpreter->getSessionInput(m_session, nullptr);
+
+    m_priors.clear();
+    for (int i = 0; i < 4; i++) {
+        float scale_w = (float)m_ai_w / m_strides[i];
+        float scale_h = (float)m_ai_h / m_strides[i];
+        int fm_w = ceil(m_ai_w / m_strides[i]);
+        int fm_h = ceil(m_ai_h / m_strides[i]);
+
+        for (int h = 0; h < fm_h; h++) {
+            for (int w = 0; w < fm_w; w++) {
+                float x_center = (w + 0.5f) / scale_w;
+                float y_center = (h + 0.5f) / scale_h;
+                for (float k : m_min_boxes[i]) {
+                    float pw = k / m_ai_w;
+                    float ph = k / m_ai_h;
+                    m_priors.push_back({clip(x_center,1), clip(y_center,1), clip(pw,1), clip(ph,1)});
+                }
+            }
+        }
+    }
+    m_num_anchors = m_priors.size();
+    m_ready = true;
+    return MNN_FACE_OK;
+}
+
+int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
+    if (!yuyv_data || width <=0 || height <=0) return MNN_FACE_ERR_INPUT;
+    cv::Mat yuyv(height, width, CV_8UC2, (void*)yuyv_data);
+    cv::cvtColor(yuyv, out_img, cv::COLOR_YUV2BGR_YUYV);
+    return MNN_FACE_OK;
+}
+
+// 【修复】全部使用 FaceInfo_MNN
+int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::vector<FaceInfo_MNN>& face_list) {
+    if (!m_ready || !yuyv_data) return MNN_FACE_ERR_INPUT;
+    face_list.clear();
+
+    cv::Mat bgr_img;
+    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, bgr_img);
+    if (ret != MNN_FACE_OK) return ret;
+
+    cv::Mat ai_img;
+    cv::resize(bgr_img, ai_img, cv::Size(m_ai_w, m_ai_h));
+
+    m_interpreter->resizeSession(m_session);
+    std::shared_ptr<MNN::CV::ImageProcess> pretreat(
+        MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
+    );
+    pretreat->convert(ai_img.data, m_ai_w, m_ai_h, ai_img.step[0], m_input_tensor);
+
+    m_interpreter->runSession(m_session);
+
+    MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
+    MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
+
+    MNN::Tensor scores_host(tensor_scores, tensor_scores->getDimensionType());
+    MNN::Tensor boxes_host(tensor_boxes, tensor_boxes->getDimensionType());
+    tensor_scores->copyToHostTensor(&scores_host);
+    tensor_boxes->copyToHostTensor(&boxes_host);
+
+    std::vector<FaceInfo_MNN> bbox_collection;
+    generate_bbox(bbox_collection, &scores_host, &boxes_host);
+    nms(bbox_collection, face_list);
+
+    return MNN_FACE_OK;
+}
+
+void UltraFaceMNN::generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes) {
+    for (int i = 0; i < m_num_anchors; i++) {
+        float score = scores->host<float>()[i * 2 + 1];
+        if (score <= m_score_thresh) continue;
+
+        FaceInfo_MNN face;
+        float xc = boxes->host<float>()[i*4]   * m_center_variance * m_priors[i][2] + m_priors[i][0];
+        float yc = boxes->host<float>()[i*4+1] * m_center_variance * m_priors[i][3] + m_priors[i][1];
+        float w  = exp(boxes->host<float>()[i*4+2] * m_size_variance) * m_priors[i][2];
+        float h  = exp(boxes->host<float>()[i*4+3] * m_size_variance) * m_priors[i][3];
+
+        face.x1 = clip(xc - w/2, 1) * m_ai_w;
+        face.y1 = clip(yc - h/2, 1) * m_ai_h;
+        face.x2 = clip(xc + w/2, 1) * m_ai_w;
+        face.y2 = clip(yc + h/2, 1) * m_ai_h;
+        face.score = score;
+        bbox_collection.push_back(face);
+    }
+}
+
+void UltraFaceMNN::nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output) {
+    if (input.empty()) return;
+    std::sort(input.begin(), input.end(), [](const FaceInfo_MNN& a, const FaceInfo_MNN& b) {
+        return a.score > b.score;
+    });
+
+    std::vector<int> merged(input.size(), 0);
+    for (int i = 0; i < input.size(); i++) {
+        if (merged[i]) continue;
+        output.push_back(input[i]);
+        merged[i] = 1;
+
+        float area0 = (input[i].x2 - input[i].x1) * (input[i].y2 - input[i].y1);
+        for (int j = i+1; j < input.size(); j++) {
+            if (merged[j]) continue;
+            float ix1 = std::max(input[i].x1, input[j].x1);
+            float iy1 = std::max(input[i].y1, input[j].y1);
+            float ix2 = std::min(input[i].x2, input[j].x2);
+            float iy2 = std::min(input[i].y2, input[j].y2);
+
+            float iw = std::max(0.0f, ix2 - ix1);
+            float ih = std::max(0.0f, iy2 - iy1);
+            float iarea = iw * ih;
+            float area1 = (input[j].x2 - input[j].x1) * (input[j].y2 - input[j].y1);
+            float iou = iarea / (area0 + area1 - iarea);
+
+            if (iou > m_iou_thresh) merged[j] = 1;
+        }
+    }
+}
+
+void UltraFaceMNN::map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h) {
+    float scale_w = (float)cam_w / ai_w;
+    float scale_h = (float)cam_h / ai_h;
+    face.x1 *= scale_w;
+    face.y1 *= scale_h;
+    face.x2 *= scale_w;
+    face.y2 *= scale_h;
+}
+
+void UltraFaceMNN::draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list) {
+    for (const auto& face : face_list) {
+        cv::rectangle(img, cv::Point((int)face.x1, (int)face.y1), 
+                      cv::Point((int)face.x2, (int)face.y2), cv::Scalar(0,255,0), 2);
+    }
+}
+
+void UltraFaceMNN::deinit() {
+    if (m_interpreter && m_session) {
+        m_interpreter->releaseSession(m_session);
+        m_interpreter->releaseModel();
+    }
+    m_session = nullptr;
+    m_input_tensor = nullptr;
+    m_ready = false;
 }
 
 
---- [6/8] 核心组件 - 事件总线+数据总线 ---
+--- [7/9] 核心组件 - 事件总线+数据总线 ---
 // src/bus/event_bus/inc/event_bus.h
 #ifndef EVENT_BUS_H
 #define EVENT_BUS_H
@@ -2209,6 +3295,7 @@ typedef enum {
     EVENT_TYPE_AI_RESULT_READY,
     EVENT_TYPE_AI_START,
     EVENT_TYPE_AI_STOP,
+    EVENT_TYPE_FACE_DETECTED,
 
     // 业务层事件 - 显示 (0x4000 - 0x4FFF)
     EVENT_TYPE_DISP_BASE = 0x4000,
@@ -2336,18 +3423,18 @@ const char* event_type_to_str(event_type_t type);
 #endif /* EVENT_BUS_H */// src/bus/event_bus/src/event_bus.c
 #include "event_bus.h"
 #include "log.h"
-#include "queue.h" // 【新增】引入我们现成的队列库
+#include "queue.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-#include <unistd.h> // 【新增】用于 pipe
+#include <unistd.h>
 
 // ==========================================================================
 // 内部宏定义
 // ==========================================================================
 #define EVENT_BUS_MAX_SUBSCRIBERS_DEFAULT 32
-#define EVENT_BUS_MAX_QUEUE_EVENTS 256    // 【新增】内部队列最大深度
+#define EVENT_BUS_MAX_QUEUE_EVENTS 256
 
 // ==========================================================================
 // 内部订阅者条目
@@ -2361,7 +3448,7 @@ typedef struct {
 } subscriber_entry_t;
 
 // ==========================================================================
-// 【核心修改】内部上下文结构体
+// 事件总线上下文
 // ==========================================================================
 typedef struct {
     event_bus_config_t config;
@@ -2372,14 +3459,14 @@ typedef struct {
     pthread_mutex_t lock;
     pthread_rwlock_t rwlock;
 
-    // 【新增】异步化组件
-    int pipefd[2];                      // 管道：[0]读端, [1]写端
-    Queue_t event_queue;                // 事件队列
-    void *queue_buffer[EVENT_BUS_MAX_QUEUE_EVENTS]; // 队列存储区 (存 event_t*)
+    int pipefd[2];
+    Queue_t event_queue;
+    void *queue_buffer[EVENT_BUS_MAX_QUEUE_EVENTS];
 } event_bus_context_t;
 
 // ==========================================================================
-// 字符串映射表
+// ✅ 优化1：事件类型字符串映射表（真正使用，删除 unused）
+// 仅映射核心通用事件，扩展事件走区间匹配
 // ==========================================================================
 static const char* g_event_type_str[] = {
     [EVENT_TYPE_INVALID] = "INVALID",
@@ -2394,12 +3481,32 @@ static const char* g_event_type_str[] = {
 // 内部辅助函数声明
 // ==========================================================================
 static uint64_t _event_bus_get_timestamp_us(void);
-static void _event_bus_free_event(event_t *event); // 【新增】辅助释放
+static void _event_bus_free_event(event_t *event);
 
 // ==========================================================================
-// 对外API实现
+// ✅ 优化2：重写 事件类型转字符串（精准+兼容）
 // ==========================================================================
+const char* event_type_to_str(event_type_t type)
+{
+    // 优先使用精准映射表
+    if (type < sizeof(g_event_type_str)/sizeof(char*) && g_event_type_str[type]) {
+        return g_event_type_str[type];
+    }
 
+    // 扩展事件按区间分类（兼容原有设计）
+    if (type >= EVENT_TYPE_CUSTOM_BASE) return "CUSTOM_EVENT";
+    if (type >= EVENT_TYPE_DISP_BASE)   return "DISP_EVENT";
+    if (type >= EVENT_TYPE_AI_BASE)     return "AI_EVENT";
+    if (type >= EVENT_TYPE_CAP_BASE)    return "CAP_EVENT";
+    if (type >= EVENT_TYPE_MOD_BASE)    return "MOD_EVENT";
+    if (type >= EVENT_TYPE_SYS_BASE)    return "SYS_EVENT";
+    
+    return "UNKNOWN_EVENT";
+}
+
+// ==========================================================================
+// 对外API实现（日志全部优化为打印事件名称）
+// ==========================================================================
 int event_bus_init(const event_bus_config_t *config,
                    event_bus_handle_t *out_handle)
 {
@@ -2408,9 +3515,7 @@ int event_bus_init(const event_bus_config_t *config,
     }
 
     event_bus_context_t *ctx = (event_bus_context_t*)malloc(sizeof(event_bus_context_t));
-    if (ctx == NULL) {
-        return -1;
-    }
+    if (!ctx) return -1;
     memset(ctx, 0, sizeof(event_bus_context_t));
 
     memcpy(&ctx->config, config, sizeof(event_bus_config_t));
@@ -2418,7 +3523,7 @@ int event_bus_init(const event_bus_config_t *config,
     ctx->next_subscription_id = 1;
 
     ctx->subscribers = (subscriber_entry_t*)malloc(ctx->max_subscribers * sizeof(subscriber_entry_t));
-    if (ctx->subscribers == NULL) {
+    if (!ctx->subscribers) {
         free(ctx);
         return -1;
     }
@@ -2427,9 +3532,6 @@ int event_bus_init(const event_bus_config_t *config,
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_rwlock_init(&ctx->rwlock, NULL);
 
-    // -------------------------------------------------------------------------
-    // 【新增】初始化 Pipe
-    // -------------------------------------------------------------------------
     if (pipe(ctx->pipefd) != 0) {
         LOG_E("Event Bus: Failed to create pipe");
         free(ctx->subscribers);
@@ -2437,9 +3539,6 @@ int event_bus_init(const event_bus_config_t *config,
         return -1;
     }
 
-    // -------------------------------------------------------------------------
-    // 【新增】初始化内部队列
-    // -------------------------------------------------------------------------
     Queue_Init(&ctx->event_queue, ctx->queue_buffer, EVENT_BUS_MAX_QUEUE_EVENTS);
 
     *out_handle = (event_bus_handle_t)ctx;
@@ -2450,8 +3549,7 @@ int event_bus_init(const event_bus_config_t *config,
 int event_bus_subscribe(event_bus_handle_t handle,
                         const event_subscriber_t *subscriber)
 {
-    // (这部分逻辑保持不变，直接复用原有代码)
-    if (handle == NULL || subscriber == NULL || subscriber->callback == NULL) {
+    if (!handle || !subscriber || !subscriber->callback) {
         return -1;
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
@@ -2479,21 +3577,20 @@ int event_bus_subscribe(event_bus_handle_t handle,
         return -1;
     }
 
-    LOG_I("Event Bus: Subscribed (id=%d, event_type=0x%X)", id, subscriber->event_type);
+    // ✅ 优化3：打印事件名称，而非数字
+    LOG_I("Event Bus: Subscribed (id=%d, event=%s)", 
+          id, event_type_to_str(subscriber->event_type));
     return id;
 }
 
-int event_bus_unsubscribe(event_bus_handle_t handle,
-                          int subscription_id)
+int event_bus_unsubscribe(event_bus_handle_t handle, int subscription_id)
 {
-    // (这部分逻辑保持不变)
-    if (handle == NULL || subscription_id <= 0) {
+    if (!handle || subscription_id <= 0) {
         return -1;
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
     pthread_rwlock_wrlock(&ctx->rwlock);
-
     int ret = -1;
     for (uint32_t i = 0; i < ctx->max_subscribers; i++) {
         if (ctx->subscribers[i].valid && ctx->subscribers[i].id == subscription_id) {
@@ -2503,7 +3600,6 @@ int event_bus_unsubscribe(event_bus_handle_t handle,
             break;
         }
     }
-
     pthread_rwlock_unlock(&ctx->rwlock);
 
     if (ret == 0) {
@@ -2512,47 +3608,39 @@ int event_bus_unsubscribe(event_bus_handle_t handle,
     return ret;
 }
 
-// ==========================================================================
-// 【核心修改】Publish 逻辑：只入队，不执行回调
-// ==========================================================================
 int event_bus_publish(event_bus_handle_t handle, const event_t *event)
 {
-    if (handle == NULL || event == NULL || event->type == EVENT_TYPE_INVALID) {
+    if (!handle || !event || event->type == EVENT_TYPE_INVALID) {
         return -1;
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
-    // 1. 分配内存拷贝事件 (因为要入队，必须脱离原调用者的栈)
     event_t *event_copy = (event_t*)malloc(sizeof(event_t));
-    if (event_copy == NULL) {
-        LOG_E("Event Bus: Out of memory for event copy");
+    if (!event_copy) {
+        LOG_E("Event Bus: Out of memory");
         return -1;
     }
     memcpy(event_copy, event, sizeof(event_t));
-    
-    // 填充时间戳
+
     if (event_copy->timestamp == 0) {
         event_copy->timestamp = _event_bus_get_timestamp_us();
     }
 
-    // 2. 尝试入队
     if (Queue_Put(&ctx->event_queue, event_copy) != QUEUE_OK) {
-        LOG_W("Event Bus: Queue full, dropping event");
-        free(event_copy); // 队列满了，丢弃
+        // ✅ 优化4：打印丢弃的事件名称
+        LOG_W("Event Bus: Queue full, drop event: %s", event_type_to_str(event->type));
+        free(event_copy);
         return -1;
     }
 
-    // 3. 【关键】写入 Pipe，唤醒主线程
     const char wakeup_byte = 0x01;
-    write(ctx->pipefd[1], &wakeup_byte, 1); // 这里不处理错误，尽力而为
+    write(ctx->pipefd[1], &wakeup_byte, 1);
 
-    // LOG_D("Event Bus: Event queued (async)"); 
     return 0;
 }
 
 int event_bus_publish_simple(event_bus_handle_t handle,
-                             event_type_t type,
-                             const char *source)
+                             event_type_t type, const char *source)
 {
     event_t evt = {0};
     evt.type = type;
@@ -2562,38 +3650,27 @@ int event_bus_publish_simple(event_bus_handle_t handle,
     return event_bus_publish(handle, &evt);
 }
 
-// ==========================================================================
-// 【新增 API】获取等待 FD
-// ==========================================================================
 int event_bus_get_wait_fd(event_bus_handle_t handle)
 {
-    if (handle == NULL) return -1;
+    if (!handle) return -1;
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
-    return ctx->pipefd[0]; // 返回读端
+    return ctx->pipefd[0];
 }
 
-// ==========================================================================
-// 【新增 API】分发事件 (主线程调用)
-// ==========================================================================
 int event_bus_dispatch(event_bus_handle_t handle)
 {
-    if (handle == NULL) return -1;
+    if (!handle) return -1;
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
-    // 1. 先把 Pipe 里的数据读空 (防止电平触发导致的一直唤醒)
     char buf[32];
-    read(ctx->pipefd[0], buf, sizeof(buf)); 
+    read(ctx->pipefd[0], buf, sizeof(buf));
 
-    // 2. 从队列取出事件
     event_t *event = NULL;
     if (Queue_Get(&ctx->event_queue, (void**)&event) != QUEUE_OK) {
-        return -1; // 没事件
+        return -1;
     }
+    if (!event) return -1;
 
-    if (event == NULL) return -1;
-
-    // 3. 【核心】执行回调 (逻辑复用旧代码，但在主线程执行)
-    // 在持有 rdlock 时调用用户回调。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
     pthread_rwlock_rdlock(&ctx->rwlock);
 
     #define MAX_TEMP_CALLBACKS 32
@@ -2616,16 +3693,16 @@ int event_bus_dispatch(event_bus_handle_t handle)
 
     pthread_rwlock_unlock(&ctx->rwlock);
 
-    // 执行回调
+    // ✅ 优化5：分发时打印事件（调试专用，可开关）
+    LOG_D("Event Bus: Dispatch event: %s", event_type_to_str(event->type));
+
     for (int i = 0; i < temp_count; i++) {
-        if (temp_callbacks[i].cb != NULL) {
+        if (temp_callbacks[i].cb) {
             temp_callbacks[i].cb(event, temp_callbacks[i].user_data);
         }
     }
 
-    // 4. 释放事件内存
     _event_bus_free_event(event);
-
     return 0;
 }
 
@@ -2636,11 +3713,9 @@ int event_bus_deinit(event_bus_handle_t handle)
     }
     event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
-    // 【新增】关闭 Pipe
     close(ctx->pipefd[0]);
     close(ctx->pipefd[1]);
 
-    // 【新增】清空队列并释放内存
     event_t *event = NULL;
     while (Queue_Get(&ctx->event_queue, (void**)&event) == QUEUE_OK) {
         _event_bus_free_event(event);
@@ -2660,21 +3735,9 @@ int event_bus_deinit(event_bus_handle_t handle)
     return 0;
 }
 
-const char* event_type_to_str(event_type_t type)
-{
-    if (type >= EVENT_TYPE_CUSTOM_BASE) return "CUSTOM";
-    if (type >= EVENT_TYPE_DISP_BASE) return "DISP";
-    if (type >= EVENT_TYPE_AI_BASE) return "AI";
-    if (type >= EVENT_TYPE_CAP_BASE) return "CAP";
-    if (type >= EVENT_TYPE_MOD_BASE) return "MOD";
-    if (type >= EVENT_TYPE_SYS_BASE) return "SYS";
-    return "UNKNOWN";
-}
-
 // ==========================================================================
-// 内部辅助函数实现
+// 内部辅助函数
 // ==========================================================================
-
 static uint64_t _event_bus_get_timestamp_us(void)
 {
     struct timespec ts;
@@ -2687,9 +3750,7 @@ static void _event_bus_free_event(event_t *event)
     if (event) {
         free(event);
     }
-}
-// src/bus/data_bus/inc/data_bus.h
-#ifndef DATA_BUS_H
+}#ifndef DATA_BUS_H
 #define DATA_BUS_H
 
 #include <stdint.h>
@@ -2701,17 +3762,18 @@ static void _event_bus_free_event(event_t *event)
 // 1. 零拷贝：只传递指针，引用计数管理生命周期
 // 2. 线程安全：引用计数操作原子化
 // 3. 类型安全：支持多种数据类型，带类型校验
-// 4. 生产者-消费者模式：一次生产，多处消费
+// 4. 支持 推模式(订阅回调) + 拉模式(主动获取) 双架构
 // ==========================================================================
 
 // ==========================================================================
 // 1. 不透明句柄
 // ==========================================================================
 typedef void* data_bus_handle_t;
-typedef void* data_bus_item_handle_t; // 数据项句柄
+typedef void* data_bus_item_handle_t;
+typedef void* data_bus_subscription_t; // 订阅句柄（补全）
 
 // ==========================================================================
-// 2. 数据类型枚举（分层预留）
+// 2. 数据类型枚举（修复重复定义）
 // ==========================================================================
 typedef enum {
     DATA_TYPE_INVALID = 0,
@@ -2728,10 +3790,10 @@ typedef enum {
 
     // 音频数据 (0x20 - 0x2F)
     DATA_TYPE_AUDIO_FRAME = 0x20,
+    DATA_TYPE_AUDIO_PCM,
 
     // 自定义扩展 (0xF0 - 0xFF)
     DATA_TYPE_CUSTOM_BASE = 0xF0,
-
     DATA_TYPE_MAX = 0xFF
 } data_type_t;
 
@@ -2747,11 +3809,17 @@ typedef struct {
 } data_bus_item_info_t;
 
 // ==========================================================================
-// 4. Data Bus 配置
+// 4. 数据总线回调类型（补全：推模式核心）
+// ==========================================================================
+typedef void (*data_bus_callback_t)(data_bus_item_handle_t item, void *user_data);
+
+// ==========================================================================
+// 5. Data Bus 配置
 // ==========================================================================
 typedef struct {
     uint32_t max_items;         // 最大数据项数量（池大小）
     size_t max_item_size;       // 单个数据项最大大小
+    uint32_t max_subscribers; // 新增：最大订阅者
 } data_bus_config_t;
 
 // ==========================================================================
@@ -2805,6 +3873,12 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item);
 // 消费者接口
 // -------------------------------------------------------------------------
 
+// 消费者 - 推模式（订阅回调，人脸服务必需）
+int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
+                       data_bus_callback_t cb, void *user_data,
+                       data_bus_subscription_t *out_sub);
+int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_t *sub);
+
 /**
  * @brief 获取最新的数据项（消费者用，引用计数+1）
  * @param handle 句柄
@@ -2857,8 +3931,7 @@ int data_bus_deinit(data_bus_handle_t handle);
  */
 const char* data_type_to_str(data_type_t type);
 
-#endif /* DATA_BUS_H */// src/bus/data_bus/src/data_bus.c
-#include "data_bus.h"
+#endif /* DATA_BUS_H */#include "data_bus.h"
 #include "log.h"
 #include <stdlib.h>
 #include <string.h>
@@ -2869,18 +3942,29 @@ const char* data_type_to_str(data_type_t type);
 // 内部宏定义
 // ==========================================================================
 #define DATA_BUS_MAX_ITEMS_DEFAULT 32
-#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT (4 * 1024 * 1024) // 4MB
+#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT (4 * 1024 * 1024)
+#define DATA_BUS_MAX_SUBSCRIBERS_DEFAULT 16
 
 // ==========================================================================
 // 内部数据项结构体
 // ==========================================================================
 typedef struct {
     data_bus_item_info_t info;
-    void *data_ptr;          // 指向实际数据的指针
-    bool in_use;             // 是否在使用中
-    bool published;          // 是否已发布
-    pthread_mutex_t ref_lock; // 引用计数锁
+    void *data_ptr;
+    bool in_use;
+    bool published;
+    pthread_mutex_t ref_lock;
 } data_item_t;
+
+// ==========================================================================
+// 内部订阅者结构体（推模式核心）
+// ==========================================================================
+typedef struct {
+    data_type_t type;
+    data_bus_callback_t cb;
+    void *user_data;
+    bool valid;
+} data_subscriber_t;
 
 // ==========================================================================
 // 内部上下文结构体
@@ -2888,19 +3972,13 @@ typedef struct {
 typedef struct {
     data_bus_config_t config;
     data_item_t *items;
-    uint32_t item_count;
+    data_subscriber_t *subscribers; // 订阅者数组
     uint32_t max_items;
+    uint32_t max_subscribers;
     size_t max_item_size;
-    
-    // 最新数据项索引（用于 acquire_latest）
     int latest_item_index;
-    
-    // 【新增】内部持有的最新 item 引用（防止被回收）
     data_item_t *latest_item_held;
-    
-    // 内存池（预分配）
     void *memory_pool;
-    
     pthread_mutex_t lock;
     pthread_rwlock_t rwlock;
 } data_bus_context_t;
@@ -2916,367 +3994,261 @@ static const char* g_data_type_str[] = {
 };
 
 // ==========================================================================
-// 内部辅助函数声明
+// 内部辅助函数
 // ==========================================================================
 static uint64_t _data_bus_get_timestamp_us(void);
 static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx);
 static void _data_bus_reset_item(data_item_t *item);
+static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *item);
 
 // ==========================================================================
 // 对外API实现
 // ==========================================================================
+int data_bus_init(const data_bus_config_t *config, data_bus_handle_t *out_handle) {
+    if (!config || !out_handle) return -1;
 
-int data_bus_init(const data_bus_config_t *config,
-                  data_bus_handle_t *out_handle)
-{
-    if (config == NULL || out_handle == NULL) {
-        return -1;
-    }
+    data_bus_context_t *ctx = calloc(1, sizeof(data_bus_context_t));
+    if (!ctx) return -1;
 
-    data_bus_context_t *ctx = (data_bus_context_t*)malloc(sizeof(data_bus_context_t));
-    if (ctx == NULL) {
-        return -1;
-    }
-    memset(ctx, 0, sizeof(data_bus_context_t));
-
-    // 拷贝配置
-    memcpy(&ctx->config, config, sizeof(data_bus_config_t));
-    ctx->max_items = (config->max_items > 0) ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
-    ctx->max_item_size = (config->max_item_size > 0) ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
+    ctx->config = *config;
+    ctx->max_items = config->max_items ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
+    ctx->max_item_size = config->max_item_size ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
+    ctx->max_subscribers = config->max_subscribers ? config->max_subscribers : DATA_BUS_MAX_SUBSCRIBERS_DEFAULT;
     ctx->latest_item_index = -1;
-    ctx->latest_item_held = NULL; // 【新增】初始化
-    // 分配数据项数组
-    ctx->items = (data_item_t*)malloc(ctx->max_items * sizeof(data_item_t));
-    if (ctx->items == NULL) {
-        free(ctx);
+    ctx->latest_item_held = NULL;
+
+    // 分配数据项
+    ctx->items = calloc(ctx->max_items, sizeof(data_item_t));
+    ctx->subscribers = calloc(ctx->max_subscribers, sizeof(data_subscriber_t));
+    ctx->memory_pool = malloc(ctx->max_items * ctx->max_item_size);
+    if (!ctx->items || !ctx->memory_pool || !ctx->subscribers) {
+        free(ctx->subscribers); free(ctx->items); free(ctx->memory_pool); free(ctx);
         return -1;
     }
-    memset(ctx->items, 0, ctx->max_items * sizeof(data_item_t));
 
-    // 预分配内存池（一次性分配，避免运行时碎片）
-    size_t total_pool_size = ctx->max_items * ctx->max_item_size;
-    ctx->memory_pool = malloc(total_pool_size);
-    if (ctx->memory_pool == NULL) {
-        free(ctx->items);
-        free(ctx);
-        return -1;
-    }
-    memset(ctx->memory_pool, 0, total_pool_size);
-
-    // 初始化每个数据项
-    for (uint32_t i = 0; i < ctx->max_items; i++) {
-        ctx->items[i].data_ptr = (uint8_t*)ctx->memory_pool + (i * ctx->max_item_size);
-        ctx->items[i].in_use = false;
-        ctx->items[i].published = false;
+    // 初始化item
+    for (uint32_t i=0; i<ctx->max_items; i++) {
+        ctx->items[i].data_ptr = (uint8_t*)ctx->memory_pool + i * ctx->max_item_size;
         pthread_mutex_init(&ctx->items[i].ref_lock, NULL);
     }
 
     pthread_mutex_init(&ctx->lock, NULL);
     pthread_rwlock_init(&ctx->rwlock, NULL);
+    *out_handle = ctx;
 
-    *out_handle = (data_bus_handle_t)ctx;
-    LOG_I("Data Bus: Initialized, max_items=%u, max_item_size=%uKB", 
-          ctx->max_items, ctx->max_item_size / 1024);
+    LOG_I("Data Bus: Init OK (items=%u, subs=%u)", ctx->max_items, ctx->max_subscribers);
     return 0;
 }
 
-// -------------------------------------------------------------------------
-// 生产者接口
-// -------------------------------------------------------------------------
-
-int data_bus_alloc(data_bus_handle_t handle,
-                   data_type_t type,
-                   size_t size,
-                   const char *producer,
-                   data_bus_item_handle_t *out_item)
-{
-    if (handle == NULL || out_item == NULL || type == DATA_TYPE_INVALID) {
-        return -1;
-    }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
-
-    if (size > ctx->max_item_size) {
-        LOG_E("Data Bus: Alloc size %zu > max %zu", size, ctx->max_item_size);
-        return -1;
-    }
+// 生产者：分配
+int data_bus_alloc(data_bus_handle_t handle, data_type_t type, size_t size,
+                   const char *producer, data_bus_item_handle_t *out_item) {
+    if (!handle || !out_item || type == DATA_TYPE_INVALID) return -1;
+    data_bus_context_t *ctx = handle;
+    if (size > ctx->max_item_size) return -1;
 
     pthread_mutex_lock(&ctx->lock);
-
-    // 找一个空闲的 item
     data_item_t *item = _data_bus_find_free_item(ctx);
-    if (item == NULL) {
-        LOG_W("Data Bus: No free items available");
-        pthread_mutex_unlock(&ctx->lock);
-        return -1;
-    }
+    if (!item) { pthread_mutex_unlock(&ctx->lock); return -1; }
 
-    // 初始化 item
     _data_bus_reset_item(item);
     item->info.type = type;
-    item->info.data_size = (uint32_t)size;
+    item->info.data_size = size;
     item->info.timestamp = _data_bus_get_timestamp_us();
     item->info.producer = producer;
-    item->info.ref_count = 1; // 生产者持有一个引用
+    item->info.ref_count = 1;
     item->in_use = true;
     item->published = false;
 
     pthread_mutex_unlock(&ctx->lock);
-
-    *out_item = (data_bus_item_handle_t)item;
-    // LOG_D("Data Bus: Allocated item (type=%s, size=%u)", data_type_to_str(type), (uint32_t)size);
+    *out_item = item;
     return 0;
 }
 
-void* data_bus_get_writable_ptr(data_bus_item_handle_t item)
-{
-    if (item == NULL) return NULL;
-    data_item_t *ditem = (data_item_t*)item;
-
-    // 只有未发布的 item 才能写
-    if (ditem->published) {
-        LOG_W("Data Bus: Attempt to write published item");
-        return NULL;
-    }
-
+// 生产者：获取可写指针
+void* data_bus_get_writable_ptr(data_bus_item_handle_t item) {
+    data_item_t *ditem = item;
+    if (!ditem || ditem->published) return NULL;
     return ditem->data_ptr;
 }
 
-int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item)
-{
-    if (handle == NULL || item == NULL) {
-        return -1;
-    }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
-    data_item_t *ditem = (data_item_t*)item;
+// 生产者：发布 + 自动通知订阅者（推模式核心）
+int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item) {
+    if (!handle || !item) return -1;
+    data_bus_context_t *ctx = handle;
+    data_item_t *ditem = item;
 
     pthread_mutex_lock(&ctx->lock);
+    if (!ditem->in_use || ditem->published) { pthread_mutex_unlock(&ctx->lock); return -1; }
 
-    if (!ditem->in_use || ditem->published) {
-        pthread_mutex_unlock(&ctx->lock);
-        return -1;
+    // 释放旧数据
+    if (ctx->latest_item_held) {
+        pthread_mutex_lock(&ctx->latest_item_held->ref_lock);
+        ctx->latest_item_held->info.ref_count--;
+        if (ctx->latest_item_held->info.ref_count == 0) _data_bus_reset_item(ctx->latest_item_held);
+        pthread_mutex_unlock(&ctx->latest_item_held->ref_lock);
     }
 
-    // 【新增】先释放旧的 latest_item_held
-    if (ctx->latest_item_held != NULL) {
-        data_item_t *old_item = ctx->latest_item_held;
-        
-        // 原子减少引用计数
-        pthread_mutex_lock(&old_item->ref_lock);
-        old_item->info.ref_count--;
-        uint32_t new_count = old_item->info.ref_count;
-        pthread_mutex_unlock(&old_item->ref_lock);
-        
-        // 如果引用计数为0，回收
-        if (new_count == 0) {
-            _data_bus_reset_item(old_item);
-            // LOG_D("Data Bus: Old latest item recycled");
-        }
-        
-        ctx->latest_item_held = NULL;
-    }
-
-    // 标记为已发布
     ditem->published = true;
-    ditem->info.timestamp = _data_bus_get_timestamp_us();
-
-    // 更新最新 item 索引
-    int index = (int)((uint8_t*)ditem - (uint8_t*)ctx->items) / sizeof(data_item_t);
-    ctx->latest_item_index = index;
-
-    // 【新增】内部持有这个新 item 的引用（ref_count +1）
+    ctx->latest_item_index = (ditem - ctx->items);
     pthread_mutex_lock(&ditem->ref_lock);
-    ditem->info.ref_count++; // 这里增加引用，防止被回收
+    ditem->info.ref_count++;
     pthread_mutex_unlock(&ditem->ref_lock);
-    
     ctx->latest_item_held = ditem;
 
+    // 【关键】推模式：通知所有订阅者
+    _data_bus_notify_subscribers(ctx, ditem);
     pthread_mutex_unlock(&ctx->lock);
-
-    // LOG_D("Data Bus: Published item (type=%s, producer=%s, ref_count now=%u)", 
-    //       data_type_to_str(ditem->info.type), 
-    //       ditem->info.producer,
-    //       ditem->info.ref_count);
     return 0;
 }
-// -------------------------------------------------------------------------
-// 消费者接口
-// -------------------------------------------------------------------------
 
-int data_bus_acquire_latest(data_bus_handle_t handle,
-                             data_type_t type,
-                             data_bus_item_handle_t *out_item)
-{
-    if (handle == NULL || out_item == NULL) {
-        return -1;
+// 消费者：订阅（人脸服务必需）
+int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
+                       data_bus_callback_t cb, void *user_data,
+                       data_bus_subscription_t *out_sub) {
+    if (!handle || !cb || !out_sub) return -1;
+    data_bus_context_t *ctx = handle;
+
+    pthread_mutex_lock(&ctx->lock);
+    for (uint32_t i=0; i<ctx->max_subscribers; i++) {
+        if (!ctx->subscribers[i].valid) {
+            ctx->subscribers[i].type = type;
+            ctx->subscribers[i].cb = cb;
+            ctx->subscribers[i].user_data = user_data;
+            ctx->subscribers[i].valid = true;
+            *out_sub = &ctx->subscribers[i];
+            pthread_mutex_unlock(&ctx->lock);
+            LOG_I("Data Bus: Subscribe OK (type=0x%x)", type);
+            return 0;
+        }
     }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
+    pthread_mutex_unlock(&ctx->lock);
+    LOG_E("Data Bus: Subscribe full");
+    return -1;
+}
 
-    pthread_rwlock_rdlock(&ctx->rwlock); // 读锁
+// 消费者：取消订阅
+int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_t *sub) {
+    if (!handle || !sub || !*sub) return -1;
+    data_bus_context_t *ctx = handle;
+    data_subscriber_t *s = *sub;
 
-    if (ctx->latest_item_index < 0) {
-        pthread_rwlock_unlock(&ctx->rwlock);
-        return -1; // 没有数据
-    }
+    pthread_mutex_lock(&ctx->lock);
+    s->valid = false;
+    pthread_mutex_unlock(&ctx->lock);
+    *sub = NULL;
+    LOG_I("Data Bus: Unsubscribe OK");
+    return 0;
+}
 
+// 消费者：拉模式 - 获取最新
+int data_bus_acquire_latest(data_bus_handle_t handle, data_type_t type,
+                             data_bus_item_handle_t *out_item) {
+    if (!handle || !out_item) return -1;
+    data_bus_context_t *ctx = handle;
+    pthread_rwlock_rdlock(&ctx->rwlock);
+
+    if (ctx->latest_item_index < 0) { pthread_rwlock_unlock(&ctx->rwlock); return -1; }
     data_item_t *item = &ctx->items[ctx->latest_item_index];
+    if (type != DATA_TYPE_INVALID && item->info.type != type) { pthread_rwlock_unlock(&ctx->rwlock); return -1; }
 
-    // 类型校验
-    if (type != DATA_TYPE_INVALID && item->info.type != type) {
-        pthread_rwlock_unlock(&ctx->rwlock);
-        return -1;
-    }
-
-    if (!item->in_use || !item->published) {
-        pthread_rwlock_unlock(&ctx->rwlock);
-        return -1;
-    }
-
-    // 原子增加引用计数
     pthread_mutex_lock(&item->ref_lock);
     item->info.ref_count++;
     pthread_mutex_unlock(&item->ref_lock);
-
     pthread_rwlock_unlock(&ctx->rwlock);
-
-    *out_item = (data_bus_item_handle_t)item;
-    // LOG_D("Data Bus: Acquired latest item (ref_count=%u)", item->info.ref_count);
+    *out_item = item;
     return 0;
 }
 
-const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item)
-{
-    if (item == NULL) return NULL;
-    data_item_t *ditem = (data_item_t*)item;
-    return ditem->data_ptr;
+const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item) {
+    return item ? ((data_item_t*)item)->data_ptr : NULL;
 }
 
-int data_bus_get_item_info(data_bus_item_handle_t item,
-                           data_bus_item_info_t *out_info)
-{
-    if (item == NULL || out_info == NULL) {
-        return -1;
-    }
-    data_item_t *ditem = (data_item_t*)item;
-    
+int data_bus_get_item_info(data_bus_item_handle_t item, data_bus_item_info_t *out_info) {
+    if (!item || !out_info) return -1;
+    data_item_t *ditem = item;
     pthread_mutex_lock(&ditem->ref_lock);
     *out_info = ditem->info;
     pthread_mutex_unlock(&ditem->ref_lock);
-    
     return 0;
 }
 
-int data_bus_release(data_bus_item_handle_t item)
-{
-    if (item == NULL) {
-        return -1;
-    }
-    data_item_t *ditem = (data_item_t*)item;
+int data_bus_release(data_bus_item_handle_t item) {
+    if (!item) return -1;
+    data_item_t *ditem = item;
 
     pthread_mutex_lock(&ditem->ref_lock);
-
-    if (ditem->info.ref_count == 0) {
-        pthread_mutex_unlock(&ditem->ref_lock);
-        return -1;
-    }
-
+    if (ditem->info.ref_count == 0) { pthread_mutex_unlock(&ditem->ref_lock); return -1; }
     ditem->info.ref_count--;
-    uint32_t new_count = ditem->info.ref_count;
-
+    uint32_t cnt = ditem->info.ref_count;
     pthread_mutex_unlock(&ditem->ref_lock);
 
-    // 如果引用计数为0，回收
-    if (new_count == 0) {
-        // 注意：这里我们不需要加总线的大锁，因为 item 已经没人用了
-        _data_bus_reset_item(ditem);
-        // LOG_D("Data Bus: Item released and recycled");
-    } else {
-        // LOG_D("Data Bus: Item released (ref_count=%u)", new_count);
-    }
-
+    if (cnt == 0) _data_bus_reset_item(ditem);
     return 0;
 }
 
-// -------------------------------------------------------------------------
-// 管理接口
-// -------------------------------------------------------------------------
-
-int data_bus_deinit(data_bus_handle_t handle)
-{
-    if (handle == NULL) {
-        return -1;
-    }
-    data_bus_context_t *ctx = (data_bus_context_t*)handle;
+int data_bus_deinit(data_bus_handle_t handle) {
+    if (!handle) return -1;
+    data_bus_context_t *ctx = handle;
 
     pthread_rwlock_wrlock(&ctx->rwlock);
-    // 【新增】先释放内部持有的 latest_item_held
-    if (ctx->latest_item_held != NULL) {
-        _data_bus_reset_item(ctx->latest_item_held);
-        ctx->latest_item_held = NULL;
-    }
-    // 销毁所有 item 的锁
-    for (uint32_t i = 0; i < ctx->max_items; i++) {
-        pthread_mutex_destroy(&ctx->items[i].ref_lock);
-    }
+    if (ctx->latest_item_held) _data_bus_reset_item(ctx->latest_item_held);
+    for (uint32_t i=0; i<ctx->max_items; i++) pthread_mutex_destroy(&ctx->items[i].ref_lock);
 
-    // 释放内存
     free(ctx->memory_pool);
     free(ctx->items);
-    
-    ctx->memory_pool = NULL;
-    ctx->items = NULL;
-    ctx->latest_item_index = -1;
-
+    free(ctx->subscribers);
     pthread_rwlock_unlock(&ctx->rwlock);
 
     pthread_rwlock_destroy(&ctx->rwlock);
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
-
-    LOG_I("Data Bus: Deinitialized");
+    LOG_I("Data Bus: Deinit OK");
     return 0;
 }
 
-const char* data_type_to_str(data_type_t type)
-{
-    if (type >= DATA_TYPE_CUSTOM_BASE) return "CUSTOM";
-    if (type < DATA_TYPE_MAX) return g_data_type_str[type];
-    return "UNKNOWN";
+const char* data_type_to_str(data_type_t type) {
+    return (type < DATA_TYPE_MAX) ? g_data_type_str[type] : "UNKNOWN";
 }
 
 // ==========================================================================
 // 内部辅助函数实现
 // ==========================================================================
-
-static uint64_t _data_bus_get_timestamp_us(void)
-{
+static uint64_t _data_bus_get_timestamp_us(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
-static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx)
-{
-    for (uint32_t i = 0; i < ctx->max_items; i++) {
-        if (!ctx->items[i].in_use) {
-            return &ctx->items[i];
-        }
-    }
+static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx) {
+    for (uint32_t i=0; i<ctx->max_items; i++) if (!ctx->items[i].in_use) return &ctx->items[i];
     return NULL;
 }
 
-static void _data_bus_reset_item(data_item_t *item)
-{
-    if (item == NULL) return;
-    
-    // 【修改】不要在 reset_item 里拿 ref_lock，因为此时 ref_count 应该已经是 0 了
-    // 直接清零
+static void _data_bus_reset_item(data_item_t *item) {
+    if (!item) return;
     memset(&item->info, 0, sizeof(item->info));
     item->in_use = false;
     item->published = false;
 }
 
+// 推模式：通知订阅者
+static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *item) {
+    for (uint32_t i=0; i<ctx->max_subscribers; i++) {
+        data_subscriber_t *s = &ctx->subscribers[i];
+        if (s->valid && (s->type == DATA_TYPE_INVALID || s->type == item->info.type)) {
+            // 引用+1，保证回调中数据安全
+            pthread_mutex_lock(&item->ref_lock);
+            item->info.ref_count++;
+            pthread_mutex_unlock(&item->ref_lock);
+            s->cb((data_bus_item_handle_t)item, s->user_data);
+            data_bus_release((data_bus_item_handle_t)item);
+        }
+    }
+}
 
---- [7/8] 核心组件 - 全局+模块状态机 ---
+
+--- [8/9] 核心组件 - 全局+模块状态机 ---
 // src/fsm/global_fsm/inc/global_fsm.h
 #ifndef GLOBAL_FSM_H
 #define GLOBAL_FSM_H
@@ -3607,7 +4579,6 @@ int global_fsm_post_event(global_fsm_handle_t handle, global_event_t event)
                 LOG_W("Global FSM: Cannot start, current state %s", global_state_to_str(current));
                 return -1;
             }
-            
             // ===================== 【修复开始】=====================
             // 1. 先在锁里拷贝模块句柄到临时数组
             module_fsm_handle_t *temp_modules = NULL;
@@ -4284,7 +5255,7 @@ static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
 }
 
 
---- [8/8] 通用组件 - 日志/队列 ---
+--- [9/9] 通用组件 - 日志/队列/线程/内存池/插件加载/图像处理 ---
 // common/log/inc/log.h
 #ifndef __LOG_H
 #define __LOG_H
@@ -4706,4 +5677,1940 @@ void Queue_Clear(Queue_t *q)
     q->head = 0;
     q->tail = 0;
     QUEUE_UNLOCK(q);
+}#ifndef __THREAD_H
+#define __THREAD_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <pthread.h>
+
+// ==========================================================================
+// 配置宏：是否启用详细日志
+// ==========================================================================
+#define THREAD_ENABLE_LOG 1
+
+#if THREAD_ENABLE_LOG
+#include "log.h"
+#endif
+
+// ==========================================================================
+// 线程优先级枚举（简化版，映射到系统优先级）
+// ==========================================================================
+typedef enum {
+    THREAD_PRIORITY_LOWEST = 0,
+    THREAD_PRIORITY_LOW,
+    THREAD_PRIORITY_NORMAL,
+    THREAD_PRIORITY_HIGH,
+    THREAD_PRIORITY_HIGHEST,
+    THREAD_PRIORITY_MAX
+} thread_priority_t;
+
+// ==========================================================================
+// 线程属性结构体
+// ==========================================================================
+typedef struct {
+    const char *name;               // 线程名称（可选，用于调试）
+    size_t stack_size;              // 栈大小（字节，0=使用默认）
+    thread_priority_t priority;     // 线程优先级
+    bool detached;                  // 是否分离状态（true=自动回收资源）
+    bool joinable;                  // 是否可等待（与 detached 互斥）
+} thread_attr_t;
+
+// ==========================================================================
+// 线程句柄结构体（完全封装）
+// ==========================================================================
+typedef struct {
+    pthread_t thread_id;            // 系统线程ID
+    thread_attr_t attr;             // 线程属性
+    void *(*entry)(void *);         // 线程入口函数
+    void *user_data;                // 用户数据
+    bool running;                   // 运行状态标记
+    bool initialized;               // 初始化标记
+} thread_t;
+
+// ==========================================================================
+// 错误码定义
+// ==========================================================================
+typedef enum {
+    THREAD_OK = 0,
+    THREAD_ERR_NULL_PARAM,         // 参数为空
+    THREAD_ERR_INVALID_ATTR,       // 属性无效
+    THREAD_ERR_CREATE_FAILED,      // 创建线程失败
+    THREAD_ERR_JOIN_FAILED,        // 等待线程失败
+    THREAD_ERR_DETACH_FAILED,      // 分离线程失败
+    THREAD_ERR_ALREADY_RUNNING,    // 线程已在运行
+    THREAD_ERR_NOT_RUNNING,        // 线程未运行
+    THREAD_ERR_NOT_INITIALIZED     // 未初始化
+} thread_err_t;
+
+// ==========================================================================
+// 对外 API 接口
+// ==========================================================================
+
+/**
+ * @brief 初始化线程属性为默认值
+ * @param attr 线程属性结构体指针
+ */
+void thread_attr_init(thread_attr_t *attr);
+
+/**
+ * @brief 创建并启动线程
+ * @param thread 线程句柄指针
+ * @param attr 线程属性（NULL=使用默认）
+ * @param entry 线程入口函数
+ * @param user_data 用户数据（透传给入口函数）
+ * @return 错误码
+ */
+thread_err_t thread_create(thread_t *thread,
+                           const thread_attr_t *attr,
+                           void *(*entry)(void *),
+                           void *user_data);
+
+/**
+ * @brief 等待线程结束（阻塞）
+ * @param thread 线程句柄指针
+ * @param retval 输出参数，线程返回值（NULL=忽略）
+ * @return 错误码
+ */
+thread_err_t thread_join(thread_t *thread, void **retval);
+
+/**
+ * @brief 分离线程（线程结束后自动回收资源）
+ * @param thread 线程句柄指针
+ * @return 错误码
+ */
+thread_err_t thread_detach(thread_t *thread);
+
+/**
+ * @brief 检查线程是否正在运行
+ * @param thread 线程句柄指针
+ * @return true=正在运行
+ */
+bool thread_is_running(thread_t *thread);
+
+/**
+ * @brief 获取线程名称
+ * @param thread 线程句柄指针
+ * @return 线程名称（NULL=未设置）
+ */
+const char* thread_get_name(thread_t *thread);
+
+/**
+ * @brief 获取当前系统线程ID
+ * @return 线程ID
+ */
+pthread_t thread_self_id(void);
+
+/**
+ * @brief 线程休眠（毫秒）
+ * @param ms 休眠毫秒数
+ */
+void thread_sleep_ms(uint32_t ms);
+
+/**
+ * @brief 线程休眠（微秒）
+ * @param us 休眠微秒数
+ */
+void thread_sleep_us(uint64_t us);
+
+/**
+ * @brief 让出CPU时间片
+ */
+void thread_yield(void);
+
+#endif /* __THREAD_H */
+#include "thread.h"
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include <errno.h>
+
+// ==========================================================================
+// 内部辅助宏
+// ==========================================================================
+#if THREAD_ENABLE_LOG
+    #define THREAD_LOG_I(fmt, ...) LOG_I(fmt, ##__VA_ARGS__)
+    #define THREAD_LOG_E(fmt, ...) LOG_E(fmt, ##__VA_ARGS__)
+    #define THREAD_LOG_W(fmt, ...) LOG_W(fmt, ##__VA_ARGS__)
+#else
+    #define THREAD_LOG_I(fmt, ...) do { } while(0)
+    #define THREAD_LOG_E(fmt, ...) do { } while(0)
+    #define THREAD_LOG_W(fmt, ...) do { } while(0)
+#endif
+
+// ==========================================================================
+// 内部辅助函数：优先级映射
+// ==========================================================================
+static int _thread_priority_to_system(thread_priority_t priority)
+{
+    int min_prio = sched_get_priority_min(SCHED_FIFO);
+    int max_prio = sched_get_priority_max(SCHED_FIFO);
+    int range = max_prio - min_prio;
+
+    switch (priority) {
+        case THREAD_PRIORITY_LOWEST:  return min_prio;
+        case THREAD_PRIORITY_LOW:     return min_prio + (range / 4);
+        case THREAD_PRIORITY_NORMAL:  return min_prio + (range / 2);
+        case THREAD_PRIORITY_HIGH:    return min_prio + (range * 3 / 4);
+        case THREAD_PRIORITY_HIGHEST: return max_prio;
+        default:                       return min_prio + (range / 2);
+    }
 }
+
+// ==========================================================================
+// 内部线程入口包装函数
+// ==========================================================================
+static void* _thread_entry_wrapper(void *arg)
+{
+    thread_t *thread = (thread_t*)arg;
+    if (thread == NULL) {
+        return NULL;
+    }
+
+    thread->running = true;
+    
+    THREAD_LOG_I("Thread [%s] started", thread->attr.name ? thread->attr.name : "unnamed");
+
+    // 调用用户入口函数
+    void *retval = NULL;
+    if (thread->entry != NULL) {
+        retval = thread->entry(thread->user_data);
+    }
+
+    thread->running = false;
+    
+    THREAD_LOG_I("Thread [%s] exited", thread->attr.name ? thread->attr.name : "unnamed");
+
+    return retval;
+}
+
+// ==========================================================================
+// 对外 API 实现
+// ==========================================================================
+
+void thread_attr_init(thread_attr_t *attr)
+{
+    if (attr == NULL) {
+        return;
+    }
+
+    memset(attr, 0, sizeof(thread_attr_t));
+    attr->name = NULL;
+    attr->stack_size = 0;          // 使用系统默认
+    attr->priority = THREAD_PRIORITY_NORMAL;
+    attr->detached = false;
+    attr->joinable = true;
+}
+
+thread_err_t thread_create(thread_t *thread,
+                           const thread_attr_t *attr,
+                           void *(*entry)(void *),
+                           void *user_data)
+{
+    if (thread == NULL || entry == NULL) {
+        return THREAD_ERR_NULL_PARAM;
+    }
+
+    if (thread->initialized && thread->running) {
+        THREAD_LOG_W("Thread already running");
+        return THREAD_ERR_ALREADY_RUNNING;
+    }
+
+    // 初始化线程结构体
+    memset(thread, 0, sizeof(thread_t));
+    thread->entry = entry;
+    thread->user_data = user_data;
+    thread->running = false;
+    thread->initialized = true;
+
+    // 拷贝属性
+    if (attr != NULL) {
+        memcpy(&thread->attr, attr, sizeof(thread_attr_t));
+    } else {
+        thread_attr_init(&thread->attr);
+    }
+
+    // 初始化 pthread 属性
+    pthread_attr_t pthread_attr;
+    pthread_attr_init(&pthread_attr);
+
+    // 设置栈大小
+    if (thread->attr.stack_size > 0) {
+        pthread_attr_setstacksize(&pthread_attr, thread->attr.stack_size);
+    }
+
+    // 设置分离状态
+    if (thread->attr.detached) {
+        pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_DETACHED);
+        thread->attr.joinable = false;
+    } else {
+        pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_JOINABLE);
+        thread->attr.joinable = true;
+    }
+
+    // 设置调度策略和优先级（仅在非分离状态下尝试）
+    if (!thread->attr.detached) {
+        struct sched_param param;
+        memset(&param, 0, sizeof(param));
+        param.sched_priority = _thread_priority_to_system(thread->attr.priority);
+        
+        // 尝试设置调度策略（可能失败，忽略错误）
+        pthread_attr_setschedpolicy(&pthread_attr, SCHED_FIFO);
+        pthread_attr_setschedparam(&pthread_attr, &param);
+        pthread_attr_setinheritsched(&pthread_attr, PTHREAD_EXPLICIT_SCHED);
+    }
+
+    // 创建线程
+    int ret = pthread_create(&thread->thread_id,
+                             &pthread_attr,
+                             _thread_entry_wrapper,
+                             thread);
+
+    // 销毁 pthread 属性
+    pthread_attr_destroy(&pthread_attr);
+
+    if (ret != 0) {
+        THREAD_LOG_E("Failed to create thread, errno=%d (%s)", ret, strerror(ret));
+        thread->initialized = false;
+        return THREAD_ERR_CREATE_FAILED;
+    }
+
+    THREAD_LOG_I("Thread created: [%s]", thread->attr.name ? thread->attr.name : "unnamed");
+
+    return THREAD_OK;
+}
+
+thread_err_t thread_join(thread_t *thread, void **retval)
+{
+    if (thread == NULL) {
+        return THREAD_ERR_NULL_PARAM;
+    }
+
+    if (!thread->initialized) {
+        return THREAD_ERR_NOT_INITIALIZED;
+    }
+
+    if (!thread->attr.joinable) {
+        THREAD_LOG_W("Thread is not joinable (detached)");
+        return THREAD_ERR_INVALID_ATTR;
+    }
+
+    int ret = pthread_join(thread->thread_id, retval);
+    if (ret != 0) {
+        THREAD_LOG_E("Failed to join thread, errno=%d (%s)", ret, strerror(ret));
+        return THREAD_ERR_JOIN_FAILED;
+    }
+
+    thread->running = false;
+    return THREAD_OK;
+}
+
+thread_err_t thread_detach(thread_t *thread)
+{
+    if (thread == NULL) {
+        return THREAD_ERR_NULL_PARAM;
+    }
+
+    if (!thread->initialized) {
+        return THREAD_ERR_NOT_INITIALIZED;
+    }
+
+    if (thread->attr.detached) {
+        return THREAD_OK; // 已经是分离状态
+    }
+
+    int ret = pthread_detach(thread->thread_id);
+    if (ret != 0) {
+        THREAD_LOG_E("Failed to detach thread, errno=%d (%s)", ret, strerror(ret));
+        return THREAD_ERR_DETACH_FAILED;
+    }
+
+    thread->attr.detached = true;
+    thread->attr.joinable = false;
+    
+    THREAD_LOG_I("Thread [%s] detached", thread->attr.name ? thread->attr.name : "unnamed");
+
+    return THREAD_OK;
+}
+
+bool thread_is_running(thread_t *thread)
+{
+    if (thread == NULL || !thread->initialized) {
+        return false;
+    }
+    return thread->running;
+}
+
+const char* thread_get_name(thread_t *thread)
+{
+    if (thread == NULL || !thread->initialized) {
+        return NULL;
+    }
+    return thread->attr.name;
+}
+
+pthread_t thread_self_id(void)
+{
+    return pthread_self();
+}
+
+void thread_sleep_ms(uint32_t ms)
+{
+    if (ms == 0) {
+        return;
+    }
+
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
+
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+        // 被信号中断，继续休眠
+    }
+}
+
+void thread_sleep_us(uint64_t us)
+{
+    if (us == 0) {
+        return;
+    }
+
+    struct timespec ts;
+    ts.tv_sec = us / 1000000;
+    ts.tv_nsec = (us % 1000000) * 1000;
+
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {
+        // 被信号中断，继续休眠
+    }
+}
+
+void thread_yield(void)
+{
+    sched_yield();
+}
+#ifndef __POOL_H
+#define __POOL_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+// ==========================================================================
+// 配置宏：是否启用线程安全
+// ==========================================================================
+#define POOL_ENABLE_THREAD_SAFE  1
+
+#if POOL_ENABLE_THREAD_SAFE
+#include <pthread.h>
+#endif
+
+// ==========================================================================
+// 错误码定义
+// ==========================================================================
+typedef enum {
+    POOL_OK = 0,
+    POOL_ERR_FULL,         // 池已满
+    POOL_ERR_EMPTY,        // 池已空
+    POOL_ERR_NULL_PARAM,   // 参数为空
+    POOL_ERR_LOCK,         // 加锁失败
+    POOL_ERR_NO_MEMORY,    // 内存不足
+    POOL_ERR_INVALID       // 无效操作
+} PoolErr_t;
+
+// ==========================================================================
+// 对象池句柄结构体（通用对象池）
+// ==========================================================================
+typedef struct {
+    void *memory_pool;          // 指向预分配的内存池
+    void **free_list;           // 空闲对象指针列表（栈结构）
+    uint32_t item_size;         // 单个对象的大小（字节）
+    uint32_t pool_capacity;     // 池的总容量
+    uint32_t free_count;        // 当前空闲对象数量
+    uint32_t top;               // 空闲列表栈顶指针
+
+#if POOL_ENABLE_THREAD_SAFE
+    pthread_mutex_t mutex;      // 互斥锁（保证多线程安全）
+#endif
+} Pool_t;
+
+// ==========================================================================
+// 对外 API 接口
+// ==========================================================================
+
+/**
+ * @brief 初始化对象池（静态内存模式，外部传入缓冲区）
+ * @param pool           对象池句柄指针
+ * @param item_size      单个对象的大小（字节）
+ * @param pool_capacity  池的总容量（对象个数）
+ * @param memory_buffer  外部传入的内存缓冲区（大小至少为 item_size * pool_capacity）
+ * @param free_list_buffer  外部传入的空闲列表缓冲区（大小至少为 sizeof(void*) * pool_capacity）
+ * @note 【静态内存模式】所有内存由外部管理，避免运行时 malloc 碎片
+ */
+void Pool_Init(Pool_t *pool,
+               size_t item_size,
+               uint32_t pool_capacity,
+               void *memory_buffer,
+               void **free_list_buffer);
+
+/**
+ * @brief 从池中获取一个对象
+ * @param pool  对象池句柄指针
+ * @param out_item  输出参数，返回对象指针
+ * @return 错误码
+ */
+PoolErr_t Pool_Acquire(Pool_t *pool, void **out_item);
+
+/**
+ * @brief 归还一个对象到池中
+ * @param pool  对象池句柄指针
+ * @param item  要归还的对象指针
+ * @return 错误码
+ */
+PoolErr_t Pool_Release(Pool_t *pool, void *item);
+
+/**
+ * @brief 判断池是否为空
+ * @param pool  对象池句柄指针
+ * @return true 为空
+ */
+bool Pool_IsEmpty(Pool_t *pool);
+
+/**
+ * @brief 判断池是否已满
+ * @param pool  对象池句柄指针
+ * @return true 为满
+ */
+bool Pool_IsFull(Pool_t *pool);
+
+/**
+ * @brief 获取当前空闲对象数量
+ * @param pool  对象池句柄指针
+ * @return 空闲对象数量
+ */
+uint32_t Pool_GetFreeCount(Pool_t *pool);
+
+/**
+ * @brief 重置池（清空所有对象，不释放内存）
+ * @param pool  对象池句柄指针
+ */
+void Pool_Reset(Pool_t *pool);
+
+#endif /* __POOL_H */#include "pool.h"
+#include <string.h>
+
+// ==========================================================================
+// 内部辅助宏（仅线程安全模式使用）
+// ==========================================================================
+#if POOL_ENABLE_THREAD_SAFE
+    #define POOL_LOCK(pool)    pthread_mutex_lock(&(pool)->mutex)
+    #define POOL_UNLOCK(pool)  pthread_mutex_unlock(&(pool)->mutex)
+#else
+    #define POOL_LOCK(pool)    ((void)0)
+    #define POOL_UNLOCK(pool)  ((void)0)
+#endif
+
+// ==========================================================================
+// API 实现
+// ==========================================================================
+
+void Pool_Init(Pool_t *pool,
+               size_t item_size,
+               uint32_t pool_capacity,
+               void *memory_buffer,
+               void **free_list_buffer)
+{
+    if (pool == NULL || memory_buffer == NULL || free_list_buffer == NULL || 
+        item_size == 0 || pool_capacity == 0) {
+        return;
+    }
+
+    // 初始化基本参数
+    pool->item_size = item_size;
+    pool->pool_capacity = pool_capacity;
+    pool->memory_pool = memory_buffer;
+    pool->free_list = free_list_buffer;
+    pool->free_count = pool_capacity;
+    pool->top = 0;
+
+    // 初始化空闲列表（栈结构）
+    // 将所有对象指针压入空闲列表
+    for (uint32_t i = 0; i < pool_capacity; i++) {
+        // 计算第 i 个对象的地址
+        pool->free_list[i] = (uint8_t*)memory_buffer + (i * item_size);
+    }
+    pool->top = pool_capacity; // 栈顶指向最后一个元素的下一个位置
+
+    // 清零内存（可选，根据需求）
+    memset(memory_buffer, 0, item_size * pool_capacity);
+
+#if POOL_ENABLE_THREAD_SAFE
+    pthread_mutex_init(&pool->mutex, NULL);
+#endif
+}
+
+PoolErr_t Pool_Acquire(Pool_t *pool, void **out_item)
+{
+    if (pool == NULL || out_item == NULL) {
+        return POOL_ERR_NULL_PARAM;
+    }
+
+    POOL_LOCK(pool);
+
+    // 检查池是否为空
+    if (pool->top == 0) {
+        POOL_UNLOCK(pool);
+        return POOL_ERR_EMPTY;
+    }
+
+    // 从栈顶弹出一个对象
+    pool->top--;
+    *out_item = pool->free_list[pool->top];
+    pool->free_count--;
+
+    POOL_UNLOCK(pool);
+    return POOL_OK;
+}
+
+PoolErr_t Pool_Release(Pool_t *pool, void *item)
+{
+    if (pool == NULL || item == NULL) {
+        return POOL_ERR_NULL_PARAM;
+    }
+
+    POOL_LOCK(pool);
+
+    // 检查池是否已满
+    if (pool->top >= pool->pool_capacity) {
+        POOL_UNLOCK(pool);
+        return POOL_ERR_FULL;
+    }
+
+    // 检查指针是否在池范围内（安全检查）
+    uintptr_t item_addr = (uintptr_t)item;
+    uintptr_t pool_start = (uintptr_t)pool->memory_pool;
+    uintptr_t pool_end = pool_start + (pool->pool_capacity * pool->item_size);
+    
+    if (item_addr < pool_start || item_addr >= pool_end) {
+        POOL_UNLOCK(pool);
+        return POOL_ERR_INVALID;
+    }
+
+    // 将对象压入空闲列表栈
+    pool->free_list[pool->top] = item;
+    pool->top++;
+    pool->free_count++;
+
+    POOL_UNLOCK(pool);
+    return POOL_OK;
+}
+
+bool Pool_IsEmpty(Pool_t *pool)
+{
+    if (pool == NULL) return true;
+
+    bool empty;
+    POOL_LOCK(pool);
+    empty = (pool->top == 0);
+    POOL_UNLOCK(pool);
+    return empty;
+}
+
+bool Pool_IsFull(Pool_t *pool)
+{
+    if (pool == NULL) return true;
+
+    bool full;
+    POOL_LOCK(pool);
+    full = (pool->top >= pool->pool_capacity);
+    POOL_UNLOCK(pool);
+    return full;
+}
+
+uint32_t Pool_GetFreeCount(Pool_t *pool)
+{
+    if (pool == NULL) return 0;
+
+    uint32_t count;
+    POOL_LOCK(pool);
+    count = pool->free_count;
+    POOL_UNLOCK(pool);
+    return count;
+}
+
+void Pool_Reset(Pool_t *pool)
+{
+    if (pool == NULL) return;
+
+    POOL_LOCK(pool);
+    
+    // 重置空闲列表
+    for (uint32_t i = 0; i < pool->pool_capacity; i++) {
+        pool->free_list[i] = (uint8_t*)pool->memory_pool + (i * pool->item_size);
+    }
+    pool->top = pool->pool_capacity;
+    pool->free_count = pool->pool_capacity;
+
+    // 清零内存
+    memset(pool->memory_pool, 0, pool->item_size * pool->pool_capacity);
+
+    POOL_UNLOCK(pool);
+}// common/plugin/plugin_loader.h
+#ifndef PLUGIN_LOADER_H
+#define PLUGIN_LOADER_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+// ==========================================================================
+// 【插件化设计】静态插件接口（嵌入式场景优先静态，避免动态库开销）
+// ==========================================================================
+
+// 插件初始化函数类型
+typedef int (*plugin_init_func_t)(void);
+// 插件启动函数类型
+typedef int (*plugin_start_func_t)(void);
+// 插件停止函数类型
+typedef int (*plugin_stop_func_t)(void);
+// 插件销毁函数类型
+typedef int (*plugin_deinit_func_t)(void);
+
+// 插件描述符
+typedef struct {
+    const char *name;           // 插件名称
+    plugin_init_func_t init;    // 初始化
+    plugin_start_func_t start;  // 启动
+    plugin_stop_func_t stop;    // 停止
+    plugin_deinit_func_t deinit;// 销毁
+} plugin_desc_t;
+
+// ==========================================================================
+// 插件加载器接口
+// ==========================================================================
+
+/**
+ * @brief 注册插件（静态插件在编译时注册）
+ * @param desc 插件描述符
+ * @return 0成功
+ */
+int plugin_register(const plugin_desc_t *desc);
+
+/**
+ * @brief 初始化所有已注册插件
+ * @return 0成功
+ */
+int plugin_init_all(void);
+
+/**
+ * @brief 启动所有已注册插件
+ * @return 0成功
+ */
+int plugin_start_all(void);
+
+/**
+ * @brief 停止所有已注册插件
+ * @return 0成功
+ */
+int plugin_stop_all(void);
+
+/**
+ * @brief 销毁所有已注册插件
+ * @return 0成功
+ */
+int plugin_deinit_all(void);
+
+#endif /* PLUGIN_LOADER_H */// common/plugin/plugin_loader.c
+#include "plugin_loader.h"
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+
+// ==========================================================================
+// 内部宏定义
+// ==========================================================================
+#define MAX_PLUGINS 32
+
+// ==========================================================================
+// 内部上下文结构体
+// ==========================================================================
+typedef struct {
+    const plugin_desc_t *plugins[MAX_PLUGINS];
+    uint32_t plugin_count;
+    bool initialized;
+    bool started;
+    pthread_mutex_t lock;
+} plugin_loader_context_t;
+
+// ==========================================================================
+// 内部全局变量（单例）
+// ==========================================================================
+static plugin_loader_context_t g_loader_ctx = {
+    .plugin_count = 0,
+    .initialized = false,
+    .started = false,
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+};
+
+// ==========================================================================
+// 对外API实现
+// ==========================================================================
+
+int plugin_register(const plugin_desc_t *desc)
+{
+    if (desc == NULL || desc->name == NULL) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_loader_ctx.lock);
+
+    // 检查是否已注册
+    for (uint32_t i = 0; i < g_loader_ctx.plugin_count; i++) {
+        if (strcmp(g_loader_ctx.plugins[i]->name, desc->name) == 0) {
+            pthread_mutex_unlock(&g_loader_ctx.lock);
+            return -1; // 已注册
+        }
+    }
+
+    // 检查插件数量
+    if (g_loader_ctx.plugin_count >= MAX_PLUGINS) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return -1;
+    }
+
+    // 注册插件
+    g_loader_ctx.plugins[g_loader_ctx.plugin_count++] = desc;
+
+    pthread_mutex_unlock(&g_loader_ctx.lock);
+    return 0;
+}
+
+int plugin_init_all(void)
+{
+    pthread_mutex_lock(&g_loader_ctx.lock);
+
+    if (g_loader_ctx.initialized) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return 0;
+    }
+
+    // 初始化所有插件
+    for (uint32_t i = 0; i < g_loader_ctx.plugin_count; i++) {
+        const plugin_desc_t *desc = g_loader_ctx.plugins[i];
+        if (desc->init != NULL) {
+            int ret = desc->init();
+            if (ret != 0) {
+                // 初始化失败，回滚已初始化的插件
+                for (uint32_t j = 0; j < i; j++) {
+                    const plugin_desc_t *rollback_desc = g_loader_ctx.plugins[j];
+                    if (rollback_desc->deinit != NULL) {
+                        rollback_desc->deinit();
+                    }
+                }
+                pthread_mutex_unlock(&g_loader_ctx.lock);
+                return ret;
+            }
+        }
+    }
+
+    g_loader_ctx.initialized = true;
+    pthread_mutex_unlock(&g_loader_ctx.lock);
+    return 0;
+}
+
+int plugin_start_all(void)
+{
+    pthread_mutex_lock(&g_loader_ctx.lock);
+
+    if (!g_loader_ctx.initialized) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return -1;
+    }
+
+    if (g_loader_ctx.started) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return 0;
+    }
+
+    // 启动所有插件
+    for (uint32_t i = 0; i < g_loader_ctx.plugin_count; i++) {
+        const plugin_desc_t *desc = g_loader_ctx.plugins[i];
+        if (desc->start != NULL) {
+            int ret = desc->start();
+            if (ret != 0) {
+                // 启动失败，回滚已启动的插件
+                for (uint32_t j = 0; j < i; j++) {
+                    const plugin_desc_t *rollback_desc = g_loader_ctx.plugins[j];
+                    if (rollback_desc->stop != NULL) {
+                        rollback_desc->stop();
+                    }
+                }
+                pthread_mutex_unlock(&g_loader_ctx.lock);
+                return ret;
+            }
+        }
+    }
+
+    g_loader_ctx.started = true;
+    pthread_mutex_unlock(&g_loader_ctx.lock);
+    return 0;
+}
+
+int plugin_stop_all(void)
+{
+    pthread_mutex_lock(&g_loader_ctx.lock);
+
+    if (!g_loader_ctx.started) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return 0;
+    }
+
+    // 停止所有插件（逆序）
+    for (int32_t i = g_loader_ctx.plugin_count - 1; i >= 0; i--) {
+        const plugin_desc_t *desc = g_loader_ctx.plugins[i];
+        if (desc->stop != NULL) {
+            desc->stop();
+        }
+    }
+
+    g_loader_ctx.started = false;
+    pthread_mutex_unlock(&g_loader_ctx.lock);
+    return 0;
+}
+
+int plugin_deinit_all(void)
+{
+    pthread_mutex_lock(&g_loader_ctx.lock);
+
+    if (!g_loader_ctx.initialized) {
+        pthread_mutex_unlock(&g_loader_ctx.lock);
+        return 0;
+    }
+
+    // 先停止
+    if (g_loader_ctx.started) {
+        plugin_stop_all();
+    }
+
+    // 销毁所有插件（逆序）
+    for (int32_t i = g_loader_ctx.plugin_count - 1; i >= 0; i--) {
+        const plugin_desc_t *desc = g_loader_ctx.plugins[i];
+        if (desc->deinit != NULL) {
+            desc->deinit();
+        }
+    }
+
+    g_loader_ctx.initialized = false;
+    g_loader_ctx.plugin_count = 0;
+    pthread_mutex_unlock(&g_loader_ctx.lock);
+    return 0;
+}
+#ifndef __IMG_PROC_H__
+#define __IMG_PROC_H__
+
+#include <stdint.h>
+#include <stddef.h>
+
+/* 图像格式枚举 */
+typedef enum {
+    IMG_FMT_YUYV422 = 0, /* YUYV 4:2:2 交错格式 */
+    IMG_FMT_RGB565,       /* RGB565 16位 */
+    IMG_FMT_RGB888,       /* RGB888 24位（模型输入常用） */
+    IMG_FMT_BGR888,       /* BGR888 24位（OpenCV常用） */
+    IMG_FMT_GRAY8,         /* 灰度8位 */
+    IMG_FMT_MAX
+} img_format_t;
+
+/* 图像缓冲区结构体 */
+typedef struct {
+    uint8_t *data;      /* 像素数据指针 */
+    img_format_t format; /* 像素格式 */
+    uint32_t width;     /* 宽度（像素） */
+    uint32_t height;    /* 高度（像素） */
+    uint32_t stride;    /* 行跨度（字节，用于对齐） */
+    uint32_t size;      /* 总数据大小（字节） */
+} img_buf_t;
+
+/* 图像预处理操作函数指针集合 */
+typedef struct {
+    /* 格式转换：in -> out */
+    int (*convert)(const img_buf_t *in, img_buf_t *out);
+    
+    /* 图像缩放：最近邻插值，in -> out */
+    int (*resize)(const img_buf_t *in, img_buf_t *out);
+    
+    /* RGB归一化+张量排布：RGB888 -> 模型输入张量
+     * norm_mean: 归一化均值（如 [127.0, 127.0, 127.0]）
+     * norm_std:  归一化标准差（如 [128.0, 128.0, 128.0]）
+     * layout:    张量排布 ("NHWC" 或 "NCHW")
+     */
+    int (*normalize)(const img_buf_t *in, float *out, 
+                     const float *norm_mean, const float *norm_std,
+                     const char *layout);
+} img_ops_t;
+
+/* 注册图像预处理实现（纯C/OpenCV通过此函数切换） */
+int img_proc_register(const img_ops_t *ops);
+
+/* 获取已注册的图像预处理操作 */
+const img_ops_t *img_proc_get_ops(void);
+
+/* 辅助函数：计算图像缓冲区大小 */
+uint32_t img_proc_calc_size(img_format_t fmt, uint32_t width, uint32_t height);
+
+/* 辅助函数：初始化图像缓冲区（内部不分配内存，由调用者管理） */
+void img_buf_init(img_buf_t *buf, uint8_t *data, img_format_t fmt, 
+                  uint32_t width, uint32_t height);
+
+#endif /* __IMG_PROC_H__ */
+#include "img_proc.h"
+#include <string.h>
+#include <math.h>
+
+/* -------------------------- 内部辅助宏与LUT -------------------------- */
+#define CLIP_U8(x) ((x) > 255 ? 255 : ((x) < 0 ? 0 : (x)))
+
+/* YUV422转RGB888的系数（BT.601标准，SDTV） */
+#define YUV2RGB_COEFF_Y(y)  ((y) - 16)
+#define YUV2RGB_COEFF_U(u)  ((u) - 128)
+#define YUV2RGB_COEFF_V(v)  ((v) - 128)
+
+#define R_FROM_YUV(y, v)  CLIP_U8((298 * YUV2RGB_COEFF_Y(y) + 409 * YUV2RGB_COEFF_V(v) + 128) >> 8)
+#define G_FROM_YUV(y, u, v) CLIP_U8((298 * YUV2RGB_COEFF_Y(y) - 100 * YUV2RGB_COEFF_U(u) - 208 * YUV2RGB_COEFF_V(v) + 128) >> 8)
+#define B_FROM_YUV(y, u)  CLIP_U8((298 * YUV2RGB_COEFF_Y(y) + 516 * YUV2RGB_COEFF_U(u) + 128) >> 8)
+
+/* -------------------------- 纯C格式转换实现 -------------------------- */
+static int _cvt_yuyv2rgb565(const img_buf_t *in, img_buf_t *out)
+{
+    if (!in || !out || in->format != IMG_FMT_YUYV422 || out->format != IMG_FMT_RGB565)
+        return -1;
+    if (in->width != out->width || in->height != out->height)
+        return -1;
+
+    const uint8_t *src = in->data;
+    uint16_t *dst = (uint16_t *)out->data;
+    uint32_t pixel_cnt = in->width * in->height;
+
+    for (uint32_t i = 0; i < pixel_cnt; i += 2) {
+        /* YUYV数据包：Y0 U0 Y1 V0 */
+        uint8_t y0 = src[0];
+        uint8_t u0 = src[1];
+        uint8_t y1 = src[2];
+        uint8_t v0 = src[3];
+        src += 4;
+
+        /* 第一个像素：Y0 U0 V0 */
+        int r = R_FROM_YUV(y0, v0);
+        int g = G_FROM_YUV(y0, u0, v0);
+        int b = B_FROM_YUV(y0, u0);
+        /* RGB888 -> RGB565 */
+        *dst++ = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+
+        /* 第二个像素：Y1 U0 V0 */
+        r = R_FROM_YUV(y1, v0);
+        g = G_FROM_YUV(y1, u0, v0);
+        b = B_FROM_YUV(y1, u0);
+        *dst++ = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+    }
+    return 0;
+}
+
+static int _cvt_yuyv2rgb888(const img_buf_t *in, img_buf_t *out)
+{
+    if (!in || !out || in->format != IMG_FMT_YUYV422 || out->format != IMG_FMT_RGB888)
+        return -1;
+    if (in->width != out->width || in->height != out->height)
+        return -1;
+
+    const uint8_t *src = in->data;
+    uint8_t *dst = out->data;
+    uint32_t pixel_cnt = in->width * in->height;
+
+    for (uint32_t i = 0; i < pixel_cnt; i += 2) {
+        uint8_t y0 = src[0];
+        uint8_t u0 = src[1];
+        uint8_t y1 = src[2];
+        uint8_t v0 = src[3];
+        src += 4;
+
+        /* 像素1 */
+        *dst++ = R_FROM_YUV(y0, v0);
+        *dst++ = G_FROM_YUV(y0, u0, v0);
+        *dst++ = B_FROM_YUV(y0, u0);
+        /* 像素2 */
+        *dst++ = R_FROM_YUV(y1, v0);
+        *dst++ = G_FROM_YUV(y1, u0, v0);
+        *dst++ = B_FROM_YUV(y1, u0);
+    }
+    return 0;
+}
+
+static int _c_convert(const img_buf_t *in, img_buf_t *out)
+{
+    if (!in || !out || !in->data || !out->data)
+        return -1;
+
+    /* 根据输入输出格式分发 */
+    if (in->format == IMG_FMT_YUYV422 && out->format == IMG_FMT_RGB565)
+        return _cvt_yuyv2rgb565(in, out);
+    else if (in->format == IMG_FMT_YUYV422 && out->format == IMG_FMT_RGB888)
+        return _cvt_yuyv2rgb888(in, out);
+    else
+        return -1; /* 其他格式暂未实现，按需添加 */
+}
+
+/* -------------------------- 纯C最近邻缩放实现 -------------------------- */
+static int _c_resize(const img_buf_t *in, img_buf_t *out)
+{
+    if (!in || !out || !in->data || !out->data)
+        return -1;
+    if (in->format != out->format)
+        return -1; /* 仅支持同格式缩放 */
+
+    uint32_t src_w = in->width;
+    uint32_t src_h = in->height;
+    uint32_t dst_w = out->width;
+    uint32_t dst_h = out->height;
+    const uint8_t *src = in->data;
+    uint8_t *dst = out->data;
+
+    /* 计算缩放比例（定点数，避免浮点运算） */
+    uint32_t scale_x = (src_w << 16) / dst_w;
+    uint32_t scale_y = (src_h << 16) / dst_h;
+
+    /* 根据像素格式处理 */
+    if (in->format == IMG_FMT_RGB888) {
+        for (uint32_t y = 0; y < dst_h; y++) {
+            uint32_t src_y = (y * scale_y) >> 16;
+            src_y = (src_y >= src_h) ? (src_h - 1) : src_y;
+
+            for (uint32_t x = 0; x < dst_w; x++) {
+                uint32_t src_x = (x * scale_x) >> 16;
+                src_x = (src_x >= src_w) ? (src_w - 1) : src_x;
+
+                /* 复制RGB888三个字节 */
+                const uint8_t *src_pix = src + (src_y * src_w + src_x) * 3;
+                uint8_t *dst_pix = dst + (y * dst_w + x) * 3;
+                dst_pix[0] = src_pix[0];
+                dst_pix[1] = src_pix[1];
+                dst_pix[2] = src_pix[2];
+            }
+        }
+        return 0;
+    } else if (in->format == IMG_FMT_RGB565) {
+        for (uint32_t y = 0; y < dst_h; y++) {
+            uint32_t src_y = (y * scale_y) >> 16;
+            src_y = (src_y >= src_h) ? (src_h - 1) : src_y;
+
+            for (uint32_t x = 0; x < dst_w; x++) {
+                uint32_t src_x = (x * scale_x) >> 16;
+                src_x = (src_x >= src_w) ? (src_w - 1) : src_x;
+
+                /* 复制RGB565两个字节 */
+                const uint16_t *src_pix = (const uint16_t *)src + (src_y * src_w + src_x);
+                uint16_t *dst_pix = (uint16_t *)dst + (y * dst_w + x);
+                *dst_pix = *src_pix;
+            }
+        }
+        return 0;
+    } else {
+        return -1; /* 其他格式暂未实现 */
+    }
+}
+
+/* -------------------------- 纯C归一化+张量排布实现（RFB-320专用） -------------------------- */
+/* RFB-320默认输入：320x240 RGB888，归一化 mean=[127,127,127], std=[128,128,128]，排布 NHWC */
+static int _c_normalize(const img_buf_t *in, float *out, 
+                        const float *norm_mean, const float *norm_std,
+                        const char *layout)
+{
+    if (!in || !out || !norm_mean || !norm_std || !layout)
+        return -1;
+    if (in->format != IMG_FMT_RGB888)
+        return -1;
+
+    uint32_t w = in->width;
+    uint32_t h = in->height;
+    const uint8_t *src = in->data;
+
+    /* 简单字符串比较，支持 NHWC 和 NCHW */
+    int is_nhwc = (layout[0] == 'N' && layout[1] == 'H' && layout[2] == 'W' && layout[3] == 'C');
+    int is_nchw = (layout[0] == 'N' && layout[1] == 'C' && layout[2] == 'H' && layout[3] == 'W');
+
+    if (!is_nhwc && !is_nchw)
+        return -1;
+
+    if (is_nhwc) {
+        /* NHWC排布：[H, W, C] */
+        for (uint32_t y = 0; y < h; y++) {
+            for (uint32_t x = 0; x < w; x++) {
+                uint32_t idx = (y * w + x) * 3;
+                float r = (src[idx + 0] - norm_mean[0]) / norm_std[0];
+                float g = (src[idx + 1] - norm_mean[1]) / norm_std[1];
+                float b = (src[idx + 2] - norm_mean[2]) / norm_std[2];
+
+                uint32_t out_idx = (y * w + x) * 3;
+                out[out_idx + 0] = r;
+                out[out_idx + 1] = g;
+                out[out_idx + 2] = b;
+            }
+        }
+    } else {
+        /* NCHW排布：[C, H, W] */
+        for (uint32_t c = 0; c < 3; c++) {
+            for (uint32_t y = 0; y < h; y++) {
+                for (uint32_t x = 0; x < w; x++) {
+                    uint32_t src_idx = (y * w + x) * 3 + c;
+                    float val = (src[src_idx] - norm_mean[c]) / norm_std[c];
+
+                    uint32_t out_idx = c * h * w + y * w + x;
+                    out[out_idx] = val;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* -------------------------- 注册与辅助函数实现 -------------------------- */
+static img_ops_t g_c_img_ops = {
+    .convert = _c_convert,
+    .resize = _c_resize,
+    .normalize = _c_normalize,
+};
+
+static const img_ops_t *g_registered_ops = NULL;
+
+int img_proc_register(const img_ops_t *ops)
+{
+    if (!ops)
+        return -1;
+    g_registered_ops = ops;
+    return 0;
+}
+
+const img_ops_t *img_proc_get_ops(void)
+{
+    return g_registered_ops;
+}
+
+uint32_t img_proc_calc_size(img_format_t fmt, uint32_t width, uint32_t height)
+{
+    switch (fmt) {
+        case IMG_FMT_YUYV422: return width * height * 2;
+        case IMG_FMT_RGB565:   return width * height * 2;
+        case IMG_FMT_RGB888:   return width * height * 3;
+        case IMG_FMT_BGR888:   return width * height * 3;
+        case IMG_FMT_GRAY8:     return width * height;
+        default: return 0;
+    }
+}
+
+void img_buf_init(img_buf_t *buf, uint8_t *data, img_format_t fmt, 
+                  uint32_t width, uint32_t height)
+{
+    if (!buf)
+        return;
+    buf->data = data;
+    buf->format = fmt;
+    buf->width = width;
+    buf->height = height;
+    buf->stride = width * (fmt == IMG_FMT_RGB888 ? 3 : (fmt == IMG_FMT_GRAY8 ? 1 : 2));
+    buf->size = img_proc_calc_size(fmt, width, height);
+}
+
+/* 模块初始化：默认注册纯C实现 */
+void img_proc_c_init(void)
+{
+    img_proc_register(&g_c_img_ops);
+}
+#ifndef __UTILS_H
+#define __UTILS_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <time.h>
+// 时间、字节序、字符串、内存、数学五大类工具
+// ==========================================================================
+// 时间工具函数
+// ==========================================================================
+
+/**
+ * @brief 获取当前时间戳（微秒）
+ * @return 时间戳（微秒）
+ */
+uint64_t utils_get_timestamp_us(void);
+
+/**
+ * @brief 获取当前时间戳（毫秒）
+ * @return 时间戳（毫秒）
+ */
+uint64_t utils_get_timestamp_ms(void);
+
+/**
+ * @brief 格式化时间戳为字符串
+ * @param timestamp_us 时间戳（微秒）
+ * @param buf 输出缓冲区
+ * @param buf_size 缓冲区大小
+ * @return 格式化后的字符串（buf指针）
+ */
+char* utils_format_timestamp(uint64_t timestamp_us, char *buf, size_t buf_size);
+
+// ==========================================================================
+// 字节序转换工具函数
+// ==========================================================================
+
+/**
+ * @brief 16位主机序转网络序（大端）
+ */
+uint16_t utils_htons(uint16_t host16);
+
+/**
+ * @brief 16位网络序转主机序
+ */
+uint16_t utils_ntohs(uint16_t net16);
+
+/**
+ * @brief 32位主机序转网络序
+ */
+uint32_t utils_htonl(uint32_t host32);
+
+/**
+ * @brief 32位网络序转主机序
+ */
+uint32_t utils_ntohl(uint32_t net32);
+
+/**
+ * @brief 检查系统是否为大端序
+ * @return true=大端序
+ */
+bool utils_is_big_endian(void);
+
+// ==========================================================================
+// 字符串工具函数
+// ==========================================================================
+
+/**
+ * @brief 安全的字符串拷贝（保证零终止）
+ * @param dst 目标缓冲区
+ * @param src 源字符串
+ * @param dst_size 目标缓冲区大小
+ * @return 实际拷贝的字符数（不包括零终止符）
+ */
+size_t utils_strlcpy(char *dst, const char *src, size_t dst_size);
+
+/**
+ * @brief 安全的字符串拼接（保证零终止）
+ * @param dst 目标缓冲区
+ * @param src 源字符串
+ * @param dst_size 目标缓冲区大小
+ * @return 实际拼接后的总长度
+ */
+size_t utils_strlcat(char *dst, const char *src, size_t dst_size);
+
+/**
+ * @brief 去除字符串首尾空白字符
+ * @param str 输入/输出字符串（原地修改）
+ * @return 处理后的字符串指针
+ */
+char* utils_trim(char *str);
+
+/**
+ * @brief 字符串转整数（安全版本）
+ * @param str 输入字符串
+ * @param out_val 输出整数值
+ * @return 0=成功，非0=失败
+ */
+int utils_atoi_safe(const char *str, int *out_val);
+
+/**
+ * @brief 字符串转64位整数（安全版本）
+ * @param str 输入字符串
+ * @param out_val 输出整数值
+ * @return 0=成功，非0=失败
+ */
+int utils_atoll_safe(const char *str, int64_t *out_val);
+
+// ==========================================================================
+// 内存工具函数
+// ==========================================================================
+
+/**
+ * @brief 安全的内存清零
+ * @param ptr 内存指针
+ * @param size 大小（字节）
+ */
+void utils_memzero(void *ptr, size_t size);
+
+/**
+ * @brief 检查内存区域是否全零
+ * @param ptr 内存指针
+ * @param size 大小（字节）
+ * @return true=全零
+ */
+bool utils_memiszero(const void *ptr, size_t size);
+
+// ==========================================================================
+// 数学工具函数
+// ==========================================================================
+
+/**
+ * @brief 计算绝对值（32位）
+ */
+int32_t utils_abs(int32_t x);
+
+/**
+ * @brief 计算绝对值（64位）
+ */
+int64_t utils_llabs(int64_t x);
+
+/**
+ * @brief 计算两个数的最大值（32位）
+ */
+int32_t utils_max(int32_t a, int32_t b);
+
+/**
+ * @brief 计算两个数的最小值（32位）
+ */
+int32_t utils_min(int32_t a, int32_t b);
+
+/**
+ * @brief 数值钳制（限制在 min 和 max 之间）
+ */
+int32_t utils_clamp(int32_t val, int32_t min_val, int32_t max_val);
+
+/**
+ * @brief 除法向上取整
+ */
+uint32_t utils_div_ceil(uint32_t a, uint32_t b);
+
+#endif /* __UTILS_H */#include "utils.h"
+#include <stdio.h>      // 【新增】用于 snprintf
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>     // 【新增】用于 INT_MIN / INT_MAX
+#include <arpa/inet.h>  // 用于字节序转换
+
+// ==========================================================================
+// 时间工具函数实现
+// ==========================================================================
+
+uint64_t utils_get_timestamp_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+}
+
+uint64_t utils_get_timestamp_ms(void)
+{
+    return utils_get_timestamp_us() / 1000;
+}
+
+char* utils_format_timestamp(uint64_t timestamp_us, char *buf, size_t buf_size)
+{
+    if (buf == NULL || buf_size == 0) {
+        return NULL;
+    }
+
+    time_t sec = (time_t)(timestamp_us / 1000000);
+    uint32_t us = (uint32_t)(timestamp_us % 1000000);
+
+    struct tm tm;
+    localtime_r(&sec, &tm);
+
+    strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", &tm);
+    
+    // 追加微秒
+    size_t len = strlen(buf);
+    if (len + 8 < buf_size) {
+        snprintf(buf + len, buf_size - len, ".%06u", us);
+    }
+
+    return buf;
+}
+
+// ==========================================================================
+// 字节序转换工具函数实现
+// ==========================================================================
+
+uint16_t utils_htons(uint16_t host16)
+{
+    return htons(host16);
+}
+
+uint16_t utils_ntohs(uint16_t net16)
+{
+    return ntohs(net16);
+}
+
+uint32_t utils_htonl(uint32_t host32)
+{
+    return htonl(host32);
+}
+
+uint32_t utils_ntohl(uint32_t net32)
+{
+    return ntohl(net32);
+}
+
+bool utils_is_big_endian(void)
+{
+    union {
+        uint32_t i;
+        char c[4];
+    } u = {0x01020304};
+    return u.c[0] == 1;
+}
+
+// ==========================================================================
+// 字符串工具函数实现
+// ==========================================================================
+
+size_t utils_strlcpy(char *dst, const char *src, size_t dst_size)
+{
+    if (dst == NULL || src == NULL || dst_size == 0) {
+        return 0;
+    }
+
+    size_t src_len = strlen(src);
+    size_t copy_len = (src_len < dst_size - 1) ? src_len : dst_size - 1;
+
+    memcpy(dst, src, copy_len);
+    dst[copy_len] = '\0';
+
+    return copy_len;
+}
+
+size_t utils_strlcat(char *dst, const char *src, size_t dst_size)
+{
+    if (dst == NULL || src == NULL || dst_size == 0) {
+        return 0;
+    }
+
+    size_t dst_len = strlen(dst);
+    size_t src_len = strlen(src);
+    size_t available = dst_size - dst_len - 1;
+
+    if (available > 0) {
+        size_t copy_len = (src_len < available) ? src_len : available;
+        memcpy(dst + dst_len, src, copy_len);
+        dst[dst_len + copy_len] = '\0';
+    }
+
+    return dst_len + src_len;
+}
+
+char* utils_trim(char *str)
+{
+    if (str == NULL) {
+        return NULL;
+    }
+
+    // 去除首部空白
+    char *start = str;
+    while (*start != '\0' && isspace((unsigned char)*start)) {
+        start++;
+    }
+
+    // 去除尾部空白
+    if (*start != '\0') {
+        char *end = start + strlen(start) - 1;
+        while (end > start && isspace((unsigned char)*end)) {
+            end--;
+        }
+        *(end + 1) = '\0';
+    }
+
+    // 如果有移动，需要拷贝
+    if (start != str) {
+        memmove(str, start, strlen(start) + 1);
+    }
+
+    return str;
+}
+
+int utils_atoi_safe(const char *str, int *out_val)
+{
+    if (str == NULL || out_val == NULL) {
+        return -1;
+    }
+
+    char *endptr = NULL;
+    errno = 0;
+    
+    long val = strtol(str, &endptr, 10);
+    
+    if (endptr == str || *endptr != '\0' || errno != 0 ||
+        val < INT_MIN || val > INT_MAX) {
+        return -1;
+    }
+
+    *out_val = (int)val;
+    return 0;
+}
+
+int utils_atoll_safe(const char *str, int64_t *out_val)
+{
+    if (str == NULL || out_val == NULL) {
+        return -1;
+    }
+
+    char *endptr = NULL;
+    errno = 0;
+    
+    long long val = strtoll(str, &endptr, 10);
+    
+    if (endptr == str || *endptr != '\0' || errno != 0) {
+        return -1;
+    }
+
+    *out_val = (int64_t)val;
+    return 0;
+}
+
+// ==========================================================================
+// 内存工具函数实现
+// ==========================================================================
+
+void utils_memzero(void *ptr, size_t size)
+{
+    if (ptr == NULL || size == 0) {
+        return;
+    }
+    memset(ptr, 0, size);
+}
+
+bool utils_memiszero(const void *ptr, size_t size)
+{
+    if (ptr == NULL || size == 0) {
+        return true;
+    }
+
+    const uint8_t *p = (const uint8_t*)ptr;
+    for (size_t i = 0; i < size; i++) {
+        if (p[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ==========================================================================
+// 数学工具函数实现
+// ==========================================================================
+
+int32_t utils_abs(int32_t x)
+{
+    return (x < 0) ? -x : x;
+}
+
+int64_t utils_llabs(int64_t x)
+{
+    return (x < 0) ? -x : x;
+}
+
+int32_t utils_max(int32_t a, int32_t b)
+{
+    return (a > b) ? a : b;
+}
+
+int32_t utils_min(int32_t a, int32_t b)
+{
+    return (a < b) ? a : b;
+}
+
+int32_t utils_clamp(int32_t val, int32_t min_val, int32_t max_val)
+{
+    if (val < min_val) return min_val;
+    if (val > max_val) return max_val;
+    return val;
+}
+
+uint32_t utils_div_ceil(uint32_t a, uint32_t b)
+{
+    if (b == 0) {
+        return 0;
+    }
+    return (a + b - 1) / b;
+}// src/hal/video/inc/video_hal.h
+#ifndef VIDEO_HAL_H
+#define VIDEO_HAL_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+// ==========================================================================
+// 【HAL层铁律】
+// 1. 绝对不创建业务线程
+// 2. 绝对不碰数据流、业务逻辑
+// 3. 锁完全私有，不向上暴露（本层无锁！）
+// 4. 不依赖任何上层代码
+// 5. 无状态、无全局变量、纯函数操作
+// ==========================================================================
+
+// ==========================================================================
+// 1. 不透明句柄（状态由Link层管理，HAL层不维护）
+// ==========================================================================
+typedef void* video_handle_t;
+
+// ==========================================================================
+// 2. 通用错误码定义（全硬件兼容）
+// ==========================================================================
+typedef enum {
+    VIDEO_OK = 0,
+    VIDEO_ERR_OPEN,
+    VIDEO_ERR_QUERYCAP,
+    VIDEO_ERR_NOT_CAPTURE,
+    VIDEO_ERR_NOT_STREAMING,
+    VIDEO_ERR_ENUM_FMT,
+    VIDEO_ERR_SET_FMT,
+    VIDEO_ERR_REQBUFS,
+    VIDEO_ERR_QUERYBUF,
+    VIDEO_ERR_MMAP,
+    VIDEO_ERR_QBUF,
+    VIDEO_ERR_STREAMON,
+    VIDEO_ERR_STREAMOFF,
+    VIDEO_ERR_POLL,
+    VIDEO_ERR_DQBUF,
+    VIDEO_ERR_INVALID_PARAM,
+    VIDEO_ERR_MUNMAP,
+    VIDEO_ERR_CLOSE,
+    VIDEO_ERR_SET_FPS,
+    VIDEO_ERR_DUMP_FILE
+} video_err_t;
+
+// ==========================================================================
+// 3. 通用像素格式定义（AI视觉常用）
+// ==========================================================================
+typedef enum {
+    VIDEO_PIX_FMT_YUYV = 0,
+    VIDEO_PIX_FMT_NV12,
+    VIDEO_PIX_FMT_MJPEG
+} video_format_t;
+
+// ==========================================================================
+// 4. 摄像头能力检测结果
+// ==========================================================================
+typedef struct {
+    char device_name[32];
+    char bus_info[32];
+    bool support_yuyv;
+    bool support_mjpeg;
+    bool support_nv12;
+    bool support_manual_exposure;
+    bool support_lock_white_balance;
+    bool support_lock_gain;
+} video_capability_t;
+
+// ==========================================================================
+// 5. 通用采集配置
+// ==========================================================================
+typedef struct {
+    const char *dev_path;
+    uint32_t width;
+    uint32_t height;
+    video_format_t format;
+    uint32_t fps;
+    uint32_t buf_count;
+    bool lock_exposure;
+    bool lock_white_balance;
+    bool lock_gain;
+} video_config_t;
+
+// ==========================================================================
+// 6. 通用帧数据结构体（零拷贝）
+// ==========================================================================
+typedef struct {
+    void *data;
+    uint32_t length;
+    uint32_t width;
+    uint32_t height;
+    video_format_t format;
+    uint64_t timestamp;
+    uint32_t index;
+} video_frame_t;
+
+extern const char* g_err_str[];
+
+// ==========================================================================
+// 7. 【核心】完美重构后的通用摄像头接口（无状态、纯函数）
+// ==========================================================================
+
+/**
+ * @brief 打开摄像头设备（无状态，返回句柄）
+ * @param config 采集配置
+ * @param cap 输出：摄像头能力检测结果
+ * @param out_handle 输出：不透明句柄
+ * @return 错误码
+ */
+video_err_t video_open(const video_config_t *config,
+                       video_capability_t *cap,
+                       video_handle_t *out_handle);
+
+/**
+ * @brief 关闭摄像头设备（释放所有硬件资源）
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t video_close(video_handle_t handle);
+
+/**
+ * @brief 启动视频流
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t video_start_stream(video_handle_t handle);
+
+/**
+ * @brief 停止视频流
+ * @param handle 句柄
+ * @return 错误码
+ */
+video_err_t video_stop_stream(video_handle_t handle);
+
+/**
+ * @brief 获取一帧数据（无锁、阻塞、纯硬件操作）
+ * @param handle 句柄
+ * @param frame 输出帧
+ * @return 错误码
+ * @note 【重要】必须调用 video_put_frame() 归还缓冲区！
+ */
+video_err_t video_get_frame(video_handle_t handle, video_frame_t *frame);
+
+/**
+ * @brief 归还帧缓冲区（无锁、纯硬件操作）
+ * @param handle 句柄
+ * @param frame 帧
+ * @return 错误码
+ */
+video_err_t video_put_frame(video_handle_t handle, const video_frame_t *frame);
+
+/**
+ * @brief 动态设置帧率（需在STOP状态下调用）
+ * @param handle 句柄
+ * @param fps 期望帧率
+ * @return 错误码
+ */
+video_err_t video_set_fps(video_handle_t handle, uint32_t fps);
+
+/**
+ * @brief 枚举指定格式下支持的所有分辨率
+ */
+uint32_t video_enum_sizes(video_handle_t handle,
+                           video_format_t fmt,
+                           uint32_t (*sizes)[2],
+                           uint32_t max_cnt);
+
+/**
+ * @brief 枚举指定格式和分辨率下支持的帧率
+ */
+uint32_t video_enum_fps(video_handle_t handle,
+                         video_format_t fmt,
+                         uint32_t width,
+                         uint32_t height,
+                         uint32_t *fps,
+                         uint32_t max_cnt);
+
+/**
+ * @brief 保存帧为YUYV裸数据文件（调试用）
+ */
+video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath);
+
+// 新增：获取摄像头设备文件描述符（用于Link层poll监听）
+int video_get_wait_fd(video_handle_t handle);
+
+/**
+ * @brief 获取错误描述字符串
+ * @param err 错误码
+ * @return 错误描述（永远不为NULL）
+ */
+const char* video_err_str(video_err_t err);
+
+#endif /* VIDEO_HAL_H */
+#ifndef AI_MODEL_MNN_HPP
+#define AI_MODEL_MNN_HPP
+
+#include <memory>
+#include <vector>
+#include <stdint.h>
+#include "Interpreter.hpp"
+#include "Tensor.hpp"
+#include "ImageProcess.hpp"
+#include <opencv2/opencv.hpp>
+
+// 错误码定义
+#define MNN_FACE_OK             0
+#define MNN_FACE_ERR_INIT       -1
+#define MNN_FACE_ERR_MODEL      -2
+#define MNN_FACE_ERR_INPUT      -3
+#define MNN_FACE_ERR_INFER      -4
+
+// AI模型默认配置 (IMX6ULL最优)
+#define DEFAULT_AI_W            320
+#define DEFAULT_AI_H            240
+#define DEFAULT_NUM_THREAD      1
+#define DEFAULT_SCORE_THRESH    0.65f
+#define DEFAULT_IOU_THRESH      0.3f
+
+// 【修复】统一结构体名称
+typedef struct {
+    float x1;
+    float y1;
+    float x2;
+    float y2;
+    float score;
+} FaceInfo_MNN; 
+
+class UltraFaceMNN {
+public:
+    UltraFaceMNN();
+    ~UltraFaceMNN();
+
+    int init(const char* model_path, 
+            int ai_w, 
+            int ai_h,
+            float score_threshold = DEFAULT_SCORE_THRESH,
+            float iou_threshold = DEFAULT_IOU_THRESH);
+
+    // 【修复】参数使用 FaceInfo_MNN
+    int detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::vector<FaceInfo_MNN>& face_list);
+
+    static void map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h);
+    static void draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list);
+
+    void deinit();
+    bool is_ready() const { return m_ready; }
+
+private:
+    int yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img);
+    void generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes);
+    void nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output);
+
+private:
+    std::shared_ptr<MNN::Interpreter> m_interpreter;
+    MNN::Session* m_session;
+    MNN::Tensor* m_input_tensor;
+
+    int m_ai_w;
+    int m_ai_h;
+    int m_num_thread;
+    float m_score_thresh;
+    float m_iou_thresh;
+    bool m_ready;
+
+    const float m_mean_vals[3]  = {127, 127, 127};
+    const float m_norm_vals[3] = {1.0f / 128, 1.0f / 128, 1.0f / 128};
+    const float m_center_variance = 0.1f;
+    const float m_size_variance   = 0.2f;
+
+    std::vector<std::vector<float>> m_min_boxes;
+    std::vector<float> m_strides;
+    std::vector<std::vector<float>> m_priors;
+    int m_num_anchors;
+};
+
+#endif // AI_MODEL_MNN_HPP

@@ -10,6 +10,7 @@
 # CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
 CROSS_COMPILE ?=
 CC 			:= $(CROSS_COMPILE)gcc
+CXX 		:= $(CROSS_COMPILE)g++
 LD 			:= $(CROSS_COMPILE)ld
 AR 			:= $(CROSS_COMPILE)ar
 OBJCOPY 	:= $(CROSS_COMPILE)objcopy
@@ -18,7 +19,7 @@ OBJDUMP 	:= $(CROSS_COMPILE)objdump
 # 自动获取交叉编译器 sysroot自动适配，无需手动填写
 SYSROOT := $(shell $(CC) -print-sysroot)
 # 标准系统头文件编译选项GCC/Clangd 通用
-SYSROOT_CFLAGS := -isystem $(SYSROOT)/usr/include --sysroot=$(SYSROOT)
+SYSROOT_CFLAGS := --sysroot=$(SYSROOT)
 # 导出给子 Makefile.build 使用
 export SYSROOT_CFLAGS
 
@@ -32,7 +33,7 @@ OUTPUTDIR 	:= $(TOPDIR)/output
 COMPILE_COMMANDS := $(OUTPUTDIR)/compile_commands.json
 
 # 导出变量，让子 Makefile.build 也能用到
-export CC LD AR OBJCOPY OBJDUMP
+export CC CXX LD AR OBJCOPY OBJDUMP 
 export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 
 # 2. 必须明确指定编译顺序（不自动扫描，避免顺序混乱）
