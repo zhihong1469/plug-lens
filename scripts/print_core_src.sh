@@ -49,12 +49,12 @@ cat "$PROJECT_ROOT/src/service/face_detect_srv/inc/face_detect_srv.h" >> "$OUTPU
 cat "$PROJECT_ROOT/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c" >> "$OUTPUT_FILE"
 echo -e "\n\n" >> "$OUTPUT_FILE"
 
-# ===================== 6. USB摄像头+MNN AI HAL驱动 =====================
+# ===================== 6. USB摄像头+MNN AI device驱动 =====================
 echo "--- [6/9] 硬件插件 - USB摄像头V4L2 + MNN AI模型 ---" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/plugins/hal_plugins/video_usb/inc/video_usb.h" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/plugins/hal_plugins/video_usb/src/video_usb.c" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/plugins/hal_plugins/video_usb/src/video_hal.c" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/plugins/hal_plugins/ai_model_mnn/src/ai_model_mnn.cpp" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/plugins/device_plugins/video_usb/inc/video_usb.h" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/plugins/device_plugins/video_usb/src/video_usb.c" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/plugins/device_plugins/video_usb/src/video_device.c" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/plugins/device_plugins/ai_model_mnn/src/ai_model_mnn.cpp" >> "$OUTPUT_FILE"
 echo -e "\n\n" >> "$OUTPUT_FILE"
 
 # ===================== 7. 双总线（事件+数据） =====================
@@ -91,9 +91,9 @@ cat "$PROJECT_ROOT/common/img_proc/inc/img_proc.h" >> "$OUTPUT_FILE"
 cat "$PROJECT_ROOT/common/img_proc/src/img_proc_c.c" >> "$OUTPUT_FILE"
 cat "$PROJECT_ROOT/common/utils/inc/utils.h" >> "$OUTPUT_FILE"
 cat "$PROJECT_ROOT/common/utils/src/utils.c" >> "$OUTPUT_FILE"
-# HAL抽象接口
-cat "$PROJECT_ROOT/src/hal/video/inc/video_hal.h" >> "$OUTPUT_FILE"
-cat "$PROJECT_ROOT/src/hal/ai_model/inc/ai_model_mnn.hpp" >> "$OUTPUT_FILE"
+# device抽象接口
+cat "$PROJECT_ROOT/src/device/video/inc/video_device.h" >> "$OUTPUT_FILE"
+cat "$PROJECT_ROOT/src/device/ai_model/inc/ai_model_mnn.hpp" >> "$OUTPUT_FILE"
 
 # 完成提示
 echo -e "\033[32m ✅ 核心源码已导出：$OUTPUT_FILE \033[0m"

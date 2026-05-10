@@ -227,15 +227,15 @@ static int _main_init_capture_service(void)
     LOG_I("Main: Initializing Capture Service...");
 
     capture_srv_config_t cap_srv_cfg = {0};
-    cap_srv_cfg.link_cfg.hal_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
-    cap_srv_cfg.link_cfg.hal_config.width = CONFIG_CAPTURE_WIDTH;
-    cap_srv_cfg.link_cfg.hal_config.height = CONFIG_CAPTURE_HEIGHT;
-    cap_srv_cfg.link_cfg.hal_config.fps = CONFIG_CAPTURE_FPS;
-    cap_srv_cfg.link_cfg.hal_config.format = CONFIG_CAPTURE_FORMAT;
-    cap_srv_cfg.link_cfg.hal_config.buf_count = CONFIG_CAPTURE_BUF_COUNT;
-    cap_srv_cfg.link_cfg.hal_config.lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE;
-    cap_srv_cfg.link_cfg.hal_config.lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE;
-    cap_srv_cfg.link_cfg.hal_config.lock_gain = CONFIG_CAPTURE_LOCK_GAIN;
+    cap_srv_cfg.link_cfg.device_config.dev_path = CONFIG_CAPTURE_DEV_PATH;
+    cap_srv_cfg.link_cfg.device_config.width = CONFIG_CAPTURE_WIDTH;
+    cap_srv_cfg.link_cfg.device_config.height = CONFIG_CAPTURE_HEIGHT;
+    cap_srv_cfg.link_cfg.device_config.fps = CONFIG_CAPTURE_FPS;
+    cap_srv_cfg.link_cfg.device_config.format = CONFIG_CAPTURE_FORMAT;
+    cap_srv_cfg.link_cfg.device_config.buf_count = CONFIG_CAPTURE_BUF_COUNT;
+    cap_srv_cfg.link_cfg.device_config.lock_exposure = CONFIG_CAPTURE_LOCK_EXPOSURE;
+    cap_srv_cfg.link_cfg.device_config.lock_white_balance = CONFIG_CAPTURE_LOCK_WHITE_BALANCE;
+    cap_srv_cfg.link_cfg.device_config.lock_gain = CONFIG_CAPTURE_LOCK_GAIN;
     cap_srv_cfg.link_cfg.frame_pool_size = CONFIG_FRAME_LINK_POOL_SIZE;
     cap_srv_cfg.link_cfg.queue_size = CONFIG_FRAME_LINK_QUEUE_SIZE;
     
@@ -779,7 +779,7 @@ static void _demo_app_print_help(void)
 #ifndef FRAME_LINK_H
 #define FRAME_LINK_H
 
-#include "video_hal.h"
+#include "video_device.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -787,7 +787,7 @@ static void _demo_app_print_help(void)
 // 【Link层铁律】
 // 1. 绝对不修改帧数据、不做AI推理/编码
 // 2. 绝对不直接向上层暴露帧池、队列、锁
-// 3. 只调用HAL层接口，不依赖更上层代码
+// 3. 只调用device层接口，不依赖更上层代码
 // ==========================================================================
 
 // ==========================================================================
@@ -799,7 +799,7 @@ typedef void* frame_link_handle_t;
 // 2. 链路配置
 // ==========================================================================
 typedef struct {
-    video_config_t hal_config;  // HAL层配置（透传）
+    video_config_t device_config;  // device层配置（透传）
     uint32_t frame_pool_size;   // 帧池大小（建议5-10）
     uint32_t queue_size;        // 队列大小（建议3-5）
 } frame_link_config_t;
@@ -818,7 +818,7 @@ typedef void (*frame_link_frame_ready_cb)(const video_frame_t *frame, void *user
  * @param config 链路配置
  * @param exit_pipe_read_fd, 注入全局退出管道
  * @param out_handle 输出：不透明句柄
- * @return 错误码（复用HAL层错误码）
+ * @return 错误码（复用device层错误码）
  */
 video_err_t frame_link_init(const frame_link_config_t *config,
                             int exit_pipe_read_fd,
@@ -879,7 +879,7 @@ video_err_t frame_link_deinit(frame_link_handle_t handle);
 
 #endif /* FRAME_LINK_H */
 #include "frame_link.h"
-#include "video_hal.h"
+#include "video_device.h"
 #include "pool.h"       // 【新增】引入通用对象池
 #include "queue.h"      // 【新增】引入通用队列
 #include "thread.h"     // 【新增】引入通用线程封装
@@ -909,9 +909,9 @@ typedef struct {
 // 【核心】内部状态结构体（重构版）
 // ==========================================================================
 typedef struct {
-    // HAL层相关
-    video_handle_t hal_handle;
-    video_capability_t hal_cap;
+    // device层相关
+    video_handle_t device_handle;
+    video_capability_t device_cap;
     frame_link_config_t config;
     int cam_fd;                // 摄像头设备fd（用于poll）
 
@@ -1025,9 +1025,9 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     pthread_cond_init(&ctx->queue_not_full, NULL);
 
     // -------------------------------------------------------------------------
-    // 4. 初始化HAL层
+    // 4. 初始化device层
     // -------------------------------------------------------------------------
-    video_err_t err = video_open(&ctx->config.hal_config, &ctx->hal_cap, &ctx->hal_handle);
+    video_err_t err = video_open(&ctx->config.device_config, &ctx->device_cap, &ctx->device_handle);
     if (err != VIDEO_OK) {
         free(ctx->queue_buffer);
         free(ctx->pool_memory_buffer);
@@ -1040,9 +1040,9 @@ video_err_t frame_link_init(const frame_link_config_t *config,
     }
 
     // 获取摄像头fd（用于Link层poll）
-    ctx->cam_fd = video_get_wait_fd(ctx->hal_handle);
+    ctx->cam_fd = video_get_wait_fd(ctx->device_handle);
     if (ctx->cam_fd < 0) {
-        video_close(ctx->hal_handle);
+        video_close(ctx->device_handle);
         free(ctx->queue_buffer);
         free(ctx->pool_memory_buffer);
         free(ctx->pool_free_list_buffer);
@@ -1074,14 +1074,14 @@ video_err_t frame_link_start(frame_link_handle_t handle)
         return VIDEO_OK;
     }
 
-    LOG_I("Frame Link: Starting HAL layer stream...");
-    // 启动HAL层流
-    video_err_t err = video_start_stream(ctx->hal_handle);
+    LOG_I("Frame Link: Starting device layer stream...");
+    // 启动device层流
+    video_err_t err = video_start_stream(ctx->device_handle);
     if (err != VIDEO_OK) {
-        LOG_E("Frame Link: Failed to start HAL stream (err=%d)", err);
+        LOG_E("Frame Link: Failed to start device stream (err=%d)", err);
         return err;
     }
-    LOG_I("Frame Link: HAL stream started");
+    LOG_I("Frame Link: device stream started");
     
     ctx->streaming = true;
 
@@ -1101,7 +1101,7 @@ video_err_t frame_link_start(frame_link_handle_t handle)
                                        ctx);
     if (terr != THREAD_OK) {
         LOG_E("Frame Link: Failed to create thread");
-        video_stop_stream(ctx->hal_handle);
+        video_stop_stream(ctx->device_handle);
         ctx->streaming = false;
         ctx->running = false;
         return VIDEO_ERR_INVALID_PARAM;
@@ -1133,9 +1133,9 @@ video_err_t frame_link_stop(frame_link_handle_t handle)
     // 【重构】等待线程安全退出（使用通用线程封装）
     thread_join(&ctx->capture_thread, NULL);
 
-    // 停止HAL层流
+    // 停止device层流
     if (ctx->streaming) {
-        video_stop_stream(ctx->hal_handle);
+        video_stop_stream(ctx->device_handle);
         ctx->streaming = false;
     }
 
@@ -1184,8 +1184,8 @@ video_err_t frame_link_put_frame(frame_link_handle_t handle,
     }
     frame_link_context_t *ctx = (frame_link_context_t*)handle;
 
-    // 归还HAL层缓冲区
-    video_put_frame(ctx->hal_handle, frame);
+    // 归还device层缓冲区
+    video_put_frame(ctx->device_handle, frame);
     
     return VIDEO_OK;
 }
@@ -1217,8 +1217,8 @@ video_err_t frame_link_deinit(frame_link_handle_t handle)
     // 先停止
     frame_link_stop(handle);
 
-    // 关闭HAL层
-    video_close(ctx->hal_handle);
+    // 关闭device层
+    video_close(ctx->device_handle);
 
     // 释放资源
     pthread_mutex_destroy(&ctx->queue_lock);
@@ -1366,8 +1366,8 @@ static void* _frame_link_capture_thread(void *arg)
 
         // 摄像头正常取帧
         if (fds[0].revents & POLLIN) {
-            video_frame_t hal_frame = {0};
-            video_err_t err = video_get_frame(ctx->hal_handle, &hal_frame);
+            video_frame_t device_frame = {0};
+            video_err_t err = video_get_frame(ctx->device_handle, &device_frame);
 
             if (err != VIDEO_OK) {
                 continue;
@@ -1376,15 +1376,15 @@ static void* _frame_link_capture_thread(void *arg)
             // 【重构】从池里分配节点
             frame_node_t *node = _frame_link_alloc_frame(ctx);
             if (node != NULL) {
-                // 拷贝HAL帧数据到节点
-                memcpy(&node->frame, &hal_frame, sizeof(video_frame_t));
+                // 拷贝device帧数据到节点
+                memcpy(&node->frame, &device_frame, sizeof(video_frame_t));
                 
                 // 入队
                 _frame_link_enqueue(ctx, node);
             }
 
-            // 归还HAL层缓冲区
-            video_put_frame(ctx->hal_handle, &hal_frame);
+            // 归还device层缓冲区
+            video_put_frame(ctx->device_handle, &device_frame);
 
             if (++frame_count % 30 == 0) {
                 LOG_D("Frame Link: Captured %d frames", frame_count);
@@ -2294,11 +2294,11 @@ static int _face_detect_process_frame(face_detect_srv_ctx_t *ctx, const uint8_t 
 
 
 --- [6/9] 硬件插件 - USB摄像头V4L2 + MNN AI模型 ---
-// plugins/hal_plugins/video_usb/inc/video_usb.h
+// plugins/device_plugins/video_usb/inc/video_usb.h
 #ifndef VIDEO_USB_H
 #define VIDEO_USB_H
 
-#include "video_hal.h"
+#include "video_device.h"
 #include <linux/videodev2.h>
 
 #define VIDEO_USB_MAX_BUFS 32
@@ -2331,7 +2331,7 @@ int  _video_usb_enum_sizes(video_usb_context_t *ctx, video_format_t fmt, uint32_
 int  _video_usb_enum_fps(video_usb_context_t *ctx, video_format_t fmt, uint32_t w, uint32_t h, uint32_t *fps, uint32_t max_cnt);
 int  _video_usb_dump_yuv(const video_frame_t *frame, const char *path);
 int _video_usb_get_fd(video_usb_context_t *ctx);
-#endif /* VIDEO_USB_H */// plugins/hal_plugins/video_usb/src/video_usb.c
+#endif /* VIDEO_USB_H */// plugins/device_plugins/video_usb/src/video_usb.c
 #include "video_usb.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -2821,8 +2821,8 @@ int _video_usb_get_fd(video_usb_context_t *ctx)
 {
     if (ctx == NULL) return -1;
     return ctx->fd;
-}// plugins/hal_plugins/video_usb/src/video_hal.c
-#include "video_hal.h"
+}// plugins/device_plugins/video_usb/src/video_device.c
+#include "video_device.h"
 #include "video_usb.h"
 #include <string.h>
 #include <stdlib.h>
@@ -2884,10 +2884,10 @@ video_err_t video_open(const video_config_t *config,
     }
     memcpy(cap, &ctx->cap, sizeof(video_capability_t));
     // 【新增】打印摄像头能力
-    LOG_I("Video HAL: Detected camera: %s", ctx->cap.device_name);
-    LOG_I("Video HAL: Support YUYV: %s", ctx->cap.support_yuyv ? "YES" : "NO");
-    LOG_I("Video HAL: Support MJPEG: %s", ctx->cap.support_mjpeg ? "YES" : "NO");
-    LOG_I("Video HAL: Support NV12: %s", ctx->cap.support_nv12 ? "YES" : "NO");
+    LOG_I("Video device: Detected camera: %s", ctx->cap.device_name);
+    LOG_I("Video device: Support YUYV: %s", ctx->cap.support_yuyv ? "YES" : "NO");
+    LOG_I("Video device: Support MJPEG: %s", ctx->cap.support_mjpeg ? "YES" : "NO");
+    LOG_I("Video device: Support NV12: %s", ctx->cap.support_nv12 ? "YES" : "NO");
     // 设置格式
     if (_video_usb_set_format(ctx) != 0) {
         _video_usb_close(ctx);
@@ -3037,7 +3037,7 @@ video_err_t video_dump_yuv(const video_frame_t *frame, const char *filepath)
     return VIDEO_OK;
 }
 
-// 新增：HAL层转发获取摄像头fd
+// 新增：device层转发获取摄像头fd
 int video_get_wait_fd(video_handle_t handle)
 {
     if (handle == NULL) return -1;
@@ -7335,16 +7335,16 @@ uint32_t utils_div_ceil(uint32_t a, uint32_t b)
         return 0;
     }
     return (a + b - 1) / b;
-}// src/hal/video/inc/video_hal.h
-#ifndef VIDEO_HAL_H
-#define VIDEO_HAL_H
+}// src/device/video/inc/video_device.h
+#ifndef VIDEO_device_H
+#define VIDEO_device_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
 
 // ==========================================================================
-// 【HAL层铁律】
+// 【device层铁律】
 // 1. 绝对不创建业务线程
 // 2. 绝对不碰数据流、业务逻辑
 // 3. 锁完全私有，不向上暴露（本层无锁！）
@@ -7353,7 +7353,7 @@ uint32_t utils_div_ceil(uint32_t a, uint32_t b)
 // ==========================================================================
 
 // ==========================================================================
-// 1. 不透明句柄（状态由Link层管理，HAL层不维护）
+// 1. 不透明句柄（状态由Link层管理，device层不维护）
 // ==========================================================================
 typedef void* video_handle_t;
 
@@ -7530,7 +7530,7 @@ int video_get_wait_fd(video_handle_t handle);
  */
 const char* video_err_str(video_err_t err);
 
-#endif /* VIDEO_HAL_H */
+#endif /* VIDEO_device_H */
 #ifndef AI_MODEL_MNN_HPP
 #define AI_MODEL_MNN_HPP
 

@@ -16,7 +16,7 @@ arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
 # 结构速通（详细见documents/architecture.md）
 一般应用层只需要专注plugins目录下的代码修改，src实现接口函数或者架构相关
 ex:
-新增功能需要实现HAL层代码，xxx_hal.c的原代码也放plugins目录下，xxx_hal.h放入src目录
+新增功能需要实现device层代码，xxx_device.c的原代码也放plugins目录下，xxx_device.h放入src目录
 ## 注意
     六层架构调用顺序（从上到下）
     应用层 → 服务层 → 数据链路层 → 硬件抽象层 → 插件层 → 硬件
