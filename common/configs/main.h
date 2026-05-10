@@ -1,57 +1,46 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#include <stdint.h>
-#include <stdbool.h>
-#include <termios.h>
-#include "event_bus.h"
-#include "data_bus.h"
-#include "global_fsm.h"
-#include "capture_srv.h"
-#include "vision_ai_config.h"
-#include "face_detect_srv.h"
-#include <stddef.h> // for offsetof
+// #include <stdint.h>
+// #include <stdbool.h>
+// #include <termios.h>
+// #include "event_bus.h"
+// #include "data_bus.h"
+// #include "global_fsm.h"
+// #include "capture_srv.h"
+// #include "vision_ai_config.h"
+// #include "face_detect_srv.h"
+// #include <stddef.h> // for offsetof
 
 
+// // ==========================================================================
+// // 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
+// // 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
+// // ==========================================================================
+// typedef struct {
+//     // 核心总线句柄
+//     event_bus_handle_t      evt_bus;
+//     data_bus_handle_t       data_bus;
 
-/**
- * 全局唯一转型宏（V3.0强制规范）
- * 禁止裸指针强转，仅使用container_of
- */
-#ifndef container_of
-#define offsetof(type, member)  ((size_t)&((type *)0)->member)
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
-#endif
+//     // 状态机 & 业务服务句柄
+//     global_fsm_handle_t     g_fsm;
+//     capture_srv_handle_t    cap_srv;
+//     face_detect_srv_handle_t face_detect_srv;
+//     // 优雅退出：内核管道（替代全局quit_flag，线程安全、事件驱动）
+//     int                     exit_pipe[2];     // [0]读端 / [1]写端
 
-// ==========================================================================
-// 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
-// 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
-// ==========================================================================
-typedef struct {
-    // 核心总线句柄
-    event_bus_handle_t      evt_bus;
-    data_bus_handle_t       data_bus;
+//     // 终端模式保存（基础设施）
+//     struct termios          old_termios;
+//     bool                    termios_saved;
 
-    // 状态机 & 业务服务句柄
-    global_fsm_handle_t     g_fsm;
-    capture_srv_handle_t    cap_srv;
-    face_detect_srv_handle_t face_detect_srv;
-    // 优雅退出：内核管道（替代全局quit_flag，线程安全、事件驱动）
-    int                     exit_pipe[2];     // [0]读端 / [1]写端
-
-    // 终端模式保存（基础设施）
-    struct termios          old_termios;
-    bool                    termios_saved;
-
-    // 全局运行标记（可选，作为兜底，优先用Pipe事件）
-    volatile bool           app_running;
-} app_context_t;
+//     // 全局运行标记（可选，作为兜底，优先用Pipe事件）
+//     volatile bool           app_running;
+// } app_context_t;
 
 // ==========================================================================
 // 全局唯一应用上下文实例（公共层统一实例化，无零散全局变量）
 // ==========================================================================
-extern app_context_t g_app_ctx;
+// extern app_context_t g_app_ctx;
 
 // ==========================================================================
 // 公共基建函数声明（main.c实现，插件可调用）
