@@ -5,6 +5,7 @@
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
 	app/camera_demo.c \
+	link/frame_link/src/frame_link.c \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp
 
@@ -30,14 +31,14 @@ INC_FLAGS := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
+	-I$(TOPDIR)/src/link/frame_link/inc \
 
 # 	-I$(TOPDIR)/plugins/app_plugins/inc \
 # 	-I$(TOPDIR)/src/bus/event_bus/inc \
 # 	-I$(TOPDIR)/src/bus/data_bus/inc \
 # 	-I$(TOPDIR)/src/fsm/global_fsm/inc \
 # 	-I$(TOPDIR)/src/fsm/module_fsm/inc \
-# 	-I$(TOPDIR)/src/link/frame_link/inc \
-# 	-I$(TOPDIR)/src/link/ai_model_link/inc \
+
 # 	-I$(TOPDIR)/src/service/capture_srv/inc \
 # 	-I$(TOPDIR)/src/service/face_detect_srv/inc 
 # 3. 生成最终可执行文件

@@ -9,41 +9,36 @@
 using namespace std;
 
 // ==========================
-// MNN 子类私有数据（C++ 内部使用）
+// MNN 子类私有数据
 // ==========================
 typedef struct {
     UltraFaceMNN*    ultra_face;
     int              ai_w;
     int              ai_h;
     uint8_t*         yuyv_frame;
-    int              cam_w;
-    int              cam_h;
     vector<FaceInfo_MNN> curr_faces;
 } mnn_priv_t;
 
-// 全局单例句柄（兼容你旧框架，上层无感知）
-static ai_model_handle_t* g_mnn_handle = NULL;
-static mnn_priv_t*       g_priv       = NULL;
+// 全局单例（供旧接口使用）
+static ai_model_handle_t* g_mnn_handle = nullptr;
+static mnn_priv_t*        g_priv        = nullptr;
 
 // ==========================
-// 1. 初始化：对接基类接口
+// 1. 初始化
 // ==========================
 static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
 {
     if (!handle) return AI_MODEL_ERR_PARAM;
 
-    // 分配私有数据
     mnn_priv_t* priv = new(nothrow) mnn_priv_t;
     if (!priv) return AI_MODEL_ERR_NO_MEM;
 
-    // 创建MNN推理实例
     priv->ultra_face = new(nothrow) UltraFaceMNN();
     if (!priv->ultra_face) {
         delete priv;
         return AI_MODEL_ERR_NO_MEM;
     }
 
-    // 调用你原有MNN初始化
     int ret = priv->ultra_face->init(
         handle->config.model_path,
         handle->config.input_width,
@@ -58,11 +53,9 @@ static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
         return AI_MODEL_ERR_INIT;
     }
 
-    // 保存AI尺寸
     priv->ai_w = handle->config.input_width;
     priv->ai_h = handle->config.input_height;
 
-    // 绑定到基类句柄
     handle->user_data = priv;
     g_priv = priv;
     g_mnn_handle = handle;
@@ -71,7 +64,7 @@ static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
 }
 
 // ==========================
-// 2. 输入图像：保存YUYV帧信息
+// 2. 输入图像
 // ==========================
 static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle,
                                    uint8_t* data, uint32_t len)
@@ -85,7 +78,7 @@ static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle,
 }
 
 // ==========================
-// 3. 执行推理：基类接口
+// 3. 推理
 // ==========================
 static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
 {
@@ -105,7 +98,7 @@ static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
 }
 
 // ==========================
-// 4. 获取结果：基类接口
+// 4. 获取结果
 // ==========================
 static ai_model_err_t mnn_ai_get_result(ai_model_handle_t* handle,
                                        ai_model_detect_result_t* results,
@@ -131,7 +124,7 @@ static ai_model_err_t mnn_ai_get_result(ai_model_handle_t* handle,
 }
 
 // ==========================
-// 5. 反初始化：基类接口
+// 5. 反初始化
 // ==========================
 static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
 {
@@ -145,15 +138,15 @@ static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
     }
 
     delete priv;
-    handle->user_data = NULL;
-    g_priv = NULL;
-    g_mnn_handle = NULL;
+    handle->user_data = nullptr;
+    g_priv = nullptr;
+    g_mnn_handle = nullptr;
 
     return AI_MODEL_OK;
 }
 
 // ==========================
-// C-OOP 操作表（固定不变）
+// C-OOP 操作表
 // ==========================
 static const ai_model_ops_t g_mnn_ai_ops = {
     .init       = mnn_ai_init,
@@ -164,7 +157,7 @@ static const ai_model_ops_t g_mnn_ai_ops = {
 };
 
 // ==========================
-// C-OOP 创建接口（对外）
+// 创建接口
 // ==========================
 ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
 {
@@ -172,7 +165,7 @@ ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
 }
 
 // ==========================
-// 上层C代码直接调用，零修改
+// 实用C接口（完整保留）
 // ==========================
 void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 {
@@ -201,12 +194,10 @@ int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
 {
     if (!g_priv || !out_faces || !out_face_num) return MNN_FACE_ERR_INPUT;
 
-    // 直接调用你原有MNN推理逻辑
     vector<FaceInfo_MNN> faces;
     int ret = g_priv->ultra_face->detect(yuyv_data, cam_w, cam_h, faces);
     if (ret != MNN_FACE_OK) return ret;
 
-    // C++ vector → C 结构体转换
     *out_face_num = min((int)faces.size(), max_faces);
     for (int i = 0; i < *out_face_num; i++) {
         out_faces[i].x1 = faces[i].x1;

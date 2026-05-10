@@ -15,6 +15,7 @@ SRC_FILES := \
 INC_FLAGS := \
 	-I$(TOPDIR)/src/base/camera/inc \
   	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/link/frame_link/inc \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	-I$(TOPDIR)/common/log/inc \
@@ -23,8 +24,9 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
-	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
-# 	-I$(TOPDIR)/src/link/frame_link/inc \
+	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
+
+
 # 	-I$(TOPDIR)/src/link/ai_model_link/inc \
 # 	-I$(TOPDIR)/src/bus/data_bus/inc \
 # 	-I$(TOPDIR)/src/bus/event_bus/inc \

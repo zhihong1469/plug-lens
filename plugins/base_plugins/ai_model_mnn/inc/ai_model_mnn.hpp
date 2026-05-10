@@ -2,10 +2,17 @@
 #define __AI_MODEL_MNN_HPP
 
 #include "ai_model_base.h"
+#include <stdint.h>
+#include <stdbool.h>
 
+// ==========================
+// 【从 ai_model_link 完整迁移】
+// 错误码、宏、纯C结构体 全部放在这里
+// ==========================
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 // 错误码定义
 #define MNN_FACE_OK             0
 #define MNN_FACE_ERR_INIT       -1
@@ -19,7 +26,7 @@ extern "C" {
 #define DEFAULT_SCORE_THRESH    0.65f
 #define DEFAULT_IOU_THRESH      0.3f
 
-// 纯C人脸结构体
+// 纯C人脸结构体（上层C代码唯一识别的结果格式）
 typedef struct {
     float x1;
     float y1;
@@ -34,7 +41,7 @@ typedef struct {
 ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config);
 
 // ==========================
-// 【保留你全部旧版实用接口】上层C代码无缝调用
+// 【保留所有实用C接口】上层C代码无缝调用
 // ==========================
 void  ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h);
 void  ai_model_mnn_get_ai_size(int* w, int* h);
