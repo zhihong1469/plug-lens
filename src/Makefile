@@ -4,7 +4,7 @@
 
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
-	app/app_camera.c \
+	app/camera_demo.c \
 	device/camera/src/camera_base.c
 
 # 	bus/event_bus/src/event_bus.c \

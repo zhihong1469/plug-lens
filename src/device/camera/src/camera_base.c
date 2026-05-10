@@ -9,13 +9,13 @@
 #include <errno.h>
 
 /* ============================================================================
- * V4L2 系统调用薄封装
+ * V4L2 系统调用薄封装  
  * V3.0 Device层规则：仅封装内核接口，无任何业务逻辑
  * ========================================================================== */
 int v4l2_open(const char *dev_path)
 {
-    int fd = open(dev_path, O_RDWR | O_NONBLOCK);
-    return (fd < 0) ? -errno : fd;
+    int fd = open(dev_path, O_RDWR); // 阻塞模式
+    return (fd < 0) ? -errno : fd; 
 }
 
 void v4l2_close(int fd)

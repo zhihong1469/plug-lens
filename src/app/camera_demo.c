@@ -33,7 +33,7 @@ int main(void)
     if (ret < 0)
     {
         printf("启动采集失败！\n");
-        goto deinit;
+        goto destroy;
     }
 
     // 5. 循环采集3帧数据（演示）
@@ -53,9 +53,7 @@ int main(void)
     camera_stop_capture(cam);
     printf("采集停止\n");
 
-deinit:
-    // 7. 反初始化
-    camera_deinit(cam);
+
 destroy:
     // 8. 销毁对象，释放所有资源
     camera_usb_destroy(cam);
