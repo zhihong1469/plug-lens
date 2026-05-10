@@ -1,184 +1,219 @@
 #include "ai_model_mnn.hpp"
-#include <string.h>
+#include "ai_model_base.h"
+#include "UltraFaceMNN.hpp"
+#include <stdlib.h>
+#include <string>
+#include <vector>
 #include <algorithm>
-#include <math.h>
 
-#define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
+using namespace std;
 
-UltraFaceMNN::UltraFaceMNN() 
-    : m_session(nullptr), m_input_tensor(nullptr), m_ready(false),
-      m_num_thread(DEFAULT_NUM_THREAD), 
-      m_score_thresh(DEFAULT_SCORE_THRESH),
-      m_iou_thresh(DEFAULT_IOU_THRESH)
+// ==========================
+// MNN 子类私有数据（C++ 内部使用）
+// ==========================
+typedef struct {
+    UltraFaceMNN*    ultra_face;
+    int              ai_w;
+    int              ai_h;
+    uint8_t*         yuyv_frame;
+    int              cam_w;
+    int              cam_h;
+    vector<FaceInfo_MNN> curr_faces;
+} mnn_priv_t;
+
+// 全局单例句柄（兼容你旧框架，上层无感知）
+static ai_model_handle_t* g_mnn_handle = NULL;
+static mnn_priv_t*       g_priv       = NULL;
+
+// ==========================
+// 1. 初始化：对接基类接口
+// ==========================
+static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
 {
-    m_min_boxes = {{10.0f,16.0f,24.0f}, {32.0f,48.0f}, {64.0f,96.0f}, {128.0f,192.0f,256.0f}};
-    m_strides = {8.0f, 16.0f, 32.0f, 64.0f};
-}
+    if (!handle) return AI_MODEL_ERR_PARAM;
 
-UltraFaceMNN::~UltraFaceMNN() {
-    deinit();
-}
+    // 分配私有数据
+    mnn_priv_t* priv = new(nothrow) mnn_priv_t;
+    if (!priv) return AI_MODEL_ERR_NO_MEM;
 
-int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
-                       float score_threshold, float iou_threshold) {
-    if (!model_path) return MNN_FACE_ERR_INPUT;
-
-    m_ai_w = ai_w;
-    m_ai_h = ai_h;
-    m_score_thresh = score_threshold;
-    m_iou_thresh = iou_threshold;
-
-    m_interpreter.reset(MNN::Interpreter::createFromFile(model_path));
-    if (!m_interpreter) return MNN_FACE_ERR_MODEL;
-
-    MNN::ScheduleConfig config;
-    config.numThread = m_num_thread;
-    MNN::BackendConfig backend_config;
-    backend_config.precision = MNN::BackendConfig::Precision_Low;
-    config.backendConfig = &backend_config;
-
-    m_session = m_interpreter->createSession(config);
-    m_input_tensor = m_interpreter->getSessionInput(m_session, nullptr);
-
-    m_priors.clear();
-    for (int i = 0; i < 4; i++) {
-        float scale_w = (float)m_ai_w / m_strides[i];
-        float scale_h = (float)m_ai_h / m_strides[i];
-        int fm_w = ceil(m_ai_w / m_strides[i]);
-        int fm_h = ceil(m_ai_h / m_strides[i]);
-
-        for (int h = 0; h < fm_h; h++) {
-            for (int w = 0; w < fm_w; w++) {
-                float x_center = (w + 0.5f) / scale_w;
-                float y_center = (h + 0.5f) / scale_h;
-                for (float k : m_min_boxes[i]) {
-                    float pw = k / m_ai_w;
-                    float ph = k / m_ai_h;
-                    m_priors.push_back({clip(x_center,1), clip(y_center,1), clip(pw,1), clip(ph,1)});
-                }
-            }
-        }
+    // 创建MNN推理实例
+    priv->ultra_face = new(nothrow) UltraFaceMNN();
+    if (!priv->ultra_face) {
+        delete priv;
+        return AI_MODEL_ERR_NO_MEM;
     }
-    m_num_anchors = m_priors.size();
-    m_ready = true;
-    return MNN_FACE_OK;
+
+    // 调用你原有MNN初始化
+    int ret = priv->ultra_face->init(
+        handle->config.model_path,
+        handle->config.input_width,
+        handle->config.input_height,
+        handle->config.score_thresh,
+        handle->config.iou_thresh
+    );
+
+    if (ret != MNN_FACE_OK) {
+        delete priv->ultra_face;
+        delete priv;
+        return AI_MODEL_ERR_INIT;
+    }
+
+    // 保存AI尺寸
+    priv->ai_w = handle->config.input_width;
+    priv->ai_h = handle->config.input_height;
+
+    // 绑定到基类句柄
+    handle->user_data = priv;
+    g_priv = priv;
+    g_mnn_handle = handle;
+
+    return AI_MODEL_OK;
 }
 
-int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
-    if (!yuyv_data || width <=0 || height <=0) return MNN_FACE_ERR_INPUT;
-    cv::Mat yuyv(height, width, CV_8UC2, (void*)yuyv_data);
-    cv::cvtColor(yuyv, out_img, cv::COLOR_YUV2BGR_YUYV);
-    return MNN_FACE_OK;
+// ==========================
+// 2. 输入图像：保存YUYV帧信息
+// ==========================
+static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle,
+                                   uint8_t* data, uint32_t len)
+{
+    if (!handle || !data) return AI_MODEL_ERR_PARAM;
+    mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
+    if (!priv) return AI_MODEL_ERR_INIT;
+
+    priv->yuyv_frame = data;
+    return AI_MODEL_OK;
 }
 
-// 【修复】全部使用 FaceInfo_MNN
-int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::vector<FaceInfo_MNN>& face_list) {
-    if (!m_ready || !yuyv_data) return MNN_FACE_ERR_INPUT;
-    face_list.clear();
+// ==========================
+// 3. 执行推理：基类接口
+// ==========================
+static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
+{
+    if (!handle) return AI_MODEL_ERR_PARAM;
+    mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
+    if (!priv || !priv->yuyv_frame) return AI_MODEL_ERR_INIT;
 
-    cv::Mat bgr_img;
-    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, bgr_img);
+    priv->curr_faces.clear();
+    int ret = priv->ultra_face->detect(
+        priv->yuyv_frame,
+        priv->ai_w,
+        priv->ai_h,
+        priv->curr_faces
+    );
+
+    return (ret == MNN_FACE_OK) ? AI_MODEL_OK : AI_MODEL_ERR_INFER;
+}
+
+// ==========================
+// 4. 获取结果：基类接口
+// ==========================
+static ai_model_err_t mnn_ai_get_result(ai_model_handle_t* handle,
+                                       ai_model_detect_result_t* results,
+                                       uint32_t* result_count)
+{
+    if (!handle || !results || !result_count) return AI_MODEL_ERR_PARAM;
+    mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
+    if (!priv) return AI_MODEL_ERR_INIT;
+
+    uint32_t num = min(priv->curr_faces.size(), (size_t)10);
+    *result_count = num;
+
+    for (uint32_t i = 0; i < num; i++) {
+        auto& f = priv->curr_faces[i];
+        results[i].x1 = f.x1;
+        results[i].y1 = f.y1;
+        results[i].x2 = f.x2;
+        results[i].y2 = f.y2;
+        results[i].score = f.score;
+        results[i].class_id = 0;
+    }
+    return AI_MODEL_OK;
+}
+
+// ==========================
+// 5. 反初始化：基类接口
+// ==========================
+static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
+{
+    if (!handle) return AI_MODEL_ERR_PARAM;
+    mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
+    if (!priv) return AI_MODEL_OK;
+
+    if (priv->ultra_face) {
+        priv->ultra_face->deinit();
+        delete priv->ultra_face;
+    }
+
+    delete priv;
+    handle->user_data = NULL;
+    g_priv = NULL;
+    g_mnn_handle = NULL;
+
+    return AI_MODEL_OK;
+}
+
+// ==========================
+// C-OOP 操作表（固定不变）
+// ==========================
+static const ai_model_ops_t g_mnn_ai_ops = {
+    .init       = mnn_ai_init,
+    .input      = mnn_ai_input,
+    .infer      = mnn_ai_infer,
+    .get_result = mnn_ai_get_result,
+    .deinit     = mnn_ai_deinit,
+};
+
+// ==========================
+// C-OOP 创建接口（对外）
+// ==========================
+ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
+{
+    return ai_model_create(config, &g_mnn_ai_ops);
+}
+
+// ==========================
+// 上层C代码直接调用，零修改
+// ==========================
+void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
+{
+    if (!face || !g_priv) return;
+    float sw = (float)cam_w / g_priv->ai_w;
+    float sh = (float)cam_h / g_priv->ai_h;
+    face->x1 *= sw;
+    face->y1 *= sh;
+    face->x2 *= sw;
+    face->y2 *= sh;
+}
+
+void ai_model_mnn_get_ai_size(int* w, int* h)
+{
+    if (w) *w = g_priv ? g_priv->ai_w : 0;
+    if (h) *h = g_priv ? g_priv->ai_h : 0;
+}
+
+bool ai_model_mnn_is_ready(void)
+{
+    return g_priv && g_priv->ultra_face && g_priv->ultra_face->is_ready();
+}
+
+int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
+                            FaceInfo_C* out_faces, int max_faces, int* out_face_num)
+{
+    if (!g_priv || !out_faces || !out_face_num) return MNN_FACE_ERR_INPUT;
+
+    // 直接调用你原有MNN推理逻辑
+    vector<FaceInfo_MNN> faces;
+    int ret = g_priv->ultra_face->detect(yuyv_data, cam_w, cam_h, faces);
     if (ret != MNN_FACE_OK) return ret;
 
-    cv::Mat ai_img;
-    cv::resize(bgr_img, ai_img, cv::Size(m_ai_w, m_ai_h));
-
-    m_interpreter->resizeSession(m_session);
-    std::shared_ptr<MNN::CV::ImageProcess> pretreat(
-        MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
-    );
-    pretreat->convert(ai_img.data, m_ai_w, m_ai_h, ai_img.step[0], m_input_tensor);
-
-    m_interpreter->runSession(m_session);
-
-    MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
-    MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
-
-    MNN::Tensor scores_host(tensor_scores, tensor_scores->getDimensionType());
-    MNN::Tensor boxes_host(tensor_boxes, tensor_boxes->getDimensionType());
-    tensor_scores->copyToHostTensor(&scores_host);
-    tensor_boxes->copyToHostTensor(&boxes_host);
-
-    std::vector<FaceInfo_MNN> bbox_collection;
-    generate_bbox(bbox_collection, &scores_host, &boxes_host);
-    nms(bbox_collection, face_list);
-
+    // C++ vector → C 结构体转换
+    *out_face_num = min((int)faces.size(), max_faces);
+    for (int i = 0; i < *out_face_num; i++) {
+        out_faces[i].x1 = faces[i].x1;
+        out_faces[i].y1 = faces[i].y1;
+        out_faces[i].x2 = faces[i].x2;
+        out_faces[i].y2 = faces[i].y2;
+        out_faces[i].score = faces[i].score;
+    }
     return MNN_FACE_OK;
-}
-
-void UltraFaceMNN::generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes) {
-    for (int i = 0; i < m_num_anchors; i++) {
-        float score = scores->host<float>()[i * 2 + 1];
-        if (score <= m_score_thresh) continue;
-
-        FaceInfo_MNN face;
-        float xc = boxes->host<float>()[i*4]   * m_center_variance * m_priors[i][2] + m_priors[i][0];
-        float yc = boxes->host<float>()[i*4+1] * m_center_variance * m_priors[i][3] + m_priors[i][1];
-        float w  = exp(boxes->host<float>()[i*4+2] * m_size_variance) * m_priors[i][2];
-        float h  = exp(boxes->host<float>()[i*4+3] * m_size_variance) * m_priors[i][3];
-
-        face.x1 = clip(xc - w/2, 1) * m_ai_w;
-        face.y1 = clip(yc - h/2, 1) * m_ai_h;
-        face.x2 = clip(xc + w/2, 1) * m_ai_w;
-        face.y2 = clip(yc + h/2, 1) * m_ai_h;
-        face.score = score;
-        bbox_collection.push_back(face);
-    }
-}
-
-void UltraFaceMNN::nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output) {
-    if (input.empty()) return;
-    std::sort(input.begin(), input.end(), [](const FaceInfo_MNN& a, const FaceInfo_MNN& b) {
-        return a.score > b.score;
-    });
-
-    std::vector<int> merged(input.size(), 0);
-    for (int i = 0; i < input.size(); i++) {
-        if (merged[i]) continue;
-        output.push_back(input[i]);
-        merged[i] = 1;
-
-        float area0 = (input[i].x2 - input[i].x1) * (input[i].y2 - input[i].y1);
-        for (int j = i+1; j < input.size(); j++) {
-            if (merged[j]) continue;
-            float ix1 = std::max(input[i].x1, input[j].x1);
-            float iy1 = std::max(input[i].y1, input[j].y1);
-            float ix2 = std::min(input[i].x2, input[j].x2);
-            float iy2 = std::min(input[i].y2, input[j].y2);
-
-            float iw = std::max(0.0f, ix2 - ix1);
-            float ih = std::max(0.0f, iy2 - iy1);
-            float iarea = iw * ih;
-            float area1 = (input[j].x2 - input[j].x1) * (input[j].y2 - input[j].y1);
-            float iou = iarea / (area0 + area1 - iarea);
-
-            if (iou > m_iou_thresh) merged[j] = 1;
-        }
-    }
-}
-
-void UltraFaceMNN::map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h) {
-    float scale_w = (float)cam_w / ai_w;
-    float scale_h = (float)cam_h / ai_h;
-    face.x1 *= scale_w;
-    face.y1 *= scale_h;
-    face.x2 *= scale_w;
-    face.y2 *= scale_h;
-}
-
-void UltraFaceMNN::draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list) {
-    for (const auto& face : face_list) {
-        cv::rectangle(img, cv::Point((int)face.x1, (int)face.y1), 
-                      cv::Point((int)face.x2, (int)face.y2), cv::Scalar(0,255,0), 2);
-    }
-}
-
-void UltraFaceMNN::deinit() {
-    if (m_interpreter && m_session) {
-        m_interpreter->releaseSession(m_session);
-        m_interpreter->releaseModel();
-    }
-    m_session = nullptr;
-    m_input_tensor = nullptr;
-    m_ready = false;
 }
