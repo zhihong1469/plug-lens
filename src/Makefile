@@ -15,8 +15,8 @@ SRC_FILES := \
 
 # 2. 头文件路径（新增AI相关）
 INC_FLAGS := \
-	-I$(TOPDIR)/src/hal/video/inc \
-	-I$(TOPDIR)/src/hal/ai_model/inc \
+	-I$(TOPDIR)/src/device/video/inc \
+	-I$(TOPDIR)/src/device/ai_model/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/fsm/global_fsm/inc \
@@ -32,7 +32,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/common/plugin/inc \
 	-I$(TOPDIR)/common/configs \
-	-I$(TOPDIR)/plugins/hal_plugins/video_usb/inc \
+	-I$(TOPDIR)/plugins/device_plugins/video_usb/inc \
 	-I$(TOPDIR)/plugins/app_plugins/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
