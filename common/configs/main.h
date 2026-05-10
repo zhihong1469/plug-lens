@@ -10,6 +10,20 @@
 #include "capture_srv.h"
 #include "vision_ai_config.h"
 #include "face_detect_srv.h"
+#include <stddef.h> // for offsetof
+
+
+
+/**
+ * 全局唯一转型宏（V3.0强制规范）
+ * 禁止裸指针强转，仅使用container_of
+ */
+#ifndef container_of
+#define offsetof(type, member)  ((size_t)&((type *)0)->member)
+#define container_of(ptr, type, member) \
+    ((type *)((char *)(ptr) - offsetof(type, member)))
+#endif
+
 // ==========================================================================
 // 应用全局上下文：统一收口所有全局资源，彻底消灭零散全局变量
 // 全工程唯一顶层上下文，src底层、plugins插件均可安全引用
