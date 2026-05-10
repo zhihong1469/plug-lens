@@ -5,7 +5,7 @@
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
 	app/camera_demo.c \
-	device/camera/src/camera_base.c
+	base/camera/src/camera_base.c
 
 # 	bus/event_bus/src/event_bus.c \
 # 	bus/data_bus/src/data_bus.c \
@@ -17,8 +17,8 @@ SRC_FILES := \
 
 # 2. 头文件路径（新增AI相关）
 INC_FLAGS := \
-	-I$(TOPDIR)/src/device/camera/inc \
-	-I$(TOPDIR)/plugins/device_plugins/camera_usb/inc \
+	-I$(TOPDIR)/src/base/camera/inc \
+	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/common/log/inc
 # 	-I$(TOPDIR)/common/queue/inc \
 # 	-I$(TOPDIR)/common/pool/inc \
@@ -30,7 +30,7 @@ INC_FLAGS := \
 # 	-I$(TOPDIR)/plugins/app_plugins/inc \
 # 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 # 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
-# 	-I$(TOPDIR)/src/device/ai_model/inc \
+# 	-I$(TOPDIR)/src/base/ai_model/inc \
 # 	-I$(TOPDIR)/src/bus/event_bus/inc \
 # 	-I$(TOPDIR)/src/bus/data_bus/inc \
 # 	-I$(TOPDIR)/src/fsm/global_fsm/inc \

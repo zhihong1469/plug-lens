@@ -2,18 +2,18 @@
 # plugins/Makefile：插件模块（新增AI相关）
 # ==========================================================================
 
-# 1. 源文件（新增AI device、AI Link、人脸检测服务）
+# 1. 源文件
 SRC_FILES := \
-	device_plugins/camera_usb/src/camera_usb.c 
-# 	device_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
+	base_plugins/camera_usb/src/camera_usb.c 
+# 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 # 	app_plugins/src/demo_app.c \
 # 	service_plugins/capture_srv/src/capture_srv.c \
 # 	service_plugins/face_detect_srv/src/face_detect_srv.c
 
 # 2. 头文件路径（新增AI相关路径）
 INC_FLAGS := \
-	-I$(TOPDIR)/src/device/camera/inc \
-	-I$(TOPDIR)/plugins/device_plugins/camera_usb/inc \
+	-I$(TOPDIR)/src/base/camera/inc \
+	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/queue/inc \
 	-I$(TOPDIR)/common/plugin/inc \
@@ -21,7 +21,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
-# 	-I$(TOPDIR)/src/device/ai_model/inc \
+# 	-I$(TOPDIR)/src/base/ai_model/inc \
 # 	-I$(TOPDIR)/src/link/frame_link/inc \
 # 	-I$(TOPDIR)/src/link/ai_model_link/inc \
 # 	-I$(TOPDIR)/src/bus/data_bus/inc \
@@ -30,7 +30,7 @@ INC_FLAGS := \
 # 	-I$(TOPDIR)/src/fsm/module_fsm/inc \
 # 	-I$(TOPDIR)/src/service/capture_srv/inc \
 # 	-I$(TOPDIR)/src/service/face_detect_srv/inc \
-# 	-I$(TOPDIR)/plugins/device_plugins/video_usb/inc \
+# 	-I$(TOPDIR)/plugins/base_plugins/video_usb/inc \
 # 	-I$(TOPDIR)/plugins/app_plugins/inc 
 
 # 3. 生成插件静态库
