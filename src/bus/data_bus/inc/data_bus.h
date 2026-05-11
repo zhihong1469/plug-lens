@@ -33,8 +33,6 @@ typedef enum {
 
     // AI数据 (0x10 - 0x1F)
     DATA_TYPE_AI_RESULT = 0x10,
-    DATA_TYPE_AI_DETECTION,
-    DATA_TYPE_AI_CLASSIFICATION,
 
     // 音频数据 (0x20 - 0x2F)
     DATA_TYPE_AUDIO_FRAME = 0x20,

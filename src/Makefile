@@ -32,7 +32,8 @@ INC_FLAGS := \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
 	-I$(TOPDIR)/src/link/frame_link/inc \
-
+	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	
 # 	-I$(TOPDIR)/plugins/app_plugins/inc \
 # 	-I$(TOPDIR)/src/bus/event_bus/inc \
 # 	-I$(TOPDIR)/src/bus/data_bus/inc \
