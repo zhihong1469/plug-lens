@@ -7,20 +7,20 @@ SRC_FILES := \
 	app/camera_demo.c \
 	link/frame_link/src/frame_link.c \
 	base/camera/src/camera_base.c \
- 	base/ai_model/src/ai_model_base.cpp
+ 	base/ai_model/src/ai_model_base.cpp \
+	bus/event_bus/src/event_bus.c \
+	bus/data_bus/src/data_bus.c \
 
-# 	bus/event_bus/src/event_bus.c \
-# 	bus/data_bus/src/data_bus.c \
 # 	fsm/global_fsm/src/global_fsm.c \
 # 	fsm/module_fsm/src/module_fsm.c \
-# 	link/frame_link/src/frame_link.c \
-# 	link/ai_model_link/src/ai_model_link.cpp 
 	
 
 # 2. 头文件路径（新增AI相关）
 INC_FLAGS := \
 	-I$(TOPDIR)/src/base/camera/inc \
   	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/bus/event_bus/inc \
+	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/queue/inc \
 	-I$(TOPDIR)/common/pool/inc \
@@ -35,11 +35,8 @@ INC_FLAGS := \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	
 # 	-I$(TOPDIR)/plugins/app_plugins/inc \
-# 	-I$(TOPDIR)/src/bus/event_bus/inc \
-# 	-I$(TOPDIR)/src/bus/data_bus/inc \
 # 	-I$(TOPDIR)/src/fsm/global_fsm/inc \
 # 	-I$(TOPDIR)/src/fsm/module_fsm/inc \
-
 # 	-I$(TOPDIR)/src/service/capture_srv/inc \
 # 	-I$(TOPDIR)/src/service/face_detect_srv/inc 
 # 3. 生成最终可执行文件
