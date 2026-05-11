@@ -66,7 +66,7 @@ typedef enum {
     EVENT_TYPE_AI_RESULT_READY,   // 【核心】AI结果就绪通知
     EVENT_TYPE_AI_START,
     EVENT_TYPE_AI_STOP,
-    EVENT_TYPE_FACE_DETECTED,
+    EVENT_TYPE_FACE_RESULT,
 
     // 显示模块事件 (0x4000 - 0x4FFF)：显示同步、异常
     EVENT_TYPE_DISP_BASE = 0x4000,
