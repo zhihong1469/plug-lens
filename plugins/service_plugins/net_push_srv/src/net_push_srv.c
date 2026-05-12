@@ -48,7 +48,7 @@ typedef struct {
     bool client_connected;            // 客户端连接状态
     Queue_t send_queue;               // 发送队列（仅存1帧）
     void** queue_buffer;              // 队列缓冲区（指针数组）
-    data_bus_subscription_t data_sub; // 数据总线订阅句柄
+    data_bus_subscription_handle_t data_sub; // 数据总线订阅句柄
     int event_sub_id;                 // 事件总线订阅ID
     pthread_t send_thread;            // 数据发送线程ID
 } net_push_srv_ctx_t;
@@ -105,7 +105,7 @@ int net_push_srv_start(net_push_srv_handle_t handle) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(ctx->config.bind_port);  // 绑定端口
     addr.sin_addr.s_addr = INADDR_ANY;             // 监听所有网卡
-    bind(ctx->sock_fd, (struct sockaddr*)&addr, sizeof(addr));
+    bind(ctx->sock_fd, (const struct sockaddr*)&addr, (socklen_t )sizeof(addr));
 
     // 2. 订阅数据总线：接收VIDEO_FRAME类型数据
     data_bus_subscribe(ctx->config.data_bus, DATA_TYPE_VIDEO_FRAME, _data_bus_cb, ctx, &ctx->data_sub);
@@ -227,7 +227,7 @@ static void* _send_thread(void* arg) {
         // 步骤2：从队列取出最新1帧
         // ==============================================
         data_bus_item_handle_t item = NULL;
-        if (Queue_Get(&ctx->send_queue, &item) != 0) {
+        if (Queue_Get(&ctx->send_queue, (void**)&item) != 0) {
             usleep(1000);
             continue;
         }

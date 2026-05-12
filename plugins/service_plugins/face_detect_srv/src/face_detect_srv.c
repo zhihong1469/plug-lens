@@ -50,7 +50,7 @@ typedef struct {
     event_bus_handle_t evt_bus;
     data_bus_handle_t data_bus;
 
-    data_bus_subscription_t data_sub;
+    data_bus_subscription_handle_t data_sub;
     bool data_subscribed;
     int event_sub_id;
     bool event_subscribed;

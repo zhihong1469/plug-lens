@@ -17,7 +17,7 @@
 // 1. 不透明句柄
 // 外部代码看不到内部结构，仅用void*指针操作事件总线
 // ==========================================================================
-typedef void* event_bus_handle_t;
+typedef struct event_bus_t* event_bus_handle_t;
 
 // ==========================================================================
 // 2. 事件优先级（预留扩展，当前默认使用普通优先级）
@@ -32,51 +32,29 @@ typedef enum {
 } event_priority_t;
 
 // ==========================================================================
-// 3. 事件类型定义（分层设计，方便业务扩展）
-// 按系统/模块/业务分层，避免事件ID冲突，你的项目核心用：
-// 系统事件 + 采集事件 + AI事件 + 模块状态事件
+// 3. 【全局通用事件类型】（0x0000-0x0FFF）
+// 所有服务都需要订阅的系统级控制事件，仅此一处定义
+// 业务模块私有事件请在各自头文件中定义，禁止修改此文件！
 // ==========================================================================
 typedef enum {
     EVENT_TYPE_INVALID = 0,       // 无效事件
 
-    // 系统层事件 (0x0001 - 0x0FFF)：系统启动、停止、状态变更
+    // 系统全局控制事件（所有服务必须订阅）
     EVENT_TYPE_SYS_BASE = 0x0001,
-    EVENT_TYPE_SYS_STATE_CHANGED,
-    EVENT_TYPE_SYS_START,
-    EVENT_TYPE_SYS_STOP,
-    EVENT_TYPE_SYS_SHUTDOWN,
-    EVENT_TYPE_SYS_ERROR,
+    EVENT_TYPE_SYS_PAUSE,         // 全局暂停
+    EVENT_TYPE_SYS_RESUME,        // 全局恢复
+    EVENT_TYPE_SYS_STOP,          // 全局停止
+    EVENT_TYPE_SYS_SHUTDOWN,      // 系统关机
+    EVENT_TYPE_SYS_ERROR,         // 系统错误
 
-    // 模块层事件 (0x1000 - 0x1FFF)：各个业务模块状态变更
-    EVENT_TYPE_MOD_BASE = 0x1000,
-    EVENT_TYPE_MOD_STATE_CHANGED,
-    EVENT_TYPE_MOD_READY,
-    EVENT_TYPE_MOD_RUNNING,
-    EVENT_TYPE_MOD_ERROR,
-    EVENT_TYPE_MOD_STOPPED,
+    // 通用模块状态事件（所有服务都可以发布）
+    EVENT_TYPE_MOD_STATE_CHANGED, // 模块状态变更
+    EVENT_TYPE_MOD_READY,         // 模块就绪
+    EVENT_TYPE_MOD_RUNNING,       // 模块运行中
+    EVENT_TYPE_MOD_ERROR,         // 模块错误
+    EVENT_TYPE_MOD_STOPPED,       // 模块已停止
 
-    // 采集模块事件 (0x2000 - 0x2FFF)：摄像头帧就绪、采集启停
-    EVENT_TYPE_CAP_BASE = 0x2000,
-    EVENT_TYPE_CAP_FRAME_READY,   // 【核心】摄像头帧就绪通知
-    EVENT_TYPE_CAP_START,
-    EVENT_TYPE_CAP_STOP,
-
-    // AI模块事件 (0x3000 - 0x3FFF)：AI结果就绪、人脸检测
-    EVENT_TYPE_AI_BASE = 0x3000,
-    EVENT_TYPE_AI_RESULT_READY,   // 【核心】AI结果就绪通知
-    EVENT_TYPE_AI_START,
-    EVENT_TYPE_AI_STOP,
-    EVENT_TYPE_FACE_RESULT,
-
-    // 显示模块事件 (0x4000 - 0x4FFF)：显示同步、异常
-    EVENT_TYPE_DISP_BASE = 0x4000,
-    EVENT_TYPE_DISP_VSYNC,
-    EVENT_TYPE_DISP_ERROR,
-
-    // 自定义扩展事件 (0xF000 - 0xFFFF)：项目专属事件
-    EVENT_TYPE_CUSTOM_BASE = 0xF000,
-
-    EVENT_TYPE_MAX = 0xFFFF
+    EVENT_TYPE_SYS_MAX = 0x0FFF   // 系统事件上限
 } event_type_t;
 
 // ==========================================================================

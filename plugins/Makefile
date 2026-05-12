@@ -8,13 +8,13 @@ SRC_FILES := \
 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 	base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp \
 	service_plugins/net_push_srv/src/net_push_srv.c \
-	service_plugins/capture_srv/src/capture_srv.c \
+	service_plugins/capture_srv/src/capture_srv.c 
 
 # 	app_plugins/src/demo_app.c \
 # 	service_plugins/face_detect_srv/src/face_detect_srv.c
 
 # 2. 头文件路径（新增AI相关路径）
-INC_FLAGS := \
+INC_FLAGS += \
 	-I$(TOPDIR)/src/base/camera/inc \
   	-I$(TOPDIR)/src/base/ai_model/inc \
 	-I$(TOPDIR)/src/base/service/inc \
@@ -24,6 +24,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \
+	-I$(TOPDIR)/plugins/service_plugins/capture_srv/inc\
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/pool/inc \
 	-I$(TOPDIR)/common/queue/inc \
@@ -31,7 +32,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/common/thread/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
-	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
+	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 
 
 
 

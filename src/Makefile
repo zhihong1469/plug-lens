@@ -33,6 +33,7 @@ INC_FLAGS := \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
+	-I$(TOPDIR)/plugins/service_plugins/capture_srv/inc\
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
 	-I$(TOPDIR)/src/link/frame_link/inc 
