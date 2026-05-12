@@ -1,224 +1,182 @@
-#include "demo_app.h"
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file demo_app.c
+ * @brief 【Linux内核式实现】采集+人脸检测 自动运行Demo
+ * @details 1. 基于initcall自动初始化/启动
+ *          2. 独立线程运行业务，不侵入main主循环
+ *          3. 优雅退出，完全对标Linux内核设计
+ */
+
+#include "main.h"
+#include "capture_srv.h"
+#include "face_detect_srv.h"
 #include "log.h"
-#include "main.h"   // 引入全局app上下文
+#include "service_base.h"
+#include "initcall.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
 #include <sys/select.h>
+#include <errno.h>
+#include <pthread.h>
+// AI模块头文件
+#include "ai_model_mnn.hpp"
 
-// ==========================================================================
-// 内部私有上下文
-// ==========================================================================
-typedef struct {
-    event_bus_handle_t evt_bus;
-    data_bus_handle_t data_bus;
-    global_fsm_handle_t g_fsm;
-    capture_srv_handle_t cap_srv;
-    
-    int exit_pipe_read_fd;  // 退出管道读端
-    int cap_sub_id;         // 采集事件订阅ID
-} demo_app_ctx_t;
+#define MODULE_NAME "DEMO_APP"
 
-static demo_app_ctx_t g_demo_ctx = {0};
+// ====================== 全局句柄（线程安全） ======================
+static app_context_t *g_ctx = NULL;
+static service_base_t *g_cap_srv = NULL;
+static face_detect_srv_handle_t *g_face_srv = NULL;
+static data_bus_subscription_handle_t g_ai_sub = NULL;
+static pthread_t g_demo_tid;
 
-// ==========================================================================
-// 内部辅助函数声明
-// ==========================================================================
-static void _demo_app_on_event(const event_t *event, void *user_data);
-static void _demo_app_process_frame(void);
-static void _demo_app_print_help(void);
-
-// ==========================================================================
-// 对外API实现
-// ==========================================================================
-int demo_app_init(const demo_app_config_t *config)
+// ====================== AI结果打印回调 ======================
+static void _ai_result_cb(data_bus_item_handle_t item, void *user_data)
 {
-    if (config == NULL) {
-        return -1;
+    (void)user_data;
+    if (!item) return;
+
+    data_bus_item_info_t info;
+    if (data_bus_get_item_info(item, &info) != 0) goto exit;
+    if (info.type != DATA_TYPE_AI_RESULT) goto exit;
+
+    const FaceInfo_C *faces = (const FaceInfo_C *)data_bus_get_readonly_ptr(item);
+    int face_num = info.data_size / sizeof(FaceInfo_C);
+
+    // 1秒打印一次，避免刷屏
+    static uint64_t last_ts = 0;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint64_t now = ts.tv_sec*1000 + ts.tv_nsec/1000000;
+    if (now - last_ts < 1000) goto exit;
+    last_ts = now;
+
+    LOG_I("[DEMO] 检测到人脸数: %d", face_num);
+    for (int i = 0; i < face_num; i++) {
+        LOG_I("  人脸%d: [%.0f,%.0f]-[%.0f,%.0f] 置信度:%.2f",
+            i+1, faces[i].x1, faces[i].y1, faces[i].x2, faces[i].y2, faces[i].score);
     }
 
-    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
-    g_demo_ctx.evt_bus = config->evt_bus;
-    g_demo_ctx.data_bus = config->data_bus;
-    g_demo_ctx.g_fsm = config->g_fsm;
-    g_demo_ctx.cap_srv = config->cap_srv;
-    g_demo_ctx.exit_pipe_read_fd = config->exit_pipe_read_fd;
-
-    // 订阅帧就绪事件
-    event_subscriber_t sub = {0};
-    sub.event_type = EVENT_TYPE_CAP_FRAME_READY;
-    sub.callback = _demo_app_on_event;
-    sub.user_data = NULL;
-
-    g_demo_ctx.cap_sub_id = event_bus_subscribe(g_demo_ctx.evt_bus, &sub);
-    if (g_demo_ctx.cap_sub_id < 0) {
-        LOG_E("Demo App: Failed to subscribe to events");
-        return -1;
-    }
-
-    LOG_I("Demo App: Initialized");
-    _demo_app_print_help();
-    return 0;
-}
-
-int demo_app_run(void)
-{
-    LOG_I("Demo App: Running...");
-    
-    // 获取Event Bus等待fd
-    int bus_fd = event_bus_get_wait_fd(g_demo_ctx.evt_bus);
-    if (bus_fd < 0) {
-        LOG_E("Demo App: Failed to get bus wait fd");
-        return -1;
-    }
-
-    int timeout_count = 0;
-    // 计算最大fd
-    int max_fd = STDIN_FILENO;
-    if(bus_fd > max_fd) max_fd = bus_fd;
-    if(g_demo_ctx.exit_pipe_read_fd > max_fd) max_fd = g_demo_ctx.exit_pipe_read_fd;
-
-    // 核心：全局运行标志（volatile，线程安全）
-    while (g_app_ctx.app_running) 
-    { 
-        fd_set read_fds;
-        struct timeval timeout;
-        
-        FD_ZERO(&read_fds);
-        FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(bus_fd, &read_fds);
-        FD_SET(g_demo_ctx.exit_pipe_read_fd, &read_fds);
-        
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 40000; // 20ms超时
-
-        int ret = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
-
-        // ============== 修复：信号中断直接退出 ==============
-        if (ret < 0) {
-            if (errno == EINTR) {
-                LOG_I("Demo App: Select interrupted by signal, exiting...");
-                break;
-            }
-            LOG_E("Demo App: select error: %s", strerror(errno));
-            break;
-        }
-
-        // ============== 修复：最高优先级处理退出管道 ==============
-        if (ret > 0 && FD_ISSET(g_demo_ctx.exit_pipe_read_fd, &read_fds)) {
-            LOG_I("Demo App: Received global exit signal, exiting main loop");
-            // 直接终止循环，不再处理任何事件
-            break;
-        }
-
-        // 正常事件处理
-        if (ret > 0) {
-            // Event Bus事件分发
-            if (FD_ISSET(bus_fd, &read_fds)) {
-                event_bus_dispatch(g_demo_ctx.evt_bus);
-            }
-
-            // 键盘命令解析
-            if (FD_ISSET(STDIN_FILENO, &read_fds)) {
-                char cmd = 0;
-                ssize_t nread = read(STDIN_FILENO, &cmd, 1);
-                
-                if (nread == 1) {
-                    timeout_count = 0;
-                    if (cmd == '\n' || cmd == '\r') continue;
-                    LOG_I("Demo App: Received key '%c'", cmd);
-                    
-                    switch (cmd) {
-                        case 's': case 'S':
-                            LOG_I("Demo App: User pressed START");
-                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_START);
-                            break;
-                        case 't': case 'T':
-                            LOG_I("Demo App: User pressed STOP");
-                            global_fsm_post_event(g_demo_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
-                            break;
-                        case 'q': case 'Q':
-                            LOG_I("Demo App: User pressed QUIT");
-                            app_trigger_soft_exit();
-                            break;
-                        case 'h': case 'H':
-                            _demo_app_print_help();
-                            break;
-                        default:
-                            break;
-                    }
-                }
-            }
-        }
-        else {
-            // 超时保活
-            timeout_count++;
-            if (timeout_count % 200 == 0) {
-                LOG_D("Demo App: Main thread alive");
-            }
-        }
-    }
-
-    LOG_I("Demo App: Main loop exited gracefully");
-    return 0;
-}
-
-int demo_app_deinit(void)
-{
-    if (g_demo_ctx.cap_sub_id >= 0) {
-        event_bus_unsubscribe(g_demo_ctx.evt_bus, g_demo_ctx.cap_sub_id);
-        g_demo_ctx.cap_sub_id = -1;
-    }
-
-    memset(&g_demo_ctx, 0, sizeof(g_demo_ctx));
-    LOG_I("Demo App: Deinitialized");
-    return 0;
-}
-
-// ==========================================================================
-// 内部辅助函数实现
-// ==========================================================================
-// 用户回调函数,调用时处于Event Bus rdlock 期间。该函数请尽可能简单。如果用户回调内部尝试获取写锁或其他锁，可能导致死锁。
-static void _demo_app_on_event(const event_t *event, void *user_data)
-{
-    if (event == NULL) return;
-
-    switch (event->type) {
-        case EVENT_TYPE_CAP_FRAME_READY:
-            _demo_app_process_frame();
-            break;
-        default:
-            break;
-    }
-}
-
-static void _demo_app_process_frame(void)
-{
-    data_bus_item_handle_t item = NULL;
-    int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
-    if (ret != 0 || item == NULL) {
-        return;
-    }
-
-    data_bus_item_info_t info = {0};
-    data_bus_get_item_info(item, &info);
-
-    LOG_D("Demo App: Processed frame (ts=%lu, size=%u)", 
-          (unsigned long)info.timestamp, 
-          info.data_size);
-
+exit:
     data_bus_release(item);
 }
 
-static void _demo_app_print_help(void)
+// ====================== 服务初始化 ======================
+static int _demo_init(void)
+{
+    g_ctx = app_get_context();
+    if (!g_ctx || !g_ctx->evt_bus || !g_ctx->data_bus) return -1;
+
+    // 初始化采集服务
+    g_cap_srv = capture_srv_get_instance();
+    if (!g_cap_srv || service_init(g_cap_srv)) return -2;
+
+    // 初始化人脸检测服务
+    face_detect_cfg_t cfg = {
+        .evt_bus = g_ctx->evt_bus,
+        .data_bus = g_ctx->data_bus,
+        .ai_cfg = {
+            .model_path = "./RFB-320-quant-KL-5792.mnn",
+            .input_width = 320,
+            .input_height = 240,
+            .score_thresh = 0.65f,
+            .iou_thresh = 0.3f,
+        }
+    };
+    g_face_srv = face_detect_srv_create(&cfg);
+    if (!g_face_srv) return -3;
+
+    LOG_I("%s: 服务初始化完成", MODULE_NAME);
+    return 0;
+}
+
+// ====================== 服务启动 ======================
+static int _demo_start(void)
+{
+    // 启动采集
+    if (service_start(g_cap_srv)) return -1;
+    // 启动人脸检测
+    if (face_detect_srv_start(g_face_srv)) return -2;
+    // 订阅AI结果
+    if (data_bus_subscribe(g_ctx->data_bus, DATA_TYPE_AI_RESULT, _ai_result_cb, NULL, &g_ai_sub)) return -3;
+
+    LOG_I("%s: 服务启动完成，运行中...", MODULE_NAME);
+    return 0;
+}
+
+// ====================== 资源清理 ======================
+static void _demo_cleanup(void)
+{
+    if (g_ai_sub) data_bus_unsubscribe(g_ctx->data_bus, &g_ai_sub);
+    if (g_face_srv) { face_detect_srv_stop(g_face_srv); face_detect_srv_destroy(&g_face_srv); }
+    if (g_cap_srv) { service_stop(g_cap_srv); service_deinit(g_cap_srv); }
+    LOG_I("%s: 资源清理完成", MODULE_NAME);
+}
+
+// ====================== Demo 独立线程主循环 ======================
+static void *_demo_thread(void *arg)
+{
+    (void)arg;
+    fd_set fds;
+    int ret;
+
+    // 1. 初始化
+    if (_demo_init() != 0) {
+        LOG_E("%s: 初始化失败，线程退出", MODULE_NAME);
+        return NULL;
+    }
+
+    // 2. 启动
+    if (_demo_start() != 0) {
+        LOG_E("%s: 启动失败，线程退出", MODULE_NAME);
+        _demo_cleanup();
+        return NULL;
+    }
+
+    // 3. 业务主循环（零CPU占用）
+    while (g_ctx->app_running) {
+        FD_ZERO(&fds);
+        int exit_fd = g_ctx->exit_pipe[0];
+        int evt_fd = event_bus_get_wait_fd(g_ctx->evt_bus);
+
+        FD_SET(exit_fd, &fds);
+        if (evt_fd > 0) FD_SET(evt_fd, &fds);
+
+        ret = select((exit_fd > evt_fd ? exit_fd : evt_fd) + 1, &fds, NULL, NULL, NULL);
+        if (ret < 0 && errno != EINTR) break;
+
+        // 退出信号
+        if (FD_ISSET(exit_fd, &fds)) break;
+        // 分发事件
+        if (evt_fd > 0 && FD_ISSET(evt_fd, &fds)) event_bus_dispatch(g_ctx->evt_bus);
+    }
+
+    // 4. 退出清理
+    _demo_cleanup();
+    return NULL;
+}
+
+// ====================== 【内核核心】自动初始化函数 ======================
+// 被 do_initcalls() 自动调用，创建Demo线程
+static int __demo_auto_init(void)
 {
     LOG_I("========================================");
-    LOG_I("  Demo App Control:");
-    LOG_I("    [s] - Start system");
-    LOG_I("    [t] - Stop system");
-    LOG_I("    [q] - Quit application");
-    LOG_I("    [h] - Show this help");
+    LOG_I("  【内核式自动启动】采集+人脸检测 Demo");
     LOG_I("========================================");
+
+    // 创建独立线程，不阻塞main主循环
+    int ret = pthread_create(&g_demo_tid, NULL, _demo_thread, NULL);
+    if (ret) {
+        LOG_E("%s: 创建线程失败", MODULE_NAME);
+        return -1;
+    }
+    // 线程分离，自动释放资源
+    pthread_detach(g_demo_tid);
+    return 0;
 }
+
+// ====================== 【内核核心】注册到initcall段 ======================
+// 编译时放入my_initcall段，main调用do_initcalls()自动运行
+MODULE_INIT(__demo_auto_init);

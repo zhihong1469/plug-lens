@@ -1,4 +1,4 @@
-#include "camera心情_base.h"
+#include "camera_base.h"
 #include "camera_usb.h"
 #include "frame_link.h"
 #include "log.h"

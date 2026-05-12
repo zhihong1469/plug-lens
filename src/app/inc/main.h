@@ -33,4 +33,7 @@ typedef struct {
 // 触发全局安全退出（信号/异常时调用）
 void app_trigger_soft_exit(void);
 
+// 获取全局上下文（仅Demo/框架使用，业务服务禁止调用）
+app_context_t* app_get_context(void);
+
 #endif /* MAIN_H */
