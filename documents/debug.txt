@@ -1,101 +1,68 @@
-// ====================== 【废弃：全局状态机FSM全套代码】 ======================
-// 状态机回调适配层
-static void _main_on_g_fsm_state_change(global_state_t old_state,
-                                          global_state_t new_state,
-                                          void *user_data)
-{
-    (void)user_data;
-    if (g_app_ctx.evt_bus != NULL) {
-        event_t evt = {0};
-        evt.type = EVENT_TYPE_SYS_STATE_CHANGED;
-        evt.source = "global_fsm";
-        evt.data = &new_state;
-        evt.data_len = sizeof(new_state);
-        event_bus_publish(g_app_ctx.evt_bus, &evt);
-    }
-}
+luo@Luo1469:~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal$ objdump -h ./output/vision_ai_app
 
-static void _main_on_g_fsm_event(global_event_t event,
-                                  const char *module_name,
-                                  void *user_data)
-{
-    (void)user_data;
-    if (g_app_ctx.evt_bus == NULL) return;
+./output/vision_ai_app:     file format elf32-little
 
-    event_type_t evt_type = EVENT_TYPE_INVALID;
-    switch (event) {
-        case GLOBAL_EVENT_MODULE_READY:   evt_type = EVENT_TYPE_MOD_READY; break;
-        case GLOBAL_EVENT_MODULE_RUNNING: evt_type = EVENT_TYPE_MOD_RUNNING; break;
-        case GLOBAL_EVENT_MODULE_ERROR:   evt_type = EVENT_TYPE_MOD_ERROR; break;
-        default: break;
-    }
-    
-    if (evt_type != EVENT_TYPE_INVALID) {
-        event_bus_publish_simple(g_app_ctx.evt_bus, evt_type, module_name);
-    }
-}
-
-// 状态机初始化函数
-static int _main_init_global_fsm(void)
-{
-    int ret = 0;
-    LOG_I("Main: Initializing Global FSM...");
-    
-    global_fsm_config_t g_fsm_cfg = {0};
-    g_fsm_cfg.max_modules = CONFIG_GLOBAL_FSM_MAX_MODULES;
-    g_fsm_cfg.state_cb = _main_on_g_fsm_state_change;
-    g_fsm_cfg.event_cb = _main_on_g_fsm_event;
-    g_fsm_cfg.user_data = NULL;
-    
-    ret = global_fsm_init(&g_fsm_cfg, &g_app_ctx.g_fsm);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Global FSM");
-        return -1;
-    }
-    return 0;
-}
-
-// 安全停止服务（依赖FSM）
-static void _safe_stop_all_services(void)
-{
-    LOG_I("Main: Safely stopping all services...");
-    
-    if (g_app_ctx.g_fsm) {
-        global_state_t current_state = global_fsm_get_state(g_app_ctx.g_fsm);
-        if (current_state == GLOBAL_STATE_RUNNING || current_state == GLOBAL_STATE_DEGRADED) {
-            global_fsm_post_event(g_app_ctx.g_fsm, GLOBAL_EVENT_SYSTEM_STOP);
-            usleep(200000); 
-        }
-    }
-}
-
-// ====================== 【废弃：旧版全局上下文（业务冗余版）】 ======================
-/*
-typedef struct {
-    // 核心总线句柄
-    event_bus_handle_t      evt_bus;
-    data_bus_handle_t       data_bus;
-
-    // 状态机 & 业务服务句柄（已废弃）
-    global_fsm_handle_t     g_fsm;
-    capture_srv_handle_t    cap_srv;
-    face_detect_srv_handle_t face_detect_srv;
-    
-    int                     exit_pipe[2];
-    struct termios          old_termios;
-    bool                    termios_saved;
-    volatile bool           app_running;
-} app_context_t;
-*/
-
-// ====================== 【废弃：业务入口函数】 ======================
-// 原业务主循环（已移至独立app.c）
-// demo_app_run();
-
-// ====================== 【废弃：多余公共函数声明】 ======================
-/*
-int app_exit_pipe_init(void);
-void app_exit_pipe_deinit(void);
-void app_set_terminal_noncanonical(void);
-void app_restore_terminal_safe(void);
-*/
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .interp       00000019  00010154  00010154  00000154  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  1 .note.ABI-tag 00000020  00010170  00010170  00000170  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  2 .hash         00000144  00010190  00010190  00000190  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  3 .gnu.hash     0000015c  000102d4  000102d4  000002d4  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  4 .dynsym       000002a0  00010430  00010430  00000430  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  5 .dynstr       0000028d  000106d0  000106d0  000006d0  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  6 .gnu.version  00000054  0001095e  0001095e  0000095e  2**1
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  7 .gnu.version_r 00000050  000109b4  000109b4  000009b4  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  8 .rel.dyn      00000010  00010a04  00010a04  00000a04  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+  9 .rel.plt      00000130  00010a14  00010a14  00000a14  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 10 .init         0000000c  00010b44  00010b44  00000b44  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 11 .plt          000001dc  00010b50  00010b50  00000b50  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 12 .text         00005268  00010d2c  00010d2c  00000d2c  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 13 .fini         00000008  00015f94  00015f94  00005f94  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+ 14 .rodata       00000e7d  00015f9c  00015f9c  00005f9c  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 15 .ARM.exidx    00000008  00016e1c  00016e1c  00006e1c  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 16 .eh_frame     00000004  00016e24  00016e24  00006e24  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA
+ 17 .init_array   00000004  00026ec8  00026ec8  00006ec8  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+ 18 .fini_array   00000004  00026ecc  00026ecc  00006ecc  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+ 19 .dynamic      00000130  00026ed0  00026ed0  00006ed0  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+ 20 .got          000000a8  00027000  00027000  00007000  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+ 21 .data         000000c0  000270a8  000270a8  000070a8  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+ 22 .bss          00000074  00027168  00027168  00007168  2**2
+                  ALLOC
+ 23 .comment      00000028  00000000  00000000  00007168  2**0
+                  CONTENTS, READONLY
+ 24 .ARM.attributes 00000041  00000000  00000000  00007190  2**0
+                  CONTENTS, READONLY
+ 25 .debug_aranges 00000160  00000000  00000000  000071d1  2**0
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
+ 26 .debug_info   000060e9  00000000  00000000  00007331  2**0
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
+ 27 .debug_abbrev 0000124f  00000000  00000000  0000d41a  2**0
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
+ 28 .debug_line   0000328f  00000000  00000000  0000e669  2**0
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
+ 29 .debug_frame  00000e7c  00000000  00000000  000118f8  2**2
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
+ 30 .debug_str    000025b3  00000000  00000000  00012774  2**0
+                  CONTENTS, READONLY, DEBUGGING, OCTETS
