@@ -9,7 +9,8 @@ SRC_FILES := \
  	base/ai_model/src/ai_model_base.cpp \
 	base/service/src/service_base.c \
 	bus/event_bus/src/event_bus.c \
-	bus/data_bus/src/data_bus.c 
+	bus/data_bus/src/data_bus.c \
+	app/src/main.c \
 
 # 	fsm/global_fsm/src/global_fsm.c \
 # 	fsm/module_fsm/src/module_fsm.c \

@@ -4,12 +4,13 @@
 
 # 1. 源文件
 SRC_FILES := \
-	app_plugins/src/net_demo.c \
 	base_plugins/camera_usb/src/camera_usb.c \
 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 	base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp \
 	service_plugins/net_push_srv/src/net_push_srv.c \
-	service_plugins/capture_srv/src/capture_srv.c 
+	service_plugins/capture_srv/src/capture_srv.c  \
+	
+# 	app_plugins/src/net_demo.c \
 
 # 	app_plugins/src/demo_app.c \
 # 	service_plugins/face_detect_srv/src/face_detect_srv.c
