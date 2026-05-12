@@ -8,6 +8,7 @@ SRC_FILES := \
 	link/frame_link/src/frame_link.c \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp \
+	base/service/src/service_base.c \
 	bus/event_bus/src/event_bus.c \
 	bus/data_bus/src/data_bus.c 
 
@@ -19,6 +20,7 @@ SRC_FILES := \
 INC_FLAGS := \
 	-I$(TOPDIR)/src/base/camera/inc \
   	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/base/service/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/common/log/inc \

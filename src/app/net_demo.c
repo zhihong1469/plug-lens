@@ -16,7 +16,7 @@
 #define DEV_PATH        "/dev/video1"
 #define WIDTH           640
 #define HEIGHT          360
-#define FPS             3
+#define FPS             5
 #define FORMAT          V4L2_PIX_FMT_YUYV
 
 #define POOL_CAP        12
