@@ -13,19 +13,12 @@ SRC_FILES := \
 	img_proc/src/img_proc_c.c \
 	initcall/src/initcall.c
 
-# 2. 头文件路径
-INC_FLAGS += \
-	-I$(TOPDIR)/common/log/inc \
-	-I$(TOPDIR)/common/queue/inc \
-	-I$(TOPDIR)/common/thread/inc \
-	-I$(TOPDIR)/common/utils/inc \
-	-I$(TOPDIR)/common/plugin/inc \
-	-I$(TOPDIR)/common/configs \
-	-I$(TOPDIR)/common/img_proc/inc \
-	-I$(TOPDIR)/common/pool/inc \
-	-I$(TOPDIR)/common/utils/inc \
-	-I$(TOPDIR)/common/thread/inc \
-	-I$(TOPDIR)/common/initcall/inc
+# 模块私有路径（common 无独有路径，留空）
+LOCAL_INC :=
+
+# 最终编译路径 = 全局公共路径 + 模块私有路径
+INC_FLAGS := $(GLOBAL_INC) $(LOCAL_INC)
+
 
 # 3. 生成静态库
 TARGET_NAME := libcom.a
