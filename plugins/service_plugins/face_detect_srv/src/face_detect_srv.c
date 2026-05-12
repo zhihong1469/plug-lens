@@ -6,7 +6,6 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
-
 #define MODULE_NAME     "FACE_DETECT"
 #define MAX_FACES       10
 
@@ -261,9 +260,10 @@ face_srv_state_t face_detect_srv_get_state(face_detect_srv_handle_t *srv)
 // 自动初始化（对接initcall，main自动加载）
 // ==============================================
 #include "initcall.h"
-static void _face_detect_srv_init(void)
+static int _face_detect_srv_init(void)
 {
     // 自动初始化逻辑（可在app.c中调用）
     LOG_I("%s: Auto init done", MODULE_NAME);
+    return 0;  // 必须return 0，表示成功
 }
-module_init(_face_detect_srv_init);
+MODULE_INIT(_face_detect_srv_init);

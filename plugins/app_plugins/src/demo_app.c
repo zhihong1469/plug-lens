@@ -13,6 +13,8 @@
 #include "log.h"
 #include "service_base.h"
 #include "initcall.h"
+// 引入全局配置头文件
+#include "vision_ai_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,18 +73,18 @@ static int _demo_init(void)
 
     // 初始化采集服务
     g_cap_srv = capture_srv_get_instance();
-    if (!g_cap_srv || service_init(g_cap_srv)) return -2;
+    if (!g_cap_srv || service_base_init(g_cap_srv)) return -2;
 
-    // 初始化人脸检测服务
+    // 初始化人脸检测服务 → 【全部使用全局宏配置，无硬编码】
     face_detect_cfg_t cfg = {
         .evt_bus = g_ctx->evt_bus,
         .data_bus = g_ctx->data_bus,
         .ai_cfg = {
-            .model_path = "./RFB-320-quant-KL-5792.mnn",
-            .input_width = 320,
-            .input_height = 240,
-            .score_thresh = 0.65f,
-            .iou_thresh = 0.3f,
+            .model_path = CONFIG_AI_MODEL_PATH,
+            .input_width = CONFIG_AI_INPUT_W,
+            .input_height = CONFIG_AI_INPUT_H,
+            .score_thresh = CONFIG_AI_SCORE_THRESH,
+            .iou_thresh = CONFIG_AI_IOU_THRESH,
         }
     };
     g_face_srv = face_detect_srv_create(&cfg);
@@ -96,7 +98,7 @@ static int _demo_init(void)
 static int _demo_start(void)
 {
     // 启动采集
-    if (service_start(g_cap_srv)) return -1;
+    if (service_base_start(g_cap_srv)) return -1;
     // 启动人脸检测
     if (face_detect_srv_start(g_face_srv)) return -2;
     // 订阅AI结果
@@ -111,7 +113,7 @@ static void _demo_cleanup(void)
 {
     if (g_ai_sub) data_bus_unsubscribe(g_ctx->data_bus, &g_ai_sub);
     if (g_face_srv) { face_detect_srv_stop(g_face_srv); face_detect_srv_destroy(&g_face_srv); }
-    if (g_cap_srv) { service_stop(g_cap_srv); service_deinit(g_cap_srv); }
+    if (g_cap_srv) { service_base_stop(g_cap_srv); service_base_deinit(g_cap_srv); }
     LOG_I("%s: 资源清理完成", MODULE_NAME);
 }
 

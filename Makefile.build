@@ -26,7 +26,8 @@ endif
 CFLAGS   += $(INC_FLAGS) 
 CFLAGS   += $(SYSROOT_CFLAGS) # 自动带上系统头文件路径
 CFLAGS   += -Wall -O0 -g -MMD -MP # 默认开启警告、优化、调试信息、生成依赖 -O2
-LDFLAGS += -Wl,--defsym=__start_my_initcall=0 -Wl,--defsym=__stop_my_initcall=0
+# 链接自定义脚本
+LDFLAGS += -T $(TOPDIR)/custom_sections.lds
 CXXFLAGS += $(INC_FLAGS) $(SYSROOT_CFLAGS) -Wall -O0 -g -MMD -MP -std=c++11
 
 # 5. 最终目标规则
