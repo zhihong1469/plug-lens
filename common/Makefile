@@ -11,9 +11,10 @@ SRC_FILES := \
 	utils/src/utils.c \
 	thread/src/thread.c \
 	img_proc/src/img_proc_c.c \
+	initcall/src/initcall.c
 
 # 2. 头文件路径
-INC_FLAGS := \
+INC_FLAGS += \
 	-I$(TOPDIR)/common/log/inc \
 	-I$(TOPDIR)/common/queue/inc \
 	-I$(TOPDIR)/common/thread/inc \
@@ -23,7 +24,8 @@ INC_FLAGS := \
 	-I$(TOPDIR)/common/img_proc/inc \
 	-I$(TOPDIR)/common/pool/inc \
 	-I$(TOPDIR)/common/utils/inc \
-	-I$(TOPDIR)/common/thread/inc
+	-I$(TOPDIR)/common/thread/inc \
+	-I$(TOPDIR)/common/initcall/inc
 
 # 3. 生成静态库
 TARGET_NAME := libcom.a

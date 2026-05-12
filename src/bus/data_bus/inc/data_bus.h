@@ -17,11 +17,11 @@
 // 1. 不透明句柄（最关键：外部看不到内部结构，只用void*指针操作）
 // ==========================================================================
 // 总线总句柄 → 代表整个数据总线
-typedef void* data_bus_handle_t;
+typedef struct data_bus_t* data_bus_handle_t;
 // 数据项句柄 → 代表一条数据（RGB帧/AI结果）
-typedef void* data_bus_item_handle_t;
+typedef struct data_bus_item_t* data_bus_item_handle_t;
 // 订阅句柄 → 代表一个订阅者（LCD/AI模块）
-typedef void* data_bus_subscription_t;
+typedef struct data_bus_subscription_t* data_bus_subscription_handle_t;
 
 // ==========================================================================
 // 2. 数据类型枚举 → 用来区分不同数据（你的核心：RGB视频 + AI结果）
@@ -127,10 +127,10 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item);
  */
 int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
                        data_bus_callback_t cb, void *user_data,
-                       data_bus_subscription_t *out_sub);
+                       data_bus_subscription_handle_t *out_sub);
 
 // 取消订阅
-int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_t *sub);
+int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_handle_t *sub);
 
 /**
  * @brief 拉模式：主动获取最新数据

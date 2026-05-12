@@ -1,4 +1,3 @@
-// src/bus/event_bus/src/event_bus.c
 #include "event_bus.h"
 #include "log.h"
 #include "queue.h"
@@ -31,7 +30,8 @@ typedef struct {
 // 事件总线所有资源、状态、锁、队列、管道都存在这里
 // 句柄 event_bus_handle_t = 该结构体的指针
 // ==========================================================================
-typedef struct {
+// 【修改点1】对齐头文件不透明句柄标签：struct event_bus_t
+typedef struct event_bus_t {
     event_bus_config_t config;          // 外部传入的配置
     subscriber_entry_t *subscribers;    // 订阅者数组
     uint32_t subscriber_count;          // 当前有效订阅者数量
@@ -50,11 +50,16 @@ typedef struct {
 // ==========================================================================
 static const char* g_event_type_str[] = {
     [EVENT_TYPE_INVALID] = "INVALID",
-    [EVENT_TYPE_SYS_STATE_CHANGED] = "SYS_STATE_CHANGED",
-    [EVENT_TYPE_SYS_START] = "SYS_START",
+    [EVENT_TYPE_SYS_PAUSE] = "SYS_PAUSE",
+    [EVENT_TYPE_SYS_RESUME] = "SYS_RESUME",
     [EVENT_TYPE_SYS_STOP] = "SYS_STOP",
+    [EVENT_TYPE_SYS_SHUTDOWN] = "SYS_SHUTDOWN",
+    [EVENT_TYPE_SYS_ERROR] = "SYS_ERROR",
     [EVENT_TYPE_MOD_STATE_CHANGED] = "MOD_STATE_CHANGED",
-    [EVENT_TYPE_CAP_FRAME_READY] = "CAP_FRAME_READY",
+    [EVENT_TYPE_MOD_READY] = "MOD_READY",
+    [EVENT_TYPE_MOD_RUNNING] = "MOD_RUNNING",
+    [EVENT_TYPE_MOD_ERROR] = "MOD_ERROR",
+    [EVENT_TYPE_MOD_STOPPED] = "MOD_STOPPED",
 };
 
 // ==========================================================================
@@ -73,13 +78,10 @@ const char* event_type_to_str(event_type_t type)
         return g_event_type_str[type];
     }
 
-    // 扩展事件按区间分类（兼容原有设计）
-    if (type >= EVENT_TYPE_CUSTOM_BASE) return "CUSTOM_EVENT";
-    if (type >= EVENT_TYPE_DISP_BASE)   return "DISP_EVENT";
-    if (type >= EVENT_TYPE_AI_BASE)     return "AI_EVENT";
-    if (type >= EVENT_TYPE_CAP_BASE)    return "CAP_EVENT";
-    if (type >= EVENT_TYPE_MOD_BASE)    return "MOD_EVENT";
-    if (type >= EVENT_TYPE_SYS_BASE)    return "SYS_EVENT";
+    // 系统事件分类
+    if (type >= EVENT_TYPE_SYS_BASE && type <= EVENT_TYPE_SYS_MAX) {
+        return "SYS_EVENT";
+    }
     
     return "UNKNOWN_EVENT";
 }
@@ -381,10 +383,11 @@ int event_bus_deinit(event_bus_handle_t handle)
 // ==========================================================================
 
 // 获取系统当前微秒级时间戳
+// 【修改点2】改用 CLOCK_MONOTONIC（嵌入式稳定，不受系统时间修改影响）
 static uint64_t _event_bus_get_timestamp_us(void)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 

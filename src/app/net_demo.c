@@ -5,7 +5,7 @@
 #include "event_bus.h"
 #include "net_push_srv.h"
 #include "log.h"
-
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>

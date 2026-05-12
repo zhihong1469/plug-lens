@@ -16,7 +16,7 @@
 // 内部数据项结构体 → 【真正存数据的地方】（外部看不到）
 // 句柄 data_bus_item_handle_t = 这个结构体的指针
 // ==========================================================================
-typedef struct {
+typedef struct data_bus_item_t{
     data_bus_item_info_t info;   // 数据身份证
     void *data_ptr;              // 【核心指针】指向真实数据内存（RGB/AI）
     bool in_use;                 // 标记：是否被占用
@@ -27,7 +27,7 @@ typedef struct {
 // ==========================================================================
 // 内部订阅者结构体 → 存储一个订阅者的信息
 // ==========================================================================
-typedef struct {
+typedef struct data_bus_subscription_t {
     data_type_t type;            // 订阅的数据类型
     data_bus_callback_t cb;      // 回调函数
     void *user_data;             // 用户参数
@@ -38,7 +38,7 @@ typedef struct {
 // 总线上下文 → 【总线总控结构体】
 // 句柄 data_bus_handle_t = 这个结构体的指针
 // ==========================================================================
-typedef struct {
+typedef struct data_bus_t {
     data_bus_config_t config;    // 配置
     data_item_t *items;          // 数据项数组（内存池）
     data_subscriber_t *subscribers; // 订阅者数组
@@ -206,7 +206,7 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item) {
  */
 int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
                        data_bus_callback_t cb, void *user_data,
-                       data_bus_subscription_t *out_sub) {
+                       data_bus_subscription_handle_t *out_sub) {
     if (!handle || !cb || !out_sub) return -1;
     data_bus_context_t *ctx = handle;
 
@@ -229,7 +229,7 @@ int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
 }
 
 // 取消订阅
-int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_t *sub) {
+int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_handle_t *sub) {
     if (!handle || !sub || !*sub) return -1;
     data_bus_context_t *ctx = handle;
     data_subscriber_t *s = *sub;
