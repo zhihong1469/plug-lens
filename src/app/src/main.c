@@ -204,3 +204,9 @@ error_exit:
     log_deinit();
     return -1;
 }
+
+
+app_context_t* app_get_context(void)
+{
+    return &g_app_ctx;
+}
