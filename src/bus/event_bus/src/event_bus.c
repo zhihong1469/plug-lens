@@ -1,3 +1,14 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file event_bus.c
+ * @brief 嵌入式Linux 异步事件总线实现
+ * @details 纯C实现发布-订阅模式，线程安全，无全局变量
+ *          单例设计：一次初始化，多模块共享获取
+ *          主线程分发，多线程发布，解耦所有业务模块
+ * @author Luo
+ * @date 2026-05-31
+ */
+
 #include "event_bus.h"
 #include "log.h"
 #include "queue.h"
@@ -6,6 +17,28 @@
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+
+// ==========================================================================
+// 【单例优化 - 读写锁】事件总线全局唯一句柄（静态私有，无外部全局变量）
+// 设计：1次写入(初始化/销毁) + N次读取(模块获取句柄)，读写锁最高效
+// ==========================================================================
+static event_bus_handle_t s_event_bus_instance = NULL;
+// 读写锁：读共享、写独占，完美适配单例一次写多次读场景
+static pthread_rwlock_t s_instance_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+
+// ==========================================================================
+// 【新增】对外获取事件总线单例API（替代全局变量，核心解耦）
+// 读锁：多模块可并发获取，无性能损耗
+// ==========================================================================
+event_bus_handle_t event_bus_get_instance(void)
+{
+    event_bus_handle_t handle = NULL;
+    // 【读操作】加共享读锁
+    pthread_rwlock_rdlock(&s_instance_rwlock);
+    handle = s_event_bus_instance;
+    pthread_rwlock_unlock(&s_instance_rwlock);
+    return handle;
+}
 
 // ==========================================================================
 // 内部宏定义（默认配置，外部不配置时使用）
@@ -50,6 +83,7 @@ typedef struct event_bus_t {
 // ==========================================================================
 static const char* g_event_type_str[] = {
     [EVENT_TYPE_INVALID] = "INVALID",
+    [EVENT_TYPE_SYS_CORE_READY] = "SYS_CORE_READY",
     [EVENT_TYPE_SYS_PAUSE] = "SYS_PAUSE",
     [EVENT_TYPE_SYS_RESUME] = "SYS_RESUME",
     [EVENT_TYPE_SYS_STOP] = "SYS_STOP",
@@ -94,11 +128,19 @@ const char* event_type_to_str(event_type_t type)
  * @brief 初始化事件总线
  * 核心工作：申请内存、初始化锁、创建管道、初始化事件队列
  */
-int event_bus_init(const event_bus_config_t *config,
-                   event_bus_handle_t *out_handle)
+int event_bus_init(const event_bus_config_t *config)
 {
+    // 【写操作】加独占写锁：防止重复初始化
+    pthread_rwlock_wrlock(&s_instance_rwlock);
+    if (s_event_bus_instance != NULL) {
+        pthread_rwlock_unlock(&s_instance_rwlock);
+        LOG_E("Event Bus: Already initialized, duplicate init forbidden");
+        return -1;
+    }
+    pthread_rwlock_unlock(&s_instance_rwlock);
+
     // 参数校验
-    if (config == NULL || out_handle == NULL) {
+    if (config == NULL ) {
         return -1;
     }
 
@@ -135,8 +177,12 @@ int event_bus_init(const event_bus_config_t *config,
     // 初始化事件队列（缓存发布的事件）
     Queue_Init(&ctx->event_queue, ctx->queue_buffer, EVENT_BUS_MAX_QUEUE_EVENTS);
 
-    // 输出总线句柄
-    *out_handle = (event_bus_handle_t)ctx;
+
+    // 【写操作】加独占写锁：保存单例句柄
+    pthread_rwlock_wrlock(&s_instance_rwlock);
+    s_event_bus_instance = (event_bus_handle_t)ctx;
+    pthread_rwlock_unlock(&s_instance_rwlock);
+
     LOG_I("Event Bus: Initialized (Async Mode), max subscribers=%u", ctx->max_subscribers);
     return 0;
 }
@@ -373,6 +419,13 @@ int event_bus_deinit(event_bus_handle_t handle)
     pthread_rwlock_destroy(&ctx->rwlock);
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
+
+    // 【写操作】加独占写锁：清空单例，防止野指针
+    pthread_rwlock_wrlock(&s_instance_rwlock);
+    if (s_event_bus_instance == handle) {
+        s_event_bus_instance = NULL;
+    }
+    pthread_rwlock_unlock(&s_instance_rwlock);
 
     LOG_I("Event Bus: Deinitialized");
     return 0;

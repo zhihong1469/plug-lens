@@ -222,7 +222,7 @@ int main(void)
     event_bus_config_t event_cfg = {
         .max_subscribers = EVENT_BUS_MAX_SUBSCRIBERS
     };
-    ret = event_bus_init(&event_cfg, &g_event_bus);
+    ret = event_bus_init(&event_cfg);
     if (ret != 0) {
         printf("[Error] EventBus初始化失败\n");
         return -1;

@@ -1,3 +1,13 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file data_bus.h
+ * @brief 嵌入式Linux 零拷贝数据总线接口
+ * @details 内存池设计，推/拉双模式，线程安全，单例无全局变量
+ *          专用于视频帧、AI推理结果等大块数据分发
+ * @author Luo
+ * @date 2026-05-31
+ */
+
 #ifndef DATA_BUS_H
 #define DATA_BUS_H
 
@@ -16,8 +26,6 @@
 // ==========================================================================
 // 1. 不透明句柄（最关键：外部看不到内部结构，只用void*指针操作）
 // ==========================================================================
-// 总线总句柄 → 代表整个数据总线
-typedef struct data_bus_t* data_bus_handle_t;
 // 数据项句柄 → 代表一条数据（RGB帧/AI结果）
 typedef struct data_bus_item_t* data_bus_item_handle_t;
 // 订阅句柄 → 代表一个订阅者（LCD/AI模块）
@@ -45,17 +53,6 @@ typedef enum {
 } data_type_t;
 
 // ==========================================================================
-// 3. 数据元信息 → 每条数据的"身份证"
-// ==========================================================================
-typedef struct {
-    data_type_t type;          // 数据类型（RGB/AI结果）
-    uint64_t timestamp;        // 时间戳（微秒，用于同步）
-    uint32_t data_size;         // 数据大小（RGB帧大小/AI结果大小）
-    uint32_t ref_count;         // 引用计数（几个人在用这个数据）
-    const char *producer;       // 生产者名称（采集/AI模块）
-} data_bus_item_info_t;
-
-// ==========================================================================
 // 4. 推模式回调函数 → 数据来了，总线主动通知消费者
 // item：数据句柄  user_data：用户自定义参数
 // ==========================================================================
@@ -68,6 +65,7 @@ typedef struct {
     uint32_t max_items;         // 最大缓存多少条数据（内存池大小）
     size_t max_item_size;       // 单条数据最大大小（RGB帧最大尺寸）
     uint32_t max_subscribers;   // 最大支持多少个订阅者（LCD+AI+推流）
+    const char *name;          // 总线唯一名称
 } data_bus_config_t;
 
 // ==========================================================================
@@ -75,13 +73,11 @@ typedef struct {
 // ==========================================================================
 
 /**
- * @brief 初始化数据总线（创建内存池、锁、数组）
+ * @brief 初始化数据总线（简化版：单参数，内部自动托管句柄）
  * @param config 总线配置
- * @param out_handle 输出总线句柄（外部用这个操作总线）
- * @return 0成功
+ * @return 0成功，负数失败
  */
-int data_bus_init(const data_bus_config_t *config,
-                  data_bus_handle_t *out_handle);
+int data_bus_init(const data_bus_config_t *config);
 
 // -------------------------------------------------------------------------
 // 生产者接口（采集模块/压缩模块/AI模块 用）
@@ -89,14 +85,14 @@ int data_bus_init(const data_bus_config_t *config,
 
 /**
  * @brief 生产者申请一块数据内存
- * @param handle 总线句柄
+ * @param name 总线名称
  * @param type 数据类型（RGB/AI）
  * @param size 数据大小
  * @param producer 生产者名称
  * @param out_item 输出数据项句柄
  * @return 0成功
  */
-int data_bus_alloc(data_bus_handle_t handle,
+int data_bus_alloc(const char *name,
                    data_type_t type,
                    size_t size,
                    const char *producer,
@@ -110,9 +106,11 @@ void* data_bus_get_writable_ptr(data_bus_item_handle_t item);
 
 /**
  * @brief 发布数据（写完数据后，通知所有消费者）
+ * @param name 总线名称
+ * @param item 数据项句柄
  * @return 0成功
  */
-int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item);
+int data_bus_publish(const char *name, data_bus_item_handle_t item);
 
 // -------------------------------------------------------------------------
 // 消费者接口（LCD/推流/AI模块 用）
@@ -120,23 +118,28 @@ int data_bus_publish(data_bus_handle_t handle, data_bus_item_handle_t item);
 
 /**
  * @brief 订阅数据（推模式：数据来了自动回调）
+ * @param name 总线名称
  * @param type 订阅的数据类型（只收RGB/只收AI）
  * @param cb 回调函数
+ * @param user_data 用户自定义参数
  * @param out_sub 输出订阅句柄
  * @return 0成功
  */
-int data_bus_subscribe(data_bus_handle_t handle, data_type_t type,
+int data_bus_subscribe(const char *name, data_type_t type,
                        data_bus_callback_t cb, void *user_data,
                        data_bus_subscription_handle_t *out_sub);
 
 // 取消订阅
-int data_bus_unsubscribe(data_bus_handle_t handle, data_bus_subscription_handle_t *sub);
+int data_bus_unsubscribe(const char *name, data_bus_subscription_handle_t *sub);
 
 /**
  * @brief 拉模式：主动获取最新数据
+ * @param name 总线名称
+ * @param type 数据类型
+ * @param out_item 输出数据项句柄
  * @return 0成功
  */
-int data_bus_acquire_latest(data_bus_handle_t handle,
+int data_bus_acquire_latest(const char *name,
                              data_type_t type,
                              data_bus_item_handle_t *out_item);
 
@@ -144,10 +147,6 @@ int data_bus_acquire_latest(data_bus_handle_t handle,
  * @brief 获取只读指针（消费者读取数据用，不能修改）
  */
 const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item);
-
-// 获取数据身份证信息
-int data_bus_get_item_info(data_bus_item_handle_t item,
-                           data_bus_item_info_t *out_info);
 
 /**
  * @brief 释放数据（引用计数-1，没人用就自动回收内存）
@@ -158,9 +157,7 @@ int data_bus_release(data_bus_item_handle_t item);
 // 总线管理
 // -------------------------------------------------------------------------
 // 销毁总线，释放所有内存
-int data_bus_deinit(data_bus_handle_t handle);
-
-// 数据类型转字符串（打印日志用）
+int data_bus_deinit(const char *name);
 const char* data_type_to_str(data_type_t type);
 
 #endif /* DATA_BUS_H */
