@@ -32,7 +32,7 @@ typedef int (*initcall_t)(void);
  */
 #define MODULE_INIT(fn)                                    \
     static initcall_t __initcall_##fn                     \
-    __attribute__((used, section("my_initcall"))) = fn
+    __attribute__((used, section(".my_initcall"))) = fn
 
 /**
  * @brief 链接器自动生成的段边界符号

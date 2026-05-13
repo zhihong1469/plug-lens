@@ -161,7 +161,6 @@ static void *_demo_thread(void *arg)
 }
 
 // ====================== 【内核核心】自动初始化函数 ======================
-// 被 do_initcalls() 自动调用，创建Demo线程
 static int __demo_auto_init(void)
 {
     LOG_I("========================================");
@@ -180,5 +179,4 @@ static int __demo_auto_init(void)
 }
 
 // ====================== 【内核核心】注册到initcall段 ======================
-// 编译时放入my_initcall段，main调用do_initcalls()自动运行
 MODULE_INIT(__demo_auto_init);
