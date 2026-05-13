@@ -1,3 +1,13 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file frame_link.c
+ * @brief 嵌入式Linux 帧数据链路层实现
+ * @details 内存池+队列双缓存，零拷贝帧传输，丢旧保新策略
+ *          采集服务专用私有组件，简洁高效
+ * @author Luo
+ * @date 2026-05-31
+ */
+
 #include "../inc/frame_link.h"
 #include <stdlib.h>
 #include <string.h>

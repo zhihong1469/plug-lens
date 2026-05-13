@@ -4,6 +4,9 @@
  * @brief 轻量化系统主入口（纯底层框架，无业务代码）
  * @details 职责：日志/信号/双总线/优雅退出 初始化
  *          业务模块通过事件总线交互，main永久不变
+ *          仅处理系统级异常,并通过事件总线发布通知,业务模块自行处理
+ * @author Luo
+ * @date 2026-05-31
  */
 
 #include <stdio.h>
@@ -12,13 +15,57 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include "log.h"
 #include "vision_ai_config.h"
 #include "main.h"
 #include "initcall.h"
+#include "event_bus.h"
+#include "data_bus.h"
+
+// ==================================================================================
+// 全局上下文：仅保留系统底层资源，无任何业务变量
+// 对外隐藏，具体共用指针由初始化完成后对应模块执行保留句柄,模块内部API获取句柄，彻底杜绝全局变量滥用
+// ==================================================================================
+typedef struct {
+    // 核心总线句柄（全局唯一，底层必需）
+    event_bus_handle_t      evt_bus;
+    data_bus_handle_t       data_bus;
+
+    // 系统级优雅退出管道（线程/信号安全）
+    int                     exit_pipe[2];
+
+    // 终端配置（调试用）
+    struct termios          old_termios;
+    bool                    termios_saved;
+
+    // main内部运行标记
+    volatile bool           app_running;
+} app_context_t;
 
 // 极简全局上下文（内部静态，对外完全隐藏）
 static app_context_t g_app_ctx = {0};
+
+// ==========================================================================
+// 【新增】Main层私有：系统事件统一发布接口（纯底层，无业务逻辑）
+// 遵循V4.0：Main仅发布系统级事件，不感知业务模块
+// ==========================================================================
+static void app_publish_sys_event(event_type_t type)
+{
+    if (g_app_ctx.evt_bus == NULL) {
+        LOG_W("Main: Event bus not ready, skip publish sys event: %s",
+              event_type_to_str(type));
+        return;
+    }
+
+    // 发布系统级事件（来源固定为MAIN框架，符合层级约束）
+    int ret = event_bus_publish_simple(g_app_ctx.evt_bus, type, "MAIN");
+    if (ret != 0) {
+        LOG_E("Main: Failed to publish sys event: %s", event_type_to_str(type));
+    } else {
+        LOG_I("Main: Published sys event: %s", event_type_to_str(type));
+    }
+}
 
 // ==========================================================================
 // 终端 底层基建（内部使用）
@@ -67,6 +114,9 @@ void app_trigger_soft_exit(void)
     char sig = 'E';
     (void)write(g_app_ctx.exit_pipe[1], &sig, 1);
     g_app_ctx.app_running = false;
+    
+    // 【新增】触发软退出时，广播系统关机事件
+    app_publish_sys_event(EVENT_TYPE_SYS_SHUTDOWN);
 }
 
 static void app_exit_pipe_deinit(void)
@@ -82,6 +132,8 @@ static void app_exit_pipe_deinit(void)
 static void _signal_handler(int sig)
 {
     (void)sig;
+    // 【新增】普通信号退出，发布系统关机事件
+    app_publish_sys_event(EVENT_TYPE_SYS_SHUTDOWN);
     app_trigger_soft_exit();
 }
 
@@ -90,6 +142,10 @@ static void _crash_signal_handler(int sig)
     (void)sig;
     const char *msg = "\n[Fatal] System crash, cleaning up...\n";
     (void)write(STDERR_FILENO, msg, strlen(msg));
+    
+    // 【新增】系统崩溃，发布致命错误事件（最高优先级系统通知）
+    app_publish_sys_event(EVENT_TYPE_SYS_ERROR);
+    
     app_trigger_soft_exit();
     usleep(100000); 
     _exit(1);
@@ -124,7 +180,7 @@ static int _main_init_buses(void)
     LOG_I("Main: Initializing Event Bus...");
     event_bus_config_t evt_bus_cfg = {0};
     evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
-    ret = event_bus_init(&evt_bus_cfg, &g_app_ctx.evt_bus);
+    ret = event_bus_init(&evt_bus_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Event Bus");
         return -1;
@@ -135,7 +191,7 @@ static int _main_init_buses(void)
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
     data_bus_cfg.max_item_size = 2 * 1024 * 1024;
     data_bus_cfg.max_subscribers = 16;
-    ret = data_bus_init(&data_bus_cfg, &g_app_ctx.data_bus);
+    ret = data_bus_init(&data_bus_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Data Bus");
         return -1;
@@ -183,6 +239,9 @@ int main(int argc, char **argv)
     // 3. 核心双总线初始化
     if (_main_init_buses() != 0) goto error_exit;
 
+    // 【新增】V4.0强制：双总线初始化完成 → 发布核心就绪事件（依赖注入触发）
+    app_publish_sys_event(EVENT_TYPE_SYS_CORE_READY);
+
     // 4. 自动加载所有业务模块
     do_initcalls();
 
@@ -199,14 +258,11 @@ int main(int argc, char **argv)
     return 0;
 
 error_exit:
+    // 【新增】初始化失败 → 发布系统错误事件
+    app_publish_sys_event(EVENT_TYPE_SYS_ERROR);
+    
     LOG_E("Main: Application exited with error");
     _cleanup_resources();
     log_deinit();
     return -1;
-}
-
-
-app_context_t* app_get_context(void)
-{
-    return &g_app_ctx;
 }
