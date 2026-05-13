@@ -19,26 +19,21 @@
 #include <unistd.h>
 
 // ==========================================================================
-// 【单例优化 - 读写锁】事件总线全局唯一句柄（静态私有，无外部全局变量）
-// 设计：1次写入(初始化/销毁) + N次读取(模块获取句柄)，读写锁最高效
+// 【多实例管理】内核风格静态实例表 + 名字管理
 // ==========================================================================
-static event_bus_handle_t s_event_bus_instance = NULL;
-// 读写锁：读共享、写独占，完美适配单例一次写多次读场景
-static pthread_rwlock_t s_instance_rwlock = PTHREAD_RWLOCK_INITIALIZER;
+#define MAX_EVENT_BUS        4
+#define BUS_NAME_MAX_LEN    16
 
-// ==========================================================================
-// 【新增】对外获取事件总线单例API（替代全局变量，核心解耦）
-// 读锁：多模块可并发获取，无性能损耗
-// ==========================================================================
-event_bus_handle_t event_bus_get_instance(void)
-{
-    event_bus_handle_t handle = NULL;
-    // 【读操作】加共享读锁
-    pthread_rwlock_rdlock(&s_instance_rwlock);
-    handle = s_event_bus_instance;
-    pthread_rwlock_unlock(&s_instance_rwlock);
-    return handle;
-}
+// 总线实例表条目
+typedef struct {
+    char name[BUS_NAME_MAX_LEN];
+    struct event_bus_t *bus;
+    bool used;
+} event_bus_entry_t;
+
+// 静态实例表（私有，外部不可访问）
+static event_bus_entry_t s_bus_table[MAX_EVENT_BUS] = {0};
+static pthread_mutex_t s_table_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // ==========================================================================
 // 内部宏定义（默认配置，外部不配置时使用）
@@ -61,9 +56,7 @@ typedef struct {
 // ==========================================================================
 // 事件总线上下文（总控结构体）
 // 事件总线所有资源、状态、锁、队列、管道都存在这里
-// 句柄 event_bus_handle_t = 该结构体的指针
 // ==========================================================================
-// 【修改点1】对齐头文件不透明句柄标签：struct event_bus_t
 typedef struct event_bus_t {
     event_bus_config_t config;          // 外部传入的配置
     subscriber_entry_t *subscribers;    // 订阅者数组
@@ -101,6 +94,25 @@ static const char* g_event_type_str[] = {
 // ==========================================================================
 static uint64_t _event_bus_get_timestamp_us(void);  // 获取微秒级时间戳
 static void _event_bus_free_event(event_t *event);  // 释放事件内存
+static event_bus_context_t* _event_bus_find_ctx(const char *name); // 按名称查找实例
+
+// ==========================================================================
+// 内部核心：通过名字查找事件总线实例
+// ==========================================================================
+static event_bus_context_t* _event_bus_find_ctx(const char *name) {
+    if (!name) return NULL;
+
+    pthread_mutex_lock(&s_table_lock);
+    event_bus_context_t *ctx = NULL;
+    for (int i = 0; i < MAX_EVENT_BUS; i++) {
+        if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {
+            ctx = s_bus_table[i].bus;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s_table_lock);
+    return ctx;
+}
 
 // ==========================================================================
 // 事件类型转字符串（兼容所有事件，日志打印友好）
@@ -130,23 +142,37 @@ const char* event_type_to_str(event_type_t type)
  */
 int event_bus_init(const event_bus_config_t *config)
 {
-    // 【写操作】加独占写锁：防止重复初始化
-    pthread_rwlock_wrlock(&s_instance_rwlock);
-    if (s_event_bus_instance != NULL) {
-        pthread_rwlock_unlock(&s_instance_rwlock);
-        LOG_E("Event Bus: Already initialized, duplicate init forbidden");
+    if (!config || !config->name || strlen(config->name) >= BUS_NAME_MAX_LEN) {
         return -1;
     }
-    pthread_rwlock_unlock(&s_instance_rwlock);
 
-    // 参数校验
-    if (config == NULL ) {
+    // 检查重名
+    if (_event_bus_find_ctx(config->name)) {
+        LOG_E("Event Bus[%s]: Already exists", config->name);
+        return -1;
+    }
+
+    pthread_mutex_lock(&s_table_lock);
+    // 查找空闲表项
+    int free_idx = -1;
+    for (int i = 0; i < MAX_EVENT_BUS; i++) {
+        if (!s_bus_table[i].used) {
+            free_idx = i;
+            break;
+        }
+    }
+    if (free_idx < 0) {
+        pthread_mutex_unlock(&s_table_lock);
+        LOG_E("Event Bus: Instance table full");
         return -1;
     }
 
     // 申请总线上下文内存
     event_bus_context_t *ctx = (event_bus_context_t*)malloc(sizeof(event_bus_context_t));
-    if (!ctx) return -1;
+    if (!ctx) {
+        pthread_mutex_unlock(&s_table_lock);
+        return -1;
+    }
     memset(ctx, 0, sizeof(event_bus_context_t));
 
     // 加载配置
@@ -158,6 +184,7 @@ int event_bus_init(const event_bus_config_t *config)
     ctx->subscribers = (subscriber_entry_t*)malloc(ctx->max_subscribers * sizeof(subscriber_entry_t));
     if (!ctx->subscribers) {
         free(ctx);
+        pthread_mutex_unlock(&s_table_lock);
         return -1;
     }
     memset(ctx->subscribers, 0, ctx->max_subscribers * sizeof(subscriber_entry_t));
@@ -171,19 +198,20 @@ int event_bus_init(const event_bus_config_t *config)
         LOG_E("Event Bus: Failed to create pipe");
         free(ctx->subscribers);
         free(ctx);
+        pthread_mutex_unlock(&s_table_lock);
         return -1;
     }
 
     // 初始化事件队列（缓存发布的事件）
     Queue_Init(&ctx->event_queue, ctx->queue_buffer, EVENT_BUS_MAX_QUEUE_EVENTS);
 
+    // 注册到实例表
+    strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
+    s_bus_table[free_idx].bus = ctx;
+    s_bus_table[free_idx].used = true;
 
-    // 【写操作】加独占写锁：保存单例句柄
-    pthread_rwlock_wrlock(&s_instance_rwlock);
-    s_event_bus_instance = (event_bus_handle_t)ctx;
-    pthread_rwlock_unlock(&s_instance_rwlock);
-
-    LOG_I("Event Bus: Initialized (Async Mode), max subscribers=%u", ctx->max_subscribers);
+    pthread_mutex_unlock(&s_table_lock);
+    LOG_I("Event Bus[%s]: Initialized (Async Mode), max subscribers=%u", config->name, ctx->max_subscribers);
     return 0;
 }
 
@@ -191,14 +219,14 @@ int event_bus_init(const event_bus_config_t *config)
  * @brief 订阅事件
  * 向总线注册回调，指定事件触发时执行
  */
-int event_bus_subscribe(event_bus_handle_t handle,
+int event_bus_subscribe(const char *name,
                         const event_subscriber_t *subscriber)
 {
     // 参数校验
-    if (!handle || !subscriber || !subscriber->callback) {
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx || !subscriber || !subscriber->callback) {
         return -1;
     }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
     // 写锁：修改订阅者列表
     pthread_rwlock_wrlock(&ctx->rwlock);
@@ -225,8 +253,8 @@ int event_bus_subscribe(event_bus_handle_t handle,
         LOG_E("Event Bus: No more subscriber slots");
         return -1;
     }
-    LOG_I("Event Bus: Subscribed (id=%d, event=%s)", 
-          id, event_type_to_str(subscriber->event_type));
+    LOG_I("Event Bus[%s]: Subscribed (id=%d, event=%s)", 
+          name, id, event_type_to_str(subscriber->event_type));
     return id;
 }
 
@@ -234,13 +262,13 @@ int event_bus_subscribe(event_bus_handle_t handle,
  * @brief 取消订阅事件
  * 根据订阅ID失效对应的订阅者
  */
-int event_bus_unsubscribe(event_bus_handle_t handle, int subscription_id)
+int event_bus_unsubscribe(const char *name, int subscription_id)
 {
     // 参数校验
-    if (!handle || subscription_id <= 0) {
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx || subscription_id <= 0) {
         return -1;
     }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
     // 写锁：修改订阅者列表
     pthread_rwlock_wrlock(&ctx->rwlock);
@@ -257,7 +285,7 @@ int event_bus_unsubscribe(event_bus_handle_t handle, int subscription_id)
     pthread_rwlock_unlock(&ctx->rwlock);
 
     if (ret == 0) {
-        LOG_I("Event Bus: Unsubscribed (id=%d)", subscription_id);
+        LOG_I("Event Bus[%s]: Unsubscribed (id=%d)", name, subscription_id);
     }
     return ret;
 }
@@ -268,18 +296,18 @@ int event_bus_unsubscribe(event_bus_handle_t handle, int subscription_id)
  * 2. 放入事件队列
  * 3. 写管道唤醒主线程分发
  */
-int event_bus_publish(event_bus_handle_t handle, const event_t *event)
+int event_bus_publish(const char *name, const event_t *event)
 {
     // 参数校验
-    if (!handle || !event || event->type == EVENT_TYPE_INVALID) {
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx || !event || event->type == EVENT_TYPE_INVALID) {
         return -1;
     }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
 
     // 申请内存，拷贝事件（保证线程安全）
     event_t *event_copy = (event_t*)malloc(sizeof(event_t));
     if (!event_copy) {
-        LOG_E("Event Bus: Out of memory");
+        LOG_E("Event Bus[%s]: Out of memory", name);
         return -1;
     }
     memcpy(event_copy, event, sizeof(event_t));
@@ -291,7 +319,7 @@ int event_bus_publish(event_bus_handle_t handle, const event_t *event)
 
     // 将事件放入队列
     if (Queue_Put(&ctx->event_queue, event_copy) != QUEUE_OK) {
-        LOG_W("Event Bus: Queue full, drop event: %s", event_type_to_str(event->type));
+        LOG_W("Event Bus[%s]: Queue full, drop event: %s", name, event_type_to_str(event->type));
         free(event_copy);
         return -1;
     }
@@ -306,7 +334,7 @@ int event_bus_publish(event_bus_handle_t handle, const event_t *event)
 /**
  * @brief 快速发布简单事件（简化接口）
  */
-int event_bus_publish_simple(event_bus_handle_t handle,
+int event_bus_publish_simple(const char *name,
                              event_type_t type, const char *source)
 {
     event_t evt = {0};
@@ -314,16 +342,16 @@ int event_bus_publish_simple(event_bus_handle_t handle,
     evt.priority = EVENT_PRIORITY_NORMAL;
     evt.source = source;
     evt.timestamp = 0;
-    return event_bus_publish(handle, &evt);
+    return event_bus_publish(name, &evt);
 }
 
 /**
  * @brief 获取管道读端FD（用于主线程异步监听）
  */
-int event_bus_get_wait_fd(event_bus_handle_t handle)
+int event_bus_get_wait_fd(const char *name)
 {
-    if (!handle) return -1;
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx) return -1;
     return ctx->pipefd[0];
 }
 
@@ -334,10 +362,10 @@ int event_bus_get_wait_fd(event_bus_handle_t handle)
  * 3. 遍历订阅者，执行匹配的回调
  * 4. 释放事件内存
  */
-int event_bus_dispatch(event_bus_handle_t handle)
+int event_bus_dispatch(const char *name)
 {
-    if (!handle) return -1;
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx) return -1;
 
     // 读取管道：清空唤醒信号
     char buf[32];
@@ -391,12 +419,10 @@ int event_bus_dispatch(event_bus_handle_t handle)
 /**
  * @brief 销毁事件总线，释放所有资源
  */
-int event_bus_deinit(event_bus_handle_t handle)
+int event_bus_deinit(const char *name)
 {
-    if (handle == NULL) {
-        return -1;
-    }
-    event_bus_context_t *ctx = (event_bus_context_t*)handle;
+    event_bus_context_t *ctx = _event_bus_find_ctx(name);
+    if (!ctx) return -1;
 
     // 关闭管道
     close(ctx->pipefd[0]);
@@ -420,14 +446,17 @@ int event_bus_deinit(event_bus_handle_t handle)
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
 
-    // 【写操作】加独占写锁：清空单例，防止野指针
-    pthread_rwlock_wrlock(&s_instance_rwlock);
-    if (s_event_bus_instance == handle) {
-        s_event_bus_instance = NULL;
+    // 清空实例表
+    pthread_mutex_lock(&s_table_lock);
+    for (int i = 0; i < MAX_EVENT_BUS; i++) {
+        if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {
+            memset(&s_bus_table[i], 0, sizeof(event_bus_entry_t));
+            break;
+        }
     }
-    pthread_rwlock_unlock(&s_instance_rwlock);
+    pthread_mutex_unlock(&s_table_lock);
 
-    LOG_I("Event Bus: Deinitialized");
+    LOG_I("Event Bus[%s]: Deinitialized", name);
     return 0;
 }
 
@@ -436,7 +465,6 @@ int event_bus_deinit(event_bus_handle_t handle)
 // ==========================================================================
 
 // 获取系统当前微秒级时间戳
-// 【修改点2】改用 CLOCK_MONOTONIC（嵌入式稳定，不受系统时间修改影响）
 static uint64_t _event_bus_get_timestamp_us(void)
 {
     struct timespec ts;

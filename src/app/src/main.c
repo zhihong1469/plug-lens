@@ -16,22 +16,24 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <termios.h>
 #include "log.h"
 #include "vision_ai_config.h"
-#include "main.h"
 #include "initcall.h"
 #include "event_bus.h"
 #include "data_bus.h"
 
 // ==================================================================================
-// 全局上下文：仅保留系统底层资源，无任何业务变量
+// 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
+// ==================================================================================
+#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
+#define SYS_DATA_BUS_NAME     "sys_data"     // 系统数据总线名称
+
+// ==================================================================================
+// 全局上下文：仅保留系统底层资源，无任何业务变量 + 无总线句柄（已删除）
 // 对外隐藏，具体共用指针由初始化完成后对应模块执行保留句柄,模块内部API获取句柄，彻底杜绝全局变量滥用
 // ==================================================================================
 typedef struct {
-    // 核心总线句柄（全局唯一，底层必需）
-    event_bus_handle_t      evt_bus;
-    data_bus_handle_t       data_bus;
-
     // 系统级优雅退出管道（线程/信号安全）
     int                     exit_pipe[2];
 
@@ -48,18 +50,12 @@ static app_context_t g_app_ctx = {0};
 
 // ==========================================================================
 // 【新增】Main层私有：系统事件统一发布接口（纯底层，无业务逻辑）
-// 遵循V4.0：Main仅发布系统级事件，不感知业务模块
+// 遵循V4.0：Main仅发布系统级事件，不感知业务模块 | 适配新总线：按名称发布
 // ==========================================================================
 static void app_publish_sys_event(event_type_t type)
 {
-    if (g_app_ctx.evt_bus == NULL) {
-        LOG_W("Main: Event bus not ready, skip publish sys event: %s",
-              event_type_to_str(type));
-        return;
-    }
-
-    // 发布系统级事件（来源固定为MAIN框架，符合层级约束）
-    int ret = event_bus_publish_simple(g_app_ctx.evt_bus, type, "MAIN");
+    // 直接通过总线名称调用，main不持有任何句柄
+    int ret = event_bus_publish_simple(SYS_EVENT_BUS_NAME, type, "MAIN");
     if (ret != 0) {
         LOG_E("Main: Failed to publish sys event: %s", event_type_to_str(type));
     } else {
@@ -77,8 +73,9 @@ static void app_set_terminal_noncanonical(void)
         g_app_ctx.termios_saved = true;
         new_termios = g_app_ctx.old_termios;
         
+        // 修复BUG：非规范模式标准配置，移除重复赋值
         new_termios.c_lflag &= ~(ICANON | ECHO); 
-        new_termios.c_cc[VMIN] = 1;
+        new_termios.c_cc[VMIN] = 0;
         new_termios.c_cc[VTIME] = 0;
         
         tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
@@ -171,23 +168,26 @@ static void _init_signal_handling(void)
 }
 
 // ==========================================================================
-// 双总线初始化（事件+数据，核心底层）
+// 双总线初始化（事件+数据，核心底层）| 适配新API：按名称初始化，无句柄存储
 // ==========================================================================
 static int _main_init_buses(void)
 {
     int ret = 0;
 
-    LOG_I("Main: Initializing Event Bus...");
+    LOG_I("Main: Initializing Event Bus[%s]...", SYS_EVENT_BUS_NAME);
     event_bus_config_t evt_bus_cfg = {0};
+    evt_bus_cfg.name = SYS_EVENT_BUS_NAME;
     evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
     ret = event_bus_init(&evt_bus_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Event Bus");
         return -1;
     }
+    LOG_I("Main: Event Bus[%s] init success", SYS_EVENT_BUS_NAME);
 
-    LOG_I("Main: Initializing Data Bus...");
+    LOG_I("Main: Initializing Data Bus[%s]...", SYS_DATA_BUS_NAME);
     data_bus_config_t data_bus_cfg = {0};
+    data_bus_cfg.name = SYS_DATA_BUS_NAME;
     data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
     data_bus_cfg.max_item_size = 2 * 1024 * 1024;
     data_bus_cfg.max_subscribers = 16;
@@ -196,12 +196,13 @@ static int _main_init_buses(void)
         LOG_E("Main: Failed to init Data Bus");
         return -1;
     }
+    LOG_I("Main: Data Bus[%s] init success", SYS_DATA_BUS_NAME);
 
     return 0;
 }
 
 // ==========================================================================
-// 统一资源清理
+// 统一资源清理 | 适配新API：按名称销毁总线
 // ==========================================================================
 static void _cleanup_resources(void)
 {
@@ -209,9 +210,9 @@ static void _cleanup_resources(void)
 
     app_restore_terminal_safe();
     
-    // 销毁核心组件
-    data_bus_deinit(g_app_ctx.data_bus);
-    event_bus_deinit(g_app_ctx.evt_bus);
+    // 优化：清理顺序与初始化严格反向（事件总线 → 数据总线）
+    event_bus_deinit(SYS_EVENT_BUS_NAME);
+    data_bus_deinit(SYS_DATA_BUS_NAME);
     app_exit_pipe_deinit();
 
     LOG_I("Main: Resource cleanup complete");

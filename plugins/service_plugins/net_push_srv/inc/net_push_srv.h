@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __NET_PUSH_SRV_H
 #define __NET_PUSH_SRV_H
 
@@ -20,9 +21,9 @@ typedef struct {
     uint32_t        queue_capacity; // 发送队列长度（默认2，丢旧保新）
     bool            enable_log;     // 是否开启推流日志
 
-    // 总线句柄
-    data_bus_handle_t   data_bus;
-    event_bus_handle_t  event_bus;
+    // 【新总线适配】总线唯一名称（替代老旧句柄）
+    const char*     data_bus_name;  // 数据总线名称
+    const char*     event_bus_name; // 事件总线名称
 } net_push_srv_config_t;
 
 // 不透明服务句柄

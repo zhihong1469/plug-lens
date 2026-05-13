@@ -1,13 +1,21 @@
+/* SPDX-License-Identifier: MIT */
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/time.h>
 #include "vision_ai_config.h"
 #include "capture_srv.h"
 #include "frame_link.h"
 #include "data_bus.h"
 #include "event_bus.h"
 #include "log.h"
+
+// ==========================================================================
+// 【框架对齐】系统总线固定名称（与main.c完全统一）
+// ==========================================================================
+#define SYS_DATA_BUS_NAME     "sys_data"     // 系统数据总线名称
+#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
 
 // ==========================================================================
 // 配置宏（与项目配置对齐）
@@ -28,11 +36,11 @@ typedef struct {
     pthread_t work_thread;
     volatile bool is_running;  // 线程运行标记（原子性）
 
-    // 核心句柄
-    frame_link_handle_t frame_link;       // 帧链路句柄
-    data_bus_handle_t data_bus;            // 数据总线句柄（唯一生产者）
-    event_bus_handle_t event_bus;          // 事件总线句柄
-    int event_sub_id;                      // 事件订阅ID
+    // 核心句柄（仅保留硬件链路，删除老旧总线句柄）
+    frame_link_handle_t frame_link;
+
+    // 事件订阅ID
+    int event_sub_id;
 
     // 私有配置
     uint32_t width;
@@ -117,18 +125,13 @@ static int capture_srv_init(void *self)
     srv->height = CONFIG_CAPTURE_HEIGHT;
     srv->fps    = CONFIG_CAPTURE_FPS;
 
-    // 获取全局总线句柄（由应用层统一初始化）
-    srv->data_bus = g_data_bus;
-    srv->event_bus = g_event_bus;
-    srv->frame_link = g_frame_link;
-
-    // 订阅全局控制事件（所有服务必须订阅）
+    // 【新总线适配】订阅全局事件：名称传参，无句柄
     event_subscriber_t sub = {
         .event_type = EVENT_TYPE_INVALID,  // 订阅所有系统事件
         .callback = capture_srv_event_cb,
         .user_data = srv
     };
-    srv->event_sub_id = event_bus_subscribe(srv->event_bus, &sub);
+    srv->event_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &sub);
     if (srv->event_sub_id < 0) {
         LOG_E("capture srv subscribe event failed");
         return -2;
@@ -158,9 +161,9 @@ static int capture_srv_start(void *self)
         return -2;
     }
 
-    // 状态切换 + 发布启动事件
+    // 状态切换 + 【新总线适配】发布启动事件
     srv->base.state = SRV_STATE_RUNNING;
-    event_bus_publish_simple(srv->event_bus, EVENT_TYPE_CAP_START, CAP_SRV_NAME);
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAP_START, CAP_SRV_NAME);
     LOG_I("capture srv started");
 
     return 0;
@@ -208,9 +211,9 @@ static int capture_srv_stop(void *self)
         srv->work_thread = 0;
     }
 
-    // 状态切换 + 发布停止事件
+    // 状态切换 + 【新总线适配】发布停止事件
     srv->base.state = SRV_STATE_STOP;
-    event_bus_publish_simple(srv->event_bus, EVENT_TYPE_CAP_STOP, CAP_SRV_NAME);
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAP_STOP, CAP_SRV_NAME);
     LOG_I("capture srv stopped");
 
     return 0;
@@ -228,9 +231,9 @@ static int capture_srv_deinit(void *self)
     // 确保已停止
     capture_srv_stop(self);
 
-    // 取消事件订阅
+    // 【新总线适配】取消事件订阅：名称传参
     if (srv->event_sub_id >= 0) {
-        event_bus_unsubscribe(srv->event_bus, srv->event_sub_id);
+        event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->event_sub_id);
         srv->event_sub_id = -1;
     }
 
@@ -278,6 +281,7 @@ static void *capture_srv_work_thread(void *arg)
     frame_t *frame = NULL;
     data_bus_item_handle_t item = NULL;
     uint64_t current_ts;
+    struct timeval tv;
 
     LOG_I("capture work thread start");
 
@@ -295,9 +299,9 @@ static void *capture_srv_work_thread(void *arg)
             continue;
         }
 
-        // 2. 数据总线：申请内存（零拷贝）
+        // 2. 【新总线适配】数据总线申请内存：名称传参
         size_t frame_size = frame->width * frame->height * 3; // RGB888
-        ret = data_bus_alloc(srv->data_bus, DATA_TYPE_VIDEO_FRAME_RGB,
+        ret = data_bus_alloc(SYS_DATA_BUS_NAME, DATA_TYPE_VIDEO_FRAME_RGB,
                              frame_size, CAP_SRV_NAME, &item);
         if (ret != 0 || !item) {
             frame_link_release_frame(srv->frame_link, frame);
@@ -308,22 +312,23 @@ static void *capture_srv_work_thread(void *arg)
         void *w_ptr = data_bus_get_writable_ptr(item);
         memcpy(w_ptr, frame->data, frame_size);
 
-        // 4. 发布数据到总线（通知所有消费者）
-        data_bus_publish(srv->data_bus, item);
+        // 4. 【新总线适配】发布数据到总线
+        data_bus_publish(SYS_DATA_BUS_NAME, item);
         data_bus_release(item);  // 释放引用
 
         // 5. 归还帧到内存池
         frame_link_release_frame(srv->frame_link, frame);
         srv->frame_count++;
 
-        // 6. 发布帧就绪事件
-        event_bus_publish_simple(srv->event_bus,
+        // 6. 【新总线适配】发布帧就绪事件
+        event_bus_publish_simple(SYS_EVENT_BUS_NAME,
                                  EVENT_TYPE_CAP_FRAME_READY, CAP_SRV_NAME);
 
         // 7. FPS定时上报
-        current_ts = srv->frame_count * 1000 / srv->fps;
+        gettimeofday(&tv, NULL);
+        current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
         if (current_ts - srv->last_report_ts >= CAP_FPS_REPORT_INTERVAL) {
-            event_bus_publish_simple(srv->event_bus,
+            event_bus_publish_simple(SYS_EVENT_BUS_NAME,
                                      EVENT_TYPE_CAP_FPS_REPORT, CAP_SRV_NAME);
             srv->last_report_ts = current_ts;
         }

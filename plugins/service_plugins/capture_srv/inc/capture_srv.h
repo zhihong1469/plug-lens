@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __CAPTURE_SRV_H
 #define __CAPTURE_SRV_H
 

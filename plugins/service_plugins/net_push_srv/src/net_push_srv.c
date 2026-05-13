@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #include "../inc/net_push_srv.h"
 #include "log.h"
 #include "queue.h"
@@ -68,8 +69,8 @@ static int _udp_send_frame(net_push_srv_ctx_t* ctx, const uint8_t* data, uint32_
 // 返回：0成功，负数失败
 // ==============================================
 int net_push_srv_create(const net_push_srv_config_t* config, net_push_srv_handle_t* out_handle) {
-    // 入参合法性校验
-    if (!config || !out_handle || !config->data_bus || !config->event_bus) return -1;
+    // 【新总线适配】入参校验：校验总线名称（替代老旧句柄）
+    if (!config || !out_handle || !config->data_bus_name || !config->event_bus_name) return -1;
 
     // 分配服务上下文内存
     net_push_srv_ctx_t* ctx = calloc(1, sizeof(net_push_srv_ctx_t));
@@ -107,22 +108,36 @@ int net_push_srv_start(net_push_srv_handle_t handle) {
     addr.sin_addr.s_addr = INADDR_ANY;             // 监听所有网卡
     bind(ctx->sock_fd, (const struct sockaddr*)&addr, (socklen_t )sizeof(addr));
 
-    // 2. 订阅数据总线：接收VIDEO_FRAME类型数据
-    data_bus_subscribe(ctx->config.data_bus, DATA_TYPE_VIDEO_FRAME, _data_bus_cb, ctx, &ctx->data_sub);
+    // 2. 【新总线适配】订阅数据总线：名称传参，接收VIDEO_FRAME类型数据
+    data_bus_subscribe(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, _data_bus_cb, ctx, &ctx->data_sub);
     
-    // 3. 订阅事件总线：监听SYS_STOP系统停止事件
+    // 3. 【新总线适配】订阅事件总线：名称传参，监听SYS_STOP系统停止事件
     event_subscriber_t sub = {
         .event_type = EVENT_TYPE_SYS_STOP,
         .callback = _event_cb,
         .user_data = ctx
     };
-    ctx->event_sub_id = event_bus_subscribe(ctx->config.event_bus, &sub);
+    ctx->event_sub_id = event_bus_subscribe(ctx->config.event_bus_name, &sub);
 
     // 4. 启动UDP发送线程
     ctx->is_running = true;
     pthread_create(&ctx->send_thread, NULL, _send_thread, ctx);
 
     LOG_I("NetPush: 服务启动，等待客户端连接");
+    return 0;
+}
+
+// ==============================================
+// 函数：net_push_srv_stop
+// 功能：停止推流服务
+// ==============================================
+int net_push_srv_stop(net_push_srv_handle_t handle) {
+    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)handle;
+    if (!ctx || !ctx->is_running) return -1;
+
+    ctx->is_running = false;
+    pthread_join(ctx->send_thread, NULL);
+    LOG_I("NetPush: 服务已停止");
     return 0;
 }
 
@@ -138,9 +153,9 @@ int net_push_srv_destroy(net_push_srv_handle_t handle) {
     ctx->is_running = false;
     pthread_join(ctx->send_thread, NULL);
 
-    // 取消总线订阅
-    event_bus_unsubscribe(ctx->config.event_bus, ctx->event_sub_id);
-    data_bus_unsubscribe(ctx->config.data_bus, &ctx->data_sub);
+    // 【新总线适配】取消总线订阅：名称传参
+    event_bus_unsubscribe(ctx->config.event_bus_name, ctx->event_sub_id);
+    data_bus_unsubscribe(ctx->config.data_bus_name, &ctx->data_sub);
     // 关闭socket
     close(ctx->sock_fd);
 
@@ -177,12 +192,15 @@ static void _data_bus_cb(data_bus_item_handle_t item, void* user_data) {
     }
 
     // ==============================================
-    // 修复bug：给当前数据项增加引用计数
+    // 【新总线适配+BUG修复】正确增加引用计数（名称传参）
     // 防止总线自动释放，保证数据发送前有效
     // ==============================================
-    data_bus_acquire_latest(ctx->config.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
-    // 将最新帧入队
-    Queue_Put(&ctx->send_queue, item);
+    data_bus_item_handle_t ref_item = NULL;
+    data_bus_acquire_latest(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, &ref_item);
+    if (ref_item) {
+        // 将最新帧入队
+        Queue_Put(&ctx->send_queue, ref_item);
+    }
 }
 
 // ==============================================
@@ -191,8 +209,10 @@ static void _data_bus_cb(data_bus_item_handle_t item, void* user_data) {
 // ==============================================
 static void _event_cb(const event_t* event, void* user_data) {
     net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)user_data;
-    // 收到停止事件，关闭服务
-    ctx->is_running = false;
+    if (ctx) {
+        // 收到停止事件，关闭服务
+        ctx->is_running = false;
+    }
 }
 
 // ==============================================
