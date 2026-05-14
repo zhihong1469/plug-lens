@@ -72,21 +72,44 @@ typedef struct event_bus_t {
 } event_bus_context_t;
 
 // ==========================================================================
-// 事件类型字符串映射表（日志打印专用）
+// 事件类型字符串映射表（日志打印专用）→ 【已适配全局vision_ai_config.h】
 // ==========================================================================
 static const char* g_event_type_str[] = {
-    [EVENT_TYPE_INVALID] = "INVALID",
-    [EVENT_TYPE_SYS_CORE_READY] = "SYS_CORE_READY",
-    [EVENT_TYPE_SYS_PAUSE] = "SYS_PAUSE",
-    [EVENT_TYPE_SYS_RESUME] = "SYS_RESUME",
-    [EVENT_TYPE_SYS_STOP] = "SYS_STOP",
-    [EVENT_TYPE_SYS_SHUTDOWN] = "SYS_SHUTDOWN",
-    [EVENT_TYPE_SYS_ERROR] = "SYS_ERROR",
-    [EVENT_TYPE_MOD_STATE_CHANGED] = "MOD_STATE_CHANGED",
-    [EVENT_TYPE_MOD_READY] = "MOD_READY",
-    [EVENT_TYPE_MOD_RUNNING] = "MOD_RUNNING",
-    [EVENT_TYPE_MOD_ERROR] = "MOD_ERROR",
-    [EVENT_TYPE_MOD_STOPPED] = "MOD_STOPPED",
+    // 系统全局事件 (0x0000 ~ 0x0FFF)
+    [EVENT_TYPE_INVALID]            = "INVALID",
+    [EVENT_TYPE_SYS_CORE_READY]     = "SYS_CORE_READY",
+    [EVENT_TYPE_SYS_PAUSE]          = "SYS_PAUSE",
+    [EVENT_TYPE_SYS_RESUME]         = "SYS_RESUME",
+    [EVENT_TYPE_SYS_STOP]           = "SYS_STOP",
+    [EVENT_TYPE_SYS_SHUTDOWN]       = "SYS_SHUTDOWN",
+    [EVENT_TYPE_SYS_ERROR]          = "SYS_ERROR",
+
+    // 模块通用事件 (0x1000 ~ 0x1FFF)
+    [EVENT_TYPE_MOD_INIT_DONE]      = "MOD_INIT_DONE",
+    [EVENT_TYPE_MOD_START_DONE]     = "MOD_START_DONE",
+    [EVENT_TYPE_MOD_PAUSED]         = "MOD_PAUSED",
+    [EVENT_TYPE_MOD_RESUMED]        = "MOD_RESUMED",
+    [EVENT_TYPE_MOD_STOPPED]        = "MOD_STOPPED",
+    [EVENT_TYPE_MOD_FAULT]          = "MOD_FAULT",
+
+    // 视频采集服务事件 (0x2000 ~ 0x2FFF)
+    [EVENT_TYPE_CAPTURE_READY]      = "CAPTURE_READY",
+    [EVENT_TYPE_CAPTURE_RUNNING]    = "CAPTURE_RUNNING",
+    [EVENT_TYPE_CAPTURE_FRAME_READY] = "CAPTURE_FRAME_READY",
+    [EVENT_TYPE_CAPTURE_STOPPED]    = "CAPTURE_STOPPED",
+    [EVENT_TYPE_CAPTURE_ERROR]      = "CAPTURE_ERROR",
+
+    // 人脸检测服务事件 (0x3000 ~ 0x3FFF)
+    [EVENT_TYPE_FACE_READY]         = "FACE_READY",
+    [EVENT_TYPE_FACE_RUNNING]       = "FACE_RUNNING",
+    [EVENT_TYPE_FACE_PROCESS_START] = "FACE_PROCESS_START",
+    [EVENT_TYPE_FACE_PROCESS_DONE]  = "FACE_PROCESS_DONE",
+    [EVENT_TYPE_FACE_STOPPED]       = "FACE_STOPPED",
+    [EVENT_TYPE_FACE_ERROR]         = "FACE_ERROR",
+
+    // Demo应用事件 (0x4000 ~ 0x4FFF)
+    [EVENT_TYPE_DEMO_RUNNING]       = "DEMO_RUNNING",
+    [EVENT_TYPE_DEMO_EXIT]          = "DEMO_EXIT"
 };
 
 // ==========================================================================
@@ -127,6 +150,22 @@ const char* event_type_to_str(event_type_t type)
     // 系统事件分类
     if (type >= EVENT_TYPE_SYS_BASE && type <= EVENT_TYPE_SYS_MAX) {
         return "SYS_EVENT";
+    }
+    // 模块通用事件
+    if (type >= EVENT_TYPE_MOD_BASE && type <= EVENT_TYPE_MOD_MAX) {
+        return "MOD_EVENT";
+    }
+    // 采集服务事件
+    if (type >= EVENT_TYPE_CAPTURE_BASE && type <= EVENT_TYPE_CAPTURE_MAX) {
+        return "CAPTURE_EVENT";
+    }
+    // 人脸检测事件
+    if (type >= EVENT_TYPE_FACE_BASE && type <= EVENT_TYPE_FACE_MAX) {
+        return "FACE_EVENT";
+    }
+    // Demo事件
+    if (type >= EVENT_TYPE_DEMO_BASE && type <= EVENT_TYPE_DEMO_MAX) {
+        return "DEMO_EVENT";
     }
     
     return "UNKNOWN_EVENT";

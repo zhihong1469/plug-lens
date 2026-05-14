@@ -1,339 +1,344 @@
 /* SPDX-License-Identifier: MIT */
-#include <stdlib.h>
-#include <pthread.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include "vision_ai_config.h"
-#include "capture_srv.h"
-#include "frame_link.h"
+#include "log.h"
 #include "data_bus.h"
 #include "event_bus.h"
-#include "log.h"
+#include "frame_link.h"
+#include "vision_ai_config.h"
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/time.h>
 
 // ==========================================================================
-// 【框架对齐】系统总线固定名称（与main.c完全统一）
+// 全局宏定义（文件私有化，标注来源，方便代码巡查）
+// 来源：common\configs\vision_ai_config.h
 // ==========================================================================
-#define SYS_DATA_BUS_NAME     "sys_data"     // 系统数据总线名称
-#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
+#define MODULE_NAME           "CAPTURE"
+#define MODULE_TAG            "[CAPTURE]"
+
+// 系统总线名称（全局约定）
+#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线
+#define VIDEO_DATA_BUS_NAME   "video"        // 采集服务自主创建的数据总线
+
+// 采集配置（来源：vision_ai_config.h）
+#define FRAME_CAPTURE_FPS         CONFIG_CAPTURE_FPS
+#define FRAME_CAPTURE_HEIGHT      CONFIG_CAPTURE_HEIGHT
+#define FRAME_CAPTURE_WIDTH       CONFIG_CAPTURE_WIDTH
+
+// 服务私有配置
+#define CAP_FRAME_WAIT_US         20000   // 20ms 取帧等待
+#define CAP_FPS_INTERVAL_MS       1000    // FPS上报间隔
+#define FRAME_POOL_SIZE           10      // 帧内存池大小
+#define FRAME_QUEUE_SIZE          4       // 帧队列大小
 
 // ==========================================================================
-// 配置宏（与项目配置对齐）
-// ==========================================================================
-#define CAP_SRV_NAME         "capture_srv"
-#define CAP_FRAME_QUEUE_WAIT 10000  // 取帧超时(us)
-#define CAP_FPS_REPORT_INTERVAL 1000 // FPS上报间隔(ms)
-
-// ==========================================================================
-// 采集服务 私有结构体（纯C继承：首成员为service_base_t）
-// 所有成员static修饰，无全局变量，无公共暴露
+// 采集服务 私有结构体（静态单例，外部完全不可见）
 // ==========================================================================
 typedef struct {
-    // 基类（必须放在第一个，实现OOP继承）
-    service_base_t base;
+    // 硬件帧链路（服务初始化创建）
+    frame_link_handle_t     frame_link;
 
     // 工作线程
-    pthread_t work_thread;
-    volatile bool is_running;  // 线程运行标记（原子性）
+    pthread_t               work_thread;
+    bool                    thread_running;
+    bool                    is_paused;
+    pthread_mutex_t         lock;
 
-    // 核心句柄（仅保留硬件链路，删除老旧总线句柄）
-    frame_link_handle_t frame_link;
+    // 视频配置
+    uint32_t                width;
+    uint32_t                height;
+    uint32_t                fps;
+    frame_format_t          format;
 
-    // 事件订阅ID
-    int event_sub_id;
+    // 统计信息
+    uint64_t                frame_count;
+    uint64_t                last_fps_ts;
 
-    // 私有配置
-    uint32_t width;
-    uint32_t height;
-    uint32_t fps;
-
-    // 状态与统计
-    uint64_t frame_count;
-    uint64_t last_report_ts;
+    // 事件订阅ID（服务订阅创建）
+    int                     evt_sub_id;
 } capture_srv_t;
 
-// 静态服务实例（唯一实例，对外隐藏）
-static capture_srv_t s_capture_srv;
+// 静态单例（服务自治，无对外暴露）
+static capture_srv_t s_capture;
 
 // ==========================================================================
-// 前置声明
+// 内部工具函数：线程安全加锁/解锁
 // ==========================================================================
-static int  capture_srv_init(void *self);
-static int  capture_srv_start(void *self);
-static int  capture_srv_pause(void *self);
-static int  capture_srv_resume(void *self);
-static int  capture_srv_stop(void *self);
-static int  capture_srv_deinit(void *self);
-static void capture_srv_event_handle(void *self, uint32_t event_id, void *data);
-static void *capture_srv_work_thread(void *arg);
+static inline void _capture_lock(void) {
+    pthread_mutex_lock(&s_capture.lock);
+}
 
-// ==========================================================================
-// 服务操作表（绑定7个生命周期接口，基类多态调用）
-// ==========================================================================
-static const service_ops_t s_capture_srv_ops = {
-    .init        = capture_srv_init,
-    .start       = capture_srv_start,
-    .pause       = capture_srv_pause,
-    .resume      = capture_srv_resume,
-    .stop        = capture_srv_stop,
-    .deinit      = capture_srv_deinit,
-    .event_handle = capture_srv_event_handle
-};
-
-// ==========================================================================
-// 对外接口：获取服务基类指针
-// ==========================================================================
-service_base_t *capture_srv_get_instance(void)
-{
-    return &s_capture_srv.base;
+static inline void _capture_unlock(void) {
+    pthread_mutex_unlock(&s_capture.lock);
 }
 
 // ==========================================================================
-// 事件总线：全局事件回调（转发给服务事件处理函数）
+// 【核心】服务统一清理函数：释放所有创建的资源（成对释放，无泄漏）
+// 启动了什么 → 释放什么：线程、帧链路、数据总线、锁、事件订阅
 // ==========================================================================
-static void capture_srv_event_cb(const event_t *event, void *user_data)
+static void capture_srv_cleanup(void)
 {
-    capture_srv_t *srv = (capture_srv_t *)user_data;
-    if (!srv || !event) return;
+    capture_srv_t *srv = &s_capture;
 
-    capture_srv_event_handle(srv, event->type, event->data);
-}
+    LOG_W(MODULE_TAG " 开始执行全量资源释放...");
 
-// ==========================================================================
-// 1. 初始化接口（IDLE → INIT）
-// 功能：初始化资源、订阅事件、绑定总线，不启动线程
-// ==========================================================================
-static int capture_srv_init(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv) return -1;
-
-    // 基类初始化
-    srv->base.state = SRV_STATE_INIT;
-    srv->base.ops   = &s_capture_srv_ops;
-    srv->base.name  = CAP_SRV_NAME;
-
-    // 私有成员初始化
-    srv->is_running = false;
-    srv->work_thread = 0;
-    srv->event_sub_id = -1;
-    srv->frame_count = 0;
-    srv->last_report_ts = 0;
-
-    // 加载配置
-    srv->width  = CONFIG_CAPTURE_WIDTH;
-    srv->height = CONFIG_CAPTURE_HEIGHT;
-    srv->fps    = CONFIG_CAPTURE_FPS;
-
-    // 【新总线适配】订阅全局事件：名称传参，无句柄
-    event_subscriber_t sub = {
-        .event_type = EVENT_TYPE_INVALID,  // 订阅所有系统事件
-        .callback = capture_srv_event_cb,
-        .user_data = srv
-    };
-    srv->event_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &sub);
-    if (srv->event_sub_id < 0) {
-        LOG_E("capture srv subscribe event failed");
-        return -2;
-    }
-
-    LOG_I("capture srv init success, %ux%u@%u fps",
-          srv->width, srv->height, srv->fps);
-    return 0;
-}
-
-// ==========================================================================
-// 2. 启动接口（INIT → RUNNING）
-// 功能：创建工作线程，启动采集逻辑
-// ==========================================================================
-static int capture_srv_start(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv || srv->base.state != SRV_STATE_INIT) return -1;
-
-    // 启动工作线程
-    srv->is_running = true;
-    int ret = pthread_create(&srv->work_thread, NULL,
-                             capture_srv_work_thread, srv);
-    if (ret != 0) {
-        LOG_E("create capture thread failed: %d", ret);
-        srv->is_running = false;
-        return -2;
-    }
-
-    // 状态切换 + 【新总线适配】发布启动事件
-    srv->base.state = SRV_STATE_RUNNING;
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAP_START, CAP_SRV_NAME);
-    LOG_I("capture srv started");
-
-    return 0;
-}
-
-// ==========================================================================
-// 3. 暂停接口（RUNNING → PAUSE）
-// ==========================================================================
-static int capture_srv_pause(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv || srv->base.state != SRV_STATE_RUNNING) return -1;
-
-    srv->base.state = SRV_STATE_PAUSE;
-    LOG_I("capture srv paused");
-    return 0;
-}
-
-// ==========================================================================
-// 4. 恢复接口（PAUSE → RUNNING）
-// ==========================================================================
-static int capture_srv_resume(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv || srv->base.state != SRV_STATE_PAUSE) return -1;
-
-    srv->base.state = SRV_STATE_RUNNING;
-    LOG_I("capture srv resumed");
-    return 0;
-}
-
-// ==========================================================================
-// 5. 停止接口（RUNNING/PAUSE → STOP）
-// 功能：停止线程，不释放资源
-// ==========================================================================
-static int capture_srv_stop(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv || srv->base.state == SRV_STATE_STOP) return 0;
-
-    // 停止线程
-    srv->is_running = false;
+    // 1. 停止工作线程（最优先，防止线程继续访问资源）
+    srv->thread_running = false;
+    srv->is_paused = true;
     if (srv->work_thread > 0) {
         pthread_join(srv->work_thread, NULL);
+        LOG_I(MODULE_TAG " 工作线程已安全退出");
         srv->work_thread = 0;
     }
 
-    // 状态切换 + 【新总线适配】发布停止事件
-    srv->base.state = SRV_STATE_STOP;
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAP_STOP, CAP_SRV_NAME);
-    LOG_I("capture srv stopped");
-
-    return 0;
-}
-
-// ==========================================================================
-// 6. 销毁接口（STOP → IDLE）
-// 功能：释放所有资源，成对释放
-// ==========================================================================
-static int capture_srv_deinit(void *self)
-{
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv) return -1;
-
-    // 确保已停止
-    capture_srv_stop(self);
-
-    // 【新总线适配】取消事件订阅：名称传参
-    if (srv->event_sub_id >= 0) {
-        event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->event_sub_id);
-        srv->event_sub_id = -1;
+    // 2. 取消系统事件订阅
+    if (srv->evt_sub_id >= 0) {
+        event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->evt_sub_id);
+        srv->evt_sub_id = -1;
+        LOG_I(MODULE_TAG " 事件订阅已取消");
     }
 
-    // 状态重置
-    srv->base.state = SRV_STATE_IDLE;
-    LOG_I("capture srv deinit success");
+    // 3. 销毁帧链路（服务初始化创建）
+    if (srv->frame_link) {
+        frame_link_deinit(srv->frame_link);
+        srv->frame_link = NULL;
+        LOG_I(MODULE_TAG " 帧链路已销毁");
+    }
 
-    return 0;
+    // 4. 销毁自主创建的 video 数据总线（核心生产者责任）
+    data_bus_deinit(VIDEO_DATA_BUS_NAME);
+    LOG_I(MODULE_TAG " video 数据总线已销毁");
+
+    // 5. 销毁线程互斥锁
+    pthread_mutex_destroy(&srv->lock);
+    LOG_I(MODULE_TAG " 线程锁已销毁");
+
+    // 6. 发布服务停止事件
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
+    LOG_I(MODULE_TAG " 所有资源释放完成，服务已安全退出");
 }
 
 // ==========================================================================
-// 7. 事件处理接口（处理全局控制命令）
+// 事件总线回调：响应系统指令 + 【关键】系统错误/关机时自动释放资源
 // ==========================================================================
-static void capture_srv_event_handle(void *self, uint32_t event_id, void *data)
+static void _capture_event_cb(const event_t *event, void *user_data)
 {
-    capture_srv_t *srv = (capture_srv_t *)self;
-    if (!srv) return;
+    (void)user_data;
+    capture_srv_t *srv = &s_capture;
 
-    switch (event_id) {
-        // 全局暂停
+    switch (event->type) {
+        // 系统核心就绪
+        case EVENT_TYPE_SYS_CORE_READY:
+            LOG_I(MODULE_TAG " 收到系统就绪事件，服务准备完成");
+            break;
+
+        // 系统暂停
         case EVENT_TYPE_SYS_PAUSE:
-            capture_srv_pause(self);
+            LOG_I(MODULE_TAG " 收到暂停指令");
+            srv->is_paused = true;
             break;
-        // 全局恢复
+
+        // 系统恢复
         case EVENT_TYPE_SYS_RESUME:
-            capture_srv_resume(self);
+            LOG_I(MODULE_TAG " 收到恢复指令");
+            srv->is_paused = false;
             break;
-        // 全局停止/关机
+
+        // 系统正常停止/关机 → 安全释放资源
         case EVENT_TYPE_SYS_STOP:
         case EVENT_TYPE_SYS_SHUTDOWN:
-            capture_srv_stop(self);
+            LOG_I(MODULE_TAG " 收到系统关机/停止指令，执行资源清理");
+            capture_srv_cleanup();
             break;
+
+        // 【关键】系统致命错误 → 立即强制释放所有资源，安全退出
+        case EVENT_TYPE_SYS_ERROR:
+            LOG_E(MODULE_TAG " 收到系统致命错误指令，强制清理所有资源！");
+            capture_srv_cleanup();
+            break;
+
         default:
             break;
     }
 }
 
 // ==========================================================================
-// 工作线程：核心业务逻辑（从frame_link取帧 → 发布到数据总线）
-// 严格遵守：唯一生产者，零拷贝，不修改硬件
+// 工作线程：采集核心 → 帧链路取帧 → 发布到 video 数据总线
 // ==========================================================================
-static void *capture_srv_work_thread(void *arg)
+static void *capture_work_thread(void *arg)
 {
-    capture_srv_t *srv = (capture_srv_t *)arg;
+    (void)arg;
+    capture_srv_t *srv = &s_capture;
     frame_t *frame = NULL;
-    data_bus_item_handle_t item = NULL;
+    data_bus_item_handle_t data_item = NULL;
     uint64_t current_ts;
     struct timeval tv;
 
-    LOG_I("capture work thread start");
+    LOG_I(MODULE_TAG " 工作线程启动，开始采集视频帧");
 
-    while (srv->is_running) {
-        // 暂停状态：空循环
-        if (srv->base.state == SRV_STATE_PAUSE) {
-            usleep(10000);
+    while (srv->thread_running) {
+        // 暂停状态：低功耗等待
+        if (srv->is_paused) {
+            usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // 1. 从frame_link非阻塞取帧
-        int ret = frame_link_dequeue_frame(srv->frame_link, &frame);
-        if (ret != 0 || !frame) {
-            usleep(CAP_FRAME_QUEUE_WAIT);
+        // 1. 从帧链路非阻塞获取一帧
+        if (frame_link_dequeue_frame(srv->frame_link, &frame) != 0 || !frame) {
+            usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // 2. 【新总线适配】数据总线申请内存：名称传参
-        size_t frame_size = frame->width * frame->height * 3; // RGB888
-        ret = data_bus_alloc(SYS_DATA_BUS_NAME, DATA_TYPE_VIDEO_FRAME_RGB,
-                             frame_size, CAP_SRV_NAME, &item);
-        if (ret != 0 || !item) {
-            frame_link_release_frame(srv->frame_link, frame);
-            continue;
+        // 2. 计算RGB帧大小
+        size_t frame_size = frame->width * frame->height * 3;
+
+        // 3. 数据总线申请内存
+        if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
+                           DATA_TYPE_VIDEO_FRAME_RGB,
+                           frame_size,
+                           MODULE_NAME,
+                           &data_item) == 0)
+        {
+            // 4. 拷贝帧数据
+            void *w_buf = data_bus_get_writable_ptr(data_item);
+            memcpy(w_buf, frame->data, frame_size);
+
+            // 5. 发布数据 + 释放引用
+            data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
+            data_bus_release(data_item);
+
+            // 6. 发布帧就绪事件（通知人脸检测等模块）
+            event_bus_publish_simple(SYS_EVENT_BUS_NAME,
+                                     EVENT_TYPE_CAPTURE_FRAME_READY,
+                                     MODULE_NAME);
         }
 
-        // 3. 拷贝帧数据（生产者唯一写入）
-        void *w_ptr = data_bus_get_writable_ptr(item);
-        memcpy(w_ptr, frame->data, frame_size);
-
-        // 4. 【新总线适配】发布数据到总线
-        data_bus_publish(SYS_DATA_BUS_NAME, item);
-        data_bus_release(item);  // 释放引用
-
-        // 5. 归还帧到内存池
+        // 7. 归还帧到内存池
         frame_link_release_frame(srv->frame_link, frame);
         srv->frame_count++;
 
-        // 6. 【新总线适配】发布帧就绪事件
-        event_bus_publish_simple(SYS_EVENT_BUS_NAME,
-                                 EVENT_TYPE_CAP_FRAME_READY, CAP_SRV_NAME);
-
-        // 7. FPS定时上报
+        // 8. FPS定时上报
         gettimeofday(&tv, NULL);
         current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        if (current_ts - srv->last_report_ts >= CAP_FPS_REPORT_INTERVAL) {
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME,
-                                     EVENT_TYPE_CAP_FPS_REPORT, CAP_SRV_NAME);
-            srv->last_report_ts = current_ts;
+        if (current_ts - srv->last_fps_ts >= CAP_FPS_INTERVAL_MS) {
+            srv->last_fps_ts = current_ts;
+            LOG_D(MODULE_TAG " 采集FPS: %llu", srv->frame_count);
+            srv->frame_count = 0;
         }
     }
 
-    LOG_I("capture work thread exit");
+    LOG_I(MODULE_TAG " 工作线程退出");
     return NULL;
 }
+
+// ==========================================================================
+// 服务初始化（自动调用）
+// ==========================================================================
+static int capture_srv_init(void)
+{
+    capture_srv_t *srv = &s_capture;
+    memset(srv, 0, sizeof(capture_srv_t));
+
+    // 1. 初始化线程锁
+    pthread_mutex_init(&srv->lock, NULL);
+    srv->evt_sub_id = -1;
+    srv->format = FRAME_FMT_RGB888;
+
+    // 2. 加载全局视频配置
+    srv->width  = FRAME_CAPTURE_WIDTH;
+    srv->height = FRAME_CAPTURE_HEIGHT;
+    srv->fps    = FRAME_CAPTURE_FPS;
+
+    // 3. 初始化帧链路（内存池+队列）
+    frame_link_config_t fl_cfg = {
+        .max_frame_size = srv->width * srv->height * 3,
+        .pool_capacity = FRAME_POOL_SIZE,
+        .queue_capacity = FRAME_QUEUE_SIZE
+    };
+    if (frame_link_init(&fl_cfg, &srv->frame_link) != 0) {
+        LOG_E(MODULE_TAG " 帧链路初始化失败");
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
+    }
+
+    // 4. 【核心】初始化自主创建的 video 数据总线
+    data_bus_config_t bus_cfg = {
+        .max_items = 8,
+        .max_item_size = srv->width * srv->height * 3,
+        .max_subscribers = 8,
+        .name = VIDEO_DATA_BUS_NAME
+    };
+    if (data_bus_init(&bus_cfg) != 0) {
+        LOG_E(MODULE_TAG " video数据总线初始化失败");
+        frame_link_deinit(srv->frame_link);
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
+    }
+
+    // 5. 订阅系统事件
+    event_subscriber_t evt_sub = {
+        .event_type = EVENT_TYPE_INVALID,
+        .callback = _capture_event_cb,
+        .user_data = srv
+    };
+    srv->evt_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &evt_sub);
+    if (srv->evt_sub_id < 0) {
+        LOG_E(MODULE_TAG " 订阅事件总线失败");
+        data_bus_deinit(VIDEO_DATA_BUS_NAME);
+        frame_link_deinit(srv->frame_link);
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
+    }
+
+    LOG_I(MODULE_TAG " 服务初始化完成 [%ux%u@%u FPS]",
+          srv->width, srv->height, srv->fps);
+    return 0;
+}
+
+// ==========================================================================
+// 服务启动（自动调用）
+// ==========================================================================
+static int capture_srv_start(void)
+{
+    capture_srv_t *srv = &s_capture;
+
+    // 1. 启动工作线程
+    srv->thread_running = true;
+    srv->is_paused = false;
+    if (pthread_create(&srv->work_thread, NULL, capture_work_thread, NULL) != 0) {
+        LOG_E(MODULE_TAG " 创建工作线程失败");
+        srv->thread_running = false;
+        return -1;
+    }
+
+    // 2. 发布服务状态事件
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
+
+    LOG_I(MODULE_TAG " 服务启动成功，开始发布视频帧");
+    return 0;
+}
+
+// ==========================================================================
+// 内核式自动初始化 + 启动（main自动调用）
+// ==========================================================================
+#include "initcall.h"
+static int _capture_auto_init(void)
+{
+    // 1. 初始化服务
+    if (capture_srv_init() != 0) {
+        return -1;
+    }
+
+    // 2. 自动启动服务
+    if (capture_srv_start() != 0) {
+        capture_srv_cleanup();
+        return -1;
+    }
+
+    LOG_I(MODULE_TAG " 自动加载并启动完成");
+    return 0;
+}
+// 注册到系统初始化段
+MODULE_INIT(_capture_auto_init);
