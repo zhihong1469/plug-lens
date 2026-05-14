@@ -27,7 +27,6 @@
 // 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
 // ==================================================================================
 #define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
-#define SYS_DATA_BUS_NAME     "sys_data"     // 系统数据总线名称
 
 // ==================================================================================
 // 全局上下文：仅保留系统底层资源，无任何业务变量 + 无总线句柄（已删除）
@@ -185,19 +184,6 @@ static int _main_init_buses(void)
     }
     LOG_I("Main: Event Bus[%s] init success", SYS_EVENT_BUS_NAME);
 
-    LOG_I("Main: Initializing Data Bus[%s]...", SYS_DATA_BUS_NAME);
-    data_bus_config_t data_bus_cfg = {0};
-    data_bus_cfg.name = SYS_DATA_BUS_NAME;
-    data_bus_cfg.max_items = CONFIG_DATA_BUS_MAX_FRAMES;
-    data_bus_cfg.max_item_size = 2 * 1024 * 1024;
-    data_bus_cfg.max_subscribers = 16;
-    ret = data_bus_init(&data_bus_cfg);
-    if (ret != 0) {
-        LOG_E("Main: Failed to init Data Bus");
-        return -1;
-    }
-    LOG_I("Main: Data Bus[%s] init success", SYS_DATA_BUS_NAME);
-
     return 0;
 }
 
@@ -237,7 +223,7 @@ int main(int argc, char **argv)
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();
 
-    // 3. 核心双总线初始化
+    // 3. 核心总线初始化
     if (_main_init_buses() != 0) goto error_exit;
 
     // 【新增】V4.0强制：双总线初始化完成 → 发布核心就绪事件（依赖注入触发）

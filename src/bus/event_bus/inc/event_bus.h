@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
-
+#include "vision_ai_config.h"
 // ==========================================================================
 // 【Event Bus 核心设计规则】
 // 1. 纯异步发布-订阅模式：只传递事件通知，不传输大数据（大数据走数据总线）
@@ -39,32 +39,7 @@ typedef enum {
     EVENT_PRIORITY_MAX
 } event_priority_t;
 
-// ==========================================================================
-// 【全局通用事件类型】（0x0000-0x0FFF）
-// 所有服务都需要订阅的系统级控制事件，仅此一处定义
-// 业务模块私有事件请在各自头文件中定义，禁止修改此文件！
-// ==========================================================================
-typedef enum {
-    EVENT_TYPE_INVALID = 0,       // 无效事件
 
-    // 系统全局控制事件（所有服务必须订阅）
-    EVENT_TYPE_SYS_BASE = 0x0001,
-    EVENT_TYPE_SYS_CORE_READY,    // 双总线初始化完成（核心依赖注入事件）
-    EVENT_TYPE_SYS_PAUSE,         // 全局暂停
-    EVENT_TYPE_SYS_RESUME,        // 全局恢复
-    EVENT_TYPE_SYS_STOP,          // 全局停止
-    EVENT_TYPE_SYS_SHUTDOWN,      // 系统关机
-    EVENT_TYPE_SYS_ERROR,         // 系统错误
-
-    // 通用模块状态事件（所有服务都可以发布）
-    EVENT_TYPE_MOD_STATE_CHANGED, // 模块状态变更
-    EVENT_TYPE_MOD_READY,         // 模块就绪
-    EVENT_TYPE_MOD_RUNNING,       // 模块运行中
-    EVENT_TYPE_MOD_ERROR,         // 模块错误
-    EVENT_TYPE_MOD_STOPPED,       // 模块已停止
-
-    EVENT_TYPE_SYS_MAX = 0x0FFF   // 系统事件上限
-} event_type_t;
 
 // ==========================================================================
 // 事件核心结构体
