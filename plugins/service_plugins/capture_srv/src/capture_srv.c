@@ -146,7 +146,7 @@ static void capture_srv_cleanup(void)
 }
 
 // ==========================================================================
-// 工作线程：适配新版FrameLink接口（传名称，不传句柄）
+// 工作线程：适配新版FrameLink+DataBus架构（零拷贝传递帧指针）
 // ==========================================================================
 static void *capture_work_thread(void *arg)
 {
@@ -168,50 +168,62 @@ static void *capture_work_thread(void *arg)
             continue;
         }
 
-        // 1. 获取空闲帧（适配新版：传帧链路名称）
+        // 1. 从FrameLink内存池获取空闲帧
         if (frame_link_get_free_frame(FRAME_LINK_NAME, &frame) != 0) {
             usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // 2. 摄像头硬件采集（固定30fps，不修改）
+        // 2. 硬件采集一帧图像
         if (camera_get_frame(srv->cam, &cam_buf, &cam_len) != 0) {
             frame_link_return_free_frame(FRAME_LINK_NAME, frame);
             usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // 3. 填充帧标准信息（固定640x360 YUYV）
+        // 3. 填充帧标准信息
         memcpy(frame->data, cam_buf, cam_len);
         frame->width  = srv->width;
         frame->height = srv->height;
         frame->format = FRAME_FMT_YUYV;
         frame->index  = srv->frame_count++;
 
-        // ====================== 核心：软件降频逻辑（仅AI队列生效） ======================
+        // ====================== AI软件降频过滤 ======================
         srv->downsample_cnt++;
-        bool send_to_ai = false;
-        // 每 N 帧保留1帧给AI，其余直接释放帧
+        bool send_to_bus = false;
         if (srv->downsample_cnt >= FPS_DOWNSAMPLE_STEP) {
-            send_to_ai = true;
-            srv->downsample_cnt = 0;  // 重置计数器
-            // 4. 帧入队FrameLink（适配新版：传名称）
+            send_to_bus = true;
+            srv->downsample_cnt = 0;
+            // 帧入队FrameLink（供内部链路使用）
             frame_link_enqueue_frame(FRAME_LINK_NAME, frame);
-        } else {
-            // 非目标帧：直接归还内存池（适配新版：传名称）
+        } else 
+        {
+            // 非目标帧：直接归还内存池，不发布
             frame_link_return_free_frame(FRAME_LINK_NAME, frame);
+            // FPS统计
+            gettimeofday(&tv, NULL);
+            current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+            if (current_ts - srv->last_fps_ts >= CAP_FPS_INTERVAL_MS) {
+                srv->last_fps_ts = current_ts;
+                LOG_D(MODULE_TAG " 采集FPS: %llu | AI降频FPS: %u", srv->frame_count, AI_TARGET_FPS);
+                srv->frame_count = 0;
+            }
+            continue;
         }
 
-        // ====================== 数据总线：保持30fps全量发布（给LCD/推流） ======================
-        size_t frame_size = srv->width * srv->height * 2; // YUYV=2字节/像素
+        // ====================== 核心修复：DataBus零拷贝发布帧指针 ======================
+        // 分配总线项：存储frame_t*指针，不拷贝图像数据
         if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
                            DATA_TYPE_VIDEO_FRAME,
-                           frame_size,
+                           sizeof(frame_t*),  // 只存指针，零拷贝
                            MODULE_NAME,
                            &data_item) == 0)
         {
-            void *w_buf = data_bus_get_writable_ptr(data_item);
-            memcpy(w_buf, frame->data, frame_size);
+            // 写入帧指针（关键：传递地址，不传递裸数据）
+            frame_t **bus_ptr = (frame_t **)data_bus_get_writable_ptr(data_item);
+            *bus_ptr = frame;
+
+            // 发布总线数据
             data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
             data_bus_release(data_item);
             event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_FRAME_READY, MODULE_NAME);
@@ -226,7 +238,6 @@ static void *capture_work_thread(void *arg)
             srv->frame_count = 0;
         }
     }
-
     LOG_I(MODULE_TAG " 工作线程退出");
     return NULL;
 }
