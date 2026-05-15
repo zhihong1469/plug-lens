@@ -1,5 +1,6 @@
 # ==========================================================================
-# Makefile.build：通用编译规则（支持C/C++混合）【修复版】
+# Makefile.build：通用编译规则（支持C/C++混合）【修复版 - 优雅解决initcall段丢失】
+# 核心修复：仅对 libplug.a 开启 --whole-archive，保留initcall自定义段，无重复定义
 # ==========================================================================
 
 # 1. 接收传入的参数
@@ -27,6 +28,8 @@ CFLAGS   += $(INC_FLAGS)
 CFLAGS   += $(SYSROOT_CFLAGS) # 自动带上系统头文件路径
 CFLAGS   += -Wall -O0 -g -MMD -MP # 默认开启警告、优化、调试信息、生成依赖 -O2
 CXXFLAGS += $(INC_FLAGS) $(SYSROOT_CFLAGS) -Wall -O0 -g -MMD -MP -std=c++11
+# 链接自定义脚本（仅可执行文件使用，静态库打包自动忽略）
+LDFLAGS := -T $(TOPDIR)/custom_sections.lds $(LDFLAGS)
 
 # 5. 最终目标规则
 ifdef TARGET_NAME
@@ -34,28 +37,37 @@ TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
 
 all: $(TARGET)
 
-# 链接规则（用g++链接，因为有C++库）
-$(TARGET): $(OBJS)
-	$(info OBJS = $(OBJS))
-	@echo "Linking $@"
+# 依赖规则：可执行文件依赖静态库生成，静态库仅依赖目标文件
 ifeq ($(TARGET_TYPE), LIB)
 $(TARGET): $(OBJS)
 else
 $(TARGET): $(OBJS) $(OUTPUTDIR)/libcom.a $(OUTPUTDIR)/libplug.a
 endif
-	$(info OBJS = $(OBJS))
-	@echo "Linking $@"
+
+# 【核心优雅修复】可执行文件链接：
+# 1. 仅对 libplug.a 开启 --whole-archive，强制保留 MODULE_INIT 自定义段
+# 2. libcom.a 正常链接，避免重复定义
+# 3. 完全兼容原有 LDFLAGS 库依赖，无侵入、无冗余
+$(TARGET): $(OBJS)
+	$(info OBJS = $(OBJS))  # 保留：核心调试信息
+	@echo "Linking $@"       # 保留：链接提示
 ifeq ($(TARGET_TYPE), LIB)
+	# 静态库打包：仅使用 ar 命令，无链接操作（修复语法错误）
 	$(AR) rcs $@ $(OBJS)
 else
-	$(LINKER) $(OBJS) -o $@ $(LDFLAGS)
+	# 可执行文件链接：专属处理 initcall 段
+	$(LINKER) $(OBJS) -o $@ \
+	-Wl,--whole-archive $(OUTPUTDIR)/libplug.a -Wl,--no-whole-archive \
+	$(LDFLAGS)
 endif
 	@echo "Built: $@"
+
 else
+# 无目标时仅编译目标文件
 all: $(OBJS)
 endif
 
-# 6.1 C 文件编译
+# 6.1 C 文件编译（带 compile_commands.json 生成，支持IDE索引）
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	@echo "Compiling C   : $<"
@@ -67,7 +79,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
 	@echo '  },' >> $(COMPILE_COMMANDS)
 
-# 6.2 C++ 文件编译
+# 6.2 C++ 文件编译（带 compile_commands.json 生成，支持IDE索引）
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
 	@echo "Compiling C++ : $<"
@@ -79,7 +91,7 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@echo '    "file": "$(abspath $<)"' >> $(COMPILE_COMMANDS)
 	@echo '  },' >> $(COMPILE_COMMANDS)
 
-# 7. 包含依赖
+# 7. 包含依赖文件，支持头文件修改自动重编译
 -include $(DEPS)
 
 .PHONY: all
