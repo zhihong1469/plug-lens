@@ -341,6 +341,10 @@ static void *face_work_thread(void *arg)
         {
             LOG_I(MODULE_TAG " 帧[%u] 检测到 %d 张人脸", proc_frame->index, srv->face_num);
         }
+        else 
+        {   
+            LOG_I(MODULE_TAG " 帧[%u] 未检测到人脸:%d", proc_frame->index, srv->face_num );
+        }
 
         // ====================== 帧生命周期管理 ======================
         // 取消引用：FrameLink自动回收帧内存
