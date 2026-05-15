@@ -14,7 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <pthread.h>
-
+#include "vision_ai_config.h"
 // ==========================================================================
 // 【Data Bus 核心规则】
 // 1. 零拷贝：只传数据指针，不复制视频/AI大数据
@@ -31,26 +31,6 @@ typedef struct data_bus_item_t* data_bus_item_handle_t;
 // 订阅句柄 → 代表一个订阅者（LCD/AI模块）
 typedef struct data_bus_subscription_t* data_bus_subscription_handle_t;
 
-// ==========================================================================
-// 2. 数据类型枚举 → 用来区分不同数据（你的核心：RGB视频 + AI结果）
-// ==========================================================================
-typedef enum {
-    DATA_TYPE_INVALID = 0,         // 无效类型
-
-    // 视频数据
-    DATA_TYPE_VIDEO_FRAME = 0x01,  // 通用视频帧
-    DATA_TYPE_VIDEO_FRAME_YUV420,  // YUV格式帧
-    DATA_TYPE_VIDEO_FRAME_RGB,     // 【你的核心】RGB原始帧
-
-    // AI数据
-    DATA_TYPE_AI_RESULT = 0x10,    // 【你的核心】人脸检测结果
-
-    // 音频数据（你用不到）
-    DATA_TYPE_AUDIO_FRAME = 0x20,
-    DATA_TYPE_AUDIO_PCM,
-
-    DATA_TYPE_MAX = 0xFF
-} data_type_t;
 
 // ==========================================================================
 // 4. 推模式回调函数 → 数据来了，总线主动通知消费者

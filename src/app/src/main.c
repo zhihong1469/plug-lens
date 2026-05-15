@@ -213,7 +213,7 @@ int main(int argc, char **argv)
     g_app_ctx.app_running = true;
 
     // 1. 日志初始化
-    log_init(LOG_LEVEL_INFO);
+    log_init(LOG_LEVEL_DEBUG);
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
