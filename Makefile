@@ -40,6 +40,31 @@ export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 # 顺序：common（公共库）→ plugins（插件）→ src（核心框架）
 SUBDIRS := common plugins src
 
+# 【核心】全局公共头文件路径（所有模块通用：common + src核心 + 第三方库）
+# 所有子模块自动继承，无需重复定义！
+GLOBAL_INC := \
+	-I$(TOPDIR)/common/log/inc \
+	-I$(TOPDIR)/common/queue/inc \
+	-I$(TOPDIR)/common/thread/inc \
+	-I$(TOPDIR)/common/utils/inc \
+	-I$(TOPDIR)/common/plugin/inc \
+	-I$(TOPDIR)/common/pool/inc \
+	-I$(TOPDIR)/common/img_proc/inc \
+	-I$(TOPDIR)/common/initcall/inc \
+	-I$(TOPDIR)/common/configs \
+	-I$(TOPDIR)/src/base/camera/inc \
+	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/base/service/inc \
+	-I$(TOPDIR)/src/bus/event_bus/inc \
+	-I$(TOPDIR)/src/bus/data_bus/inc \
+	-I$(TOPDIR)/src/app/inc \
+	-I$(TOPDIR)/src/link/frame_link/inc \
+	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
+	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
+
+# 导出全局路径（所有子模块自动可用）
+export GLOBAL_INC
+
 # 3. 目标列表
 TARGETS := $(patsubst %, build-%, $(SUBDIRS))
 

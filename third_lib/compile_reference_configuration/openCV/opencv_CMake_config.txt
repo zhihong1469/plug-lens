@@ -145,3 +145,27 @@ OCV_OPTION(OPENCV_DISABLE_THREAD_SUPPORT "Build the library without multi-thread
 OCV_OPTION(OPENCV_SEMIHOSTING         "Build the library for semihosting target (Arm). See https://developer.arm.com/documentation/100863/latest." OFF)
 OCV_OPTION(ENABLE_PYLINT              "Add target with Pylint checks"                            (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
 OCV_OPTION(ENABLE_FLAKE8              "Add target with Python flake8 checker"                    (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
+
+
+
+# 最小化、纯电脑端、仅用于视频推流调试的 OpenCV
+cmake \
+-D CMAKE_C_COMPILER=/usr/bin/gcc \
+-D CMAKE_CXX_COMPILER=/usr/bin/g++ \
+-D CMAKE_CROSSCOMPILING=OFF \
+-D CMAKE_BUILD_TYPE=Release \
+-D CMAKE_INSTALL_PREFIX=../../third_lib/opencv_local \
+-D WITH_GTK=ON \
+-D WITH_FFMPEG=ON \
+-D WITH_V4L=ON \
+-D BUILD_opencv_python3=ON \
+-D PYTHON3_EXECUTABLE=/usr/bin/python3.12 \
+-D PYTHON3_INCLUDE_DIR=/usr/include/python3.12 \
+-D PYTHON3_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.12.so \
+-D PYTHON3_NUMPY_INCLUDE_DIRS=/usr/lib/python3/dist-packages/numpy/core/include \
+-D BUILD_ADE=OFF \
+-D BUILD_opencv_gapi=OFF \
+-D BUILD_TESTS=OFF \
+-D BUILD_PERF_TESTS=OFF \
+-D BUILD_EXAMPLES=OFF \
+..

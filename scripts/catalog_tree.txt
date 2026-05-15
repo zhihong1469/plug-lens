@@ -48,11 +48,9 @@
 │           └── utils.c
 ├── documents
 │   ├── cur_issue.assets
-│   ├── design
-│   └── flowchart.js
+│   └── my_design_process
 ├── output
-│   ├── compile_commands.json
-│   └── vision_ai_app
+│   └── compile_commands.json
 ├── plugins
 │   ├── Makefile
 │   ├── app_plugins
@@ -60,16 +58,15 @@
 │   │   │   └── demo_app.h
 │   │   └── src
 │   │       └── demo_app.c
-│   ├── hal_plugins
+│   ├── device_plugins
 │   │   ├── ai_model_mnn
 │   │   │   └── src
 │   │   │       └── ai_model_mnn.cpp
-│   │   └── video_usb
+│   │   └── camera_usb
 │   │       ├── inc
-│   │       │   └── video_usb.h
+│   │       │   └── camera_usb.h
 │   │       └── src
-│   │           ├── video_hal.c
-│   │           └── video_usb.c
+│   │           └── camera_usb.c
 │   └── service_plugins
 │       ├── capture_srv
 │       │   └── src
@@ -80,6 +77,7 @@
 └── src
     ├── Makefile
     ├── app
+    │   ├── app.c
     │   └── main.c
     ├── bus
     │   ├── data_bus
@@ -92,6 +90,15 @@
     │       │   └── event_bus.h
     │       └── src
     │           └── event_bus.c
+    ├── device
+    │   ├── ai_model
+    │   │   └── inc
+    │   │       └── ai_model_mnn.hpp
+    │   └── camera
+    │       ├── inc
+    │       │   └── camera.h
+    │       └── src
+    │           └── camera.c
     ├── fsm
     │   ├── global_fsm
     │   │   ├── inc
@@ -103,13 +110,6 @@
     │       │   └── module_fsm.h
     │       └── src
     │           └── module_fsm.c
-    ├── hal
-    │   ├── ai_model
-    │   │   └── inc
-    │   │       └── ai_model_mnn.hpp
-    │   └── video
-    │       └── inc
-    │           └── video_hal.h
     ├── link
     │   ├── ai_model_link
     │   │   ├── inc
@@ -132,4 +132,4 @@
             └── inc
                 └── face_detect_srv.h
 
-80 directories, 49 files
+81 directories, 48 files

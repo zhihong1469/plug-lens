@@ -1,328 +1,344 @@
-#include "capture_srv.h"
-#include "frame_link.h"
-#include "module_fsm.h"
-#include "event_bus.h"
-#include "data_bus.h"
+/* SPDX-License-Identifier: MIT */
 #include "log.h"
+#include "data_bus.h"
+#include "event_bus.h"
+#include "frame_link.h"
+#include "vision_ai_config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <time.h>
-#include "main.h"
+#include <unistd.h>
+#include <sys/time.h>
 
 // ==========================================================================
-// 【核心】采集服务专属：状态迁移规则表
+// 全局宏定义（文件私有化，标注来源，方便代码巡查）
+// 来源：common\configs\vision_ai_config.h
 // ==========================================================================
-static module_state_trans_t g_capture_srv_trans_table[] = {
-    // 初始化流程
-    {MODULE_STATE_IDLE,           MODULE_EVENT_INIT,      MODULE_STATE_INITIALIZING},
-    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_OK,   MODULE_STATE_READY},
-    {MODULE_STATE_INITIALIZING,   MODULE_EVENT_INIT_FAIL, MODULE_STATE_ERROR},
-    
-    // 启动流程
-    {MODULE_STATE_READY,          MODULE_EVENT_START,     MODULE_STATE_STARTING},
-    {MODULE_STATE_STARTING,       MODULE_EVENT_START_OK,  MODULE_STATE_RUNNING},
-    {MODULE_STATE_STARTING,       MODULE_EVENT_START_FAIL,MODULE_STATE_ERROR},
-    
-    // 停止流程
-    {MODULE_STATE_RUNNING,        MODULE_EVENT_STOP,      MODULE_STATE_STOPPING},
-    {MODULE_STATE_STOPPING,       MODULE_EVENT_STOP_OK,   MODULE_STATE_READY},
-    
-    // 异常流程
-    {MODULE_STATE_RUNNING,        MODULE_EVENT_ERROR,     MODULE_STATE_ERROR},
-    {MODULE_STATE_ERROR,          MODULE_EVENT_ERROR_CLEAR, MODULE_STATE_IDLE},
-    
-    // 销毁流程
-    {MODULE_STATE_IDLE,           MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_READY,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_ERROR,          MODULE_EVENT_DEINIT,    MODULE_STATE_DEINITIALIZING},
-    {MODULE_STATE_DEINITIALIZING, MODULE_EVENT_DEINIT_OK, MODULE_STATE_DEINIT},
-};
-static const uint32_t g_capture_srv_trans_len = sizeof(g_capture_srv_trans_table) / sizeof(g_capture_srv_trans_table[0]);
+#define MODULE_NAME           "CAPTURE"
+#define MODULE_TAG            "[CAPTURE]"
+
+// 系统总线名称（全局约定）
+#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线
+#define VIDEO_DATA_BUS_NAME   "video"        // 采集服务自主创建的数据总线
+
+// 采集配置（来源：vision_ai_config.h）
+#define FRAME_CAPTURE_FPS         CONFIG_CAPTURE_FPS
+#define FRAME_CAPTURE_HEIGHT      CONFIG_CAPTURE_HEIGHT
+#define FRAME_CAPTURE_WIDTH       CONFIG_CAPTURE_WIDTH
+
+// 服务私有配置
+#define CAP_FRAME_WAIT_US         20000   // 20ms 取帧等待
+#define CAP_FPS_INTERVAL_MS       1000    // FPS上报间隔
+#define FRAME_POOL_SIZE           10      // 帧内存池大小
+#define FRAME_QUEUE_SIZE          4       // 帧队列大小
 
 // ==========================================================================
-// 内部上下文结构体（完美封装）
+// 采集服务 私有结构体（静态单例，外部完全不可见）
 // ==========================================================================
 typedef struct {
-    // 配置与回调
-    capture_srv_config_t config;
-    capture_srv_callbacks_t callbacks;
-    
-    // 下层依赖
-    frame_link_handle_t link_handle;
-    module_fsm_handle_t fsm_handle;
-    
-    // 总线句柄（缓存）
-    event_bus_handle_t evt_bus;
-    data_bus_handle_t data_bus;
-    
-    // 运行时状态
-    bool is_created;
-    pthread_mutex_t lock;
-} capture_srv_ctx_t;
+    // 硬件帧链路（服务初始化创建）
+    frame_link_handle_t     frame_link;
+
+    // 工作线程
+    pthread_t               work_thread;
+    bool                    thread_running;
+    bool                    is_paused;
+    pthread_mutex_t         lock;
+
+    // 视频配置
+    uint32_t                width;
+    uint32_t                height;
+    uint32_t                fps;
+    frame_format_t          format;
+
+    // 统计信息
+    uint64_t                frame_count;
+    uint64_t                last_fps_ts;
+
+    // 事件订阅ID（服务订阅创建）
+    int                     evt_sub_id;
+} capture_srv_t;
+
+// 静态单例（服务自治，无对外暴露）
+static capture_srv_t s_capture;
 
 // ==========================================================================
-// 内部辅助函数声明
+// 内部工具函数：线程安全加锁/解锁
 // ==========================================================================
-static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data);
-static void _capture_srv_fsm_state_relay(const char *module_name,
-                                          module_state_t old_state,
-                                          module_state_t new_state,
-                                          void *user_data);
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data);
-
-// ==========================================================================
-// 对外API实现
-// ==========================================================================
-
-int capture_srv_create(const capture_srv_config_t *config,
-                       capture_srv_handle_t *out_handle)
-{
-    if (config == NULL || out_handle == NULL) {
-        return -1;
-    }
-
-    // 1. 分配并清零上下文
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)malloc(sizeof(capture_srv_ctx_t));
-    if (ctx == NULL) {
-        return -1;
-    }
-    memset(ctx, 0, sizeof(capture_srv_ctx_t));
-
-    // 2. 拷贝配置与回调
-    memcpy(&ctx->config, config, sizeof(capture_srv_config_t));
-    memcpy(&ctx->callbacks, &config->callbacks, sizeof(capture_srv_callbacks_t));
-    ctx->evt_bus = config->evt_bus;
-    ctx->data_bus = config->data_bus;
-    pthread_mutex_init(&ctx->lock, NULL);
-
-    // 3. 初始化 Link层
-    LOG_I("Capture Srv: Initializing Link layer...");
-    video_err_t err = frame_link_init(&ctx->config.link_cfg, g_app_ctx.exit_pipe[0], &ctx->link_handle);
-    if (err != VIDEO_OK) {
-        LOG_E("Capture Srv: Failed to init link layer (err=%d)", err);
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
-        return -1;
-    }
-
-    // 4. 注册 Link层 回调
-    frame_link_register_frame_ready_cb(ctx->link_handle, _capture_srv_on_link_frame, ctx);
-
-    // 5. 初始化 Module FSM
-    LOG_I("Capture Srv: Creating Module FSM...");
-    module_fsm_config_t fsm_cfg = {0};
-    fsm_cfg.module_name = "capture_srv";
-    fsm_cfg.trans_table = g_capture_srv_trans_table;
-    fsm_cfg.trans_table_len = g_capture_srv_trans_len;
-    fsm_cfg.event_handler = _capture_srv_fsm_event_handler;
-    fsm_cfg.state_cb = _capture_srv_fsm_state_relay; // 【关键】先中继到自己
-    fsm_cfg.user_data = ctx; // 【关键】user_data 传自己的 ctx
-
-    int ret = module_fsm_create(&fsm_cfg, &ctx->fsm_handle);
-    if (ret != 0) {
-        LOG_E("Capture Srv: Failed to create Module FSM");
-        frame_link_deinit(ctx->link_handle);
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
-        return -1;
-    }
-
-    // 6. 启动初始化流程
-    ctx->is_created = true;
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT);
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_INIT_OK); // Link init 同步完成
-
-    // 7. 自动启动（如果配置了）
-    if (ctx->config.auto_start) {
-        LOG_I("Capture Srv: Auto start enabled");
-        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START);
-    }
-
-    *out_handle = (capture_srv_handle_t)ctx;
-    LOG_I("Capture Srv: Created successfully");
-    return 0;
+static inline void _capture_lock(void) {
+    pthread_mutex_lock(&s_capture.lock);
 }
 
-module_fsm_handle_t capture_srv_get_fsm(capture_srv_handle_t handle)
-{
-    if (handle == NULL) return NULL;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-    return ctx->fsm_handle;
-}
-
-int capture_srv_get_frame(capture_srv_handle_t handle,
-                          video_frame_t *frame,
-                          uint32_t timeout_ms)
-{
-    if (handle == NULL || frame == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-
-    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
-    if (state != MODULE_STATE_RUNNING) {
-        LOG_W("Capture Srv: Get frame called in state %s", module_state_to_str(state));
-        return -1;
-    }
-
-    return frame_link_get_frame(ctx->link_handle, frame, timeout_ms);
-}
-
-int capture_srv_put_frame(capture_srv_handle_t handle,
-                          const video_frame_t *frame)
-{
-    if (handle == NULL || frame == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-    return frame_link_put_frame(ctx->link_handle, frame);
-}
-
-int capture_srv_destroy(capture_srv_handle_t handle)
-{
-    if (handle == NULL) return -1;
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)handle;
-
-    pthread_mutex_lock(&ctx->lock);
-
-    if (!ctx->is_created) {
-        pthread_mutex_unlock(&ctx->lock);
-        return 0;
-    }
-
-    // 1. 投 DEINIT 事件
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT);
-
-    // 2. 停止并销毁 Link层
-    frame_link_stop(ctx->link_handle);
-    frame_link_deinit(ctx->link_handle);
-
-    // 3. 投 DEINIT_OK
-    module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_DEINIT_OK);
-
-    // 4. 销毁 FSM
-    module_fsm_destroy(ctx->fsm_handle);
-
-    ctx->is_created = false;
-    pthread_mutex_unlock(&ctx->lock);
-
-    pthread_mutex_destroy(&ctx->lock);
-    free(ctx);
-    
-    LOG_I("Capture Srv: Destroyed");
-    return 0;
+static inline void _capture_unlock(void) {
+    pthread_mutex_unlock(&s_capture.lock);
 }
 
 // ==========================================================================
-// 【核心】内部辅助函数实现
+// 【核心】服务统一清理函数：释放所有创建的资源（成对释放，无泄漏）
+// 启动了什么 → 释放什么：线程、帧链路、数据总线、锁、事件订阅
 // ==========================================================================
-
-/**
- * @brief FSM 事件处理器（在锁内调用，只做决策，不做耗时操作）
- */
-static int _capture_srv_fsm_event_handler(module_event_t event, void *user_data)
+static void capture_srv_cleanup(void)
 {
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL) return -1;
+    capture_srv_t *srv = &s_capture;
 
-    LOG_I("Capture Srv: FSM Event Handler received: %s", module_event_to_str(event));
-    
-    // 这里只做决策，耗时的硬件操作放在 _capture_srv_fsm_state_relay 里（锁外）
-    return 0; // 允许所有迁移
+    LOG_W(MODULE_TAG " 开始执行全量资源释放...");
+
+    // 1. 停止工作线程（最优先，防止线程继续访问资源）
+    srv->thread_running = false;
+    srv->is_paused = true;
+    if (srv->work_thread > 0) {
+        pthread_join(srv->work_thread, NULL);
+        LOG_I(MODULE_TAG " 工作线程已安全退出");
+        srv->work_thread = 0;
+    }
+
+    // 2. 取消系统事件订阅
+    if (srv->evt_sub_id >= 0) {
+        event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->evt_sub_id);
+        srv->evt_sub_id = -1;
+        LOG_I(MODULE_TAG " 事件订阅已取消");
+    }
+
+    // 3. 销毁帧链路（服务初始化创建）
+    if (srv->frame_link) {
+        frame_link_deinit(srv->frame_link);
+        srv->frame_link = NULL;
+        LOG_I(MODULE_TAG " 帧链路已销毁");
+    }
+
+    // 4. 销毁自主创建的 video 数据总线（核心生产者责任）
+    data_bus_deinit(VIDEO_DATA_BUS_NAME);
+    LOG_I(MODULE_TAG " video 数据总线已销毁");
+
+    // 5. 销毁线程互斥锁
+    pthread_mutex_destroy(&srv->lock);
+    LOG_I(MODULE_TAG " 线程锁已销毁");
+
+    // 6. 发布服务停止事件
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
+    LOG_I(MODULE_TAG " 所有资源释放完成，服务已安全退出");
 }
 
-/**
- * @brief 【关键】FSM 状态中继回调
- * 
- * 职责链：
- * Module FSM -> 此回调 -> 1. 执行硬件动作 (Start/Stop Link)
- *                        -> 2. 转发给上层回调 (Global FSM)
- */
-static void _capture_srv_fsm_state_relay(const char *module_name,
-                                          module_state_t old_state,
-                                          module_state_t new_state,
-                                          void *user_data)
+// ==========================================================================
+// 事件总线回调：响应系统指令 + 【关键】系统错误/关机时自动释放资源
+// ==========================================================================
+static void _capture_event_cb(const event_t *event, void *user_data)
 {
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL) return;
+    (void)user_data;
+    capture_srv_t *srv = &s_capture;
 
-    LOG_I("Capture Srv: State changed: %s -> %s", 
-          module_state_to_str(old_state), 
-          module_state_to_str(new_state));
+    switch (event->type) {
+        // 系统核心就绪
+        case EVENT_TYPE_SYS_CORE_READY:
+            LOG_I(MODULE_TAG " 收到系统就绪事件，服务准备完成");
+            break;
 
-    // 1. 执行硬件动作
-    if (new_state == MODULE_STATE_STARTING) {
-        LOG_I("Capture Srv: Starting Link layer...");
-        video_err_t err = frame_link_start(ctx->link_handle);
-        if (err == VIDEO_OK) {
-            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_OK);
-        } else {
-            module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_START_FAIL);
+        // 系统暂停
+        case EVENT_TYPE_SYS_PAUSE:
+            LOG_I(MODULE_TAG " 收到暂停指令");
+            srv->is_paused = true;
+            break;
+
+        // 系统恢复
+        case EVENT_TYPE_SYS_RESUME:
+            LOG_I(MODULE_TAG " 收到恢复指令");
+            srv->is_paused = false;
+            break;
+
+        // 系统正常停止/关机 → 安全释放资源
+        case EVENT_TYPE_SYS_STOP:
+        case EVENT_TYPE_SYS_SHUTDOWN:
+            LOG_I(MODULE_TAG " 收到系统关机/停止指令，执行资源清理");
+            capture_srv_cleanup();
+            break;
+
+        // 【关键】系统致命错误 → 立即强制释放所有资源，安全退出
+        case EVENT_TYPE_SYS_ERROR:
+            LOG_E(MODULE_TAG " 收到系统致命错误指令，强制清理所有资源！");
+            capture_srv_cleanup();
+            break;
+
+        default:
+            break;
+    }
+}
+
+// ==========================================================================
+// 工作线程：采集核心 → 帧链路取帧 → 发布到 video 数据总线
+// ==========================================================================
+static void *capture_work_thread(void *arg)
+{
+    (void)arg;
+    capture_srv_t *srv = &s_capture;
+    frame_t *frame = NULL;
+    data_bus_item_handle_t data_item = NULL;
+    uint64_t current_ts;
+    struct timeval tv;
+
+    LOG_I(MODULE_TAG " 工作线程启动，开始采集视频帧");
+
+    while (srv->thread_running) {
+        // 暂停状态：低功耗等待
+        if (srv->is_paused) {
+            usleep(CAP_FRAME_WAIT_US);
+            continue;
+        }
+
+        // 1. 从帧链路非阻塞获取一帧
+        if (frame_link_dequeue_frame(srv->frame_link, &frame) != 0 || !frame) {
+            usleep(CAP_FRAME_WAIT_US);
+            continue;
+        }
+
+        // 2. 计算RGB帧大小
+        size_t frame_size = frame->width * frame->height * 3;
+
+        // 3. 数据总线申请内存
+        if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
+                           DATA_TYPE_VIDEO_FRAME_RGB,
+                           frame_size,
+                           MODULE_NAME,
+                           &data_item) == 0)
+        {
+            // 4. 拷贝帧数据
+            void *w_buf = data_bus_get_writable_ptr(data_item);
+            memcpy(w_buf, frame->data, frame_size);
+
+            // 5. 发布数据 + 释放引用
+            data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
+            data_bus_release(data_item);
+
+            // 6. 发布帧就绪事件（通知人脸检测等模块）
+            event_bus_publish_simple(SYS_EVENT_BUS_NAME,
+                                     EVENT_TYPE_CAPTURE_FRAME_READY,
+                                     MODULE_NAME);
+        }
+
+        // 7. 归还帧到内存池
+        frame_link_release_frame(srv->frame_link, frame);
+        srv->frame_count++;
+
+        // 8. FPS定时上报
+        gettimeofday(&tv, NULL);
+        current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+        if (current_ts - srv->last_fps_ts >= CAP_FPS_INTERVAL_MS) {
+            srv->last_fps_ts = current_ts;
+            LOG_D(MODULE_TAG " 采集FPS: %llu", srv->frame_count);
+            srv->frame_count = 0;
         }
     }
-    else if (new_state == MODULE_STATE_STOPPING) {
-        LOG_I("Capture Srv: Stopping Link layer...");
-        frame_link_stop(ctx->link_handle);
-        module_fsm_post_event(ctx->fsm_handle, MODULE_EVENT_STOP_OK);
-    }
 
-    // 2. 转发给上层回调（Global FSM）
-    if (ctx->callbacks.state_change_cb != NULL) {
-        ctx->callbacks.state_change_cb(module_name, old_state, new_state, ctx->callbacks.user_data);
-    }
+    LOG_I(MODULE_TAG " 工作线程退出");
+    return NULL;
 }
 
-/**
- * @brief Link层 帧就绪回调（数据入口）
- * 
- * 【核心逻辑】
- * 1. 收到 Link 层的帧指针
- * 2. 申请 Data Bus Item
- * 3. ** memcpy 拷贝数据 ** (关键！不能直接用 Link 的指针)
- * 4. 发布 Data Bus Item
- * 5. ** 立即归还 Link 层的帧 ** (关键！否则摄像头会饿死)
- */
-static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_data)
+// ==========================================================================
+// 服务初始化（自动调用）
+// ==========================================================================
+static int capture_srv_init(void)
 {
-    capture_srv_ctx_t *ctx = (capture_srv_ctx_t*)user_data;
-    if (ctx == NULL || frame == NULL) return;
+    capture_srv_t *srv = &s_capture;
+    memset(srv, 0, sizeof(capture_srv_t));
 
-    // 非运行状态直接归还帧
-    module_state_t state = module_fsm_get_state(ctx->fsm_handle);
-    if (state != MODULE_STATE_RUNNING) {
-        frame_link_put_frame(ctx->link_handle, frame); // 【修复1】正确的Link层归还接口
-        return;
+    // 1. 初始化线程锁
+    pthread_mutex_init(&srv->lock, NULL);
+    srv->evt_sub_id = -1;
+    srv->format = FRAME_FMT_RGB888;
+
+    // 2. 加载全局视频配置
+    srv->width  = FRAME_CAPTURE_WIDTH;
+    srv->height = FRAME_CAPTURE_HEIGHT;
+    srv->fps    = FRAME_CAPTURE_FPS;
+
+    // 3. 初始化帧链路（内存池+队列）
+    frame_link_config_t fl_cfg = {
+        .max_frame_size = srv->width * srv->height * 3,
+        .pool_capacity = FRAME_POOL_SIZE,
+        .queue_capacity = FRAME_QUEUE_SIZE
+    };
+    if (frame_link_init(&fl_cfg, &srv->frame_link) != 0) {
+        LOG_E(MODULE_TAG " 帧链路初始化失败");
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
     }
 
-    // 申请Data Bus项
-    data_bus_item_handle_t item = NULL;
-    size_t data_size = frame->length;
-    
-    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
-    if (ret != 0 || item == NULL) {
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
+    // 4. 【核心】初始化自主创建的 video 数据总线
+    data_bus_config_t bus_cfg = {
+        .max_items = 8,
+        .max_item_size = srv->width * srv->height * 3,
+        .max_subscribers = 8,
+        .name = VIDEO_DATA_BUS_NAME
+    };
+    if (data_bus_init(&bus_cfg) != 0) {
+        LOG_E(MODULE_TAG " video数据总线初始化失败");
+        frame_link_deinit(srv->frame_link);
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
     }
 
-    // 拷贝数据到总线
-    void *w_ptr = data_bus_get_writable_ptr(item);
-    if (w_ptr == NULL) {
-        data_bus_release(item);
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
+    // 5. 订阅系统事件
+    event_subscriber_t evt_sub = {
+        .event_type = EVENT_TYPE_INVALID,
+        .callback = _capture_event_cb,
+        .user_data = srv
+    };
+    srv->evt_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &evt_sub);
+    if (srv->evt_sub_id < 0) {
+        LOG_E(MODULE_TAG " 订阅事件总线失败");
+        data_bus_deinit(VIDEO_DATA_BUS_NAME);
+        frame_link_deinit(srv->frame_link);
+        pthread_mutex_destroy(&srv->lock);
+        return -1;
     }
-    memcpy(w_ptr, frame->data, data_size);
 
-    // 发布数据到总线
-    ret = data_bus_publish(ctx->data_bus, item);
-    if (ret != 0) {
-        data_bus_release(item);
-        frame_link_put_frame(ctx->link_handle, frame);
-        return;
-    }
-    
-    // 释放生产者引用
-    data_bus_release(item); 
-    // 发布帧就绪事件
-    event_bus_publish_simple(ctx->evt_bus, EVENT_TYPE_CAP_FRAME_READY, "capture_srv");
-
-    // 【修复2】立即归还帧给Link层（摄像头核心！）
-    frame_link_put_frame(ctx->link_handle, frame);
+    LOG_I(MODULE_TAG " 服务初始化完成 [%ux%u@%u FPS]",
+          srv->width, srv->height, srv->fps);
+    return 0;
 }
+
+// ==========================================================================
+// 服务启动（自动调用）
+// ==========================================================================
+static int capture_srv_start(void)
+{
+    capture_srv_t *srv = &s_capture;
+
+    // 1. 启动工作线程
+    srv->thread_running = true;
+    srv->is_paused = false;
+    if (pthread_create(&srv->work_thread, NULL, capture_work_thread, NULL) != 0) {
+        LOG_E(MODULE_TAG " 创建工作线程失败");
+        srv->thread_running = false;
+        return -1;
+    }
+
+    // 2. 发布服务状态事件
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
+    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
+
+    LOG_I(MODULE_TAG " 服务启动成功，开始发布视频帧");
+    return 0;
+}
+
+// ==========================================================================
+// 内核式自动初始化 + 启动（main自动调用）
+// ==========================================================================
+#include "initcall.h"
+static int _capture_auto_init(void)
+{
+    // 1. 初始化服务
+    if (capture_srv_init() != 0) {
+        return -1;
+    }
+
+    // 2. 自动启动服务
+    if (capture_srv_start() != 0) {
+        capture_srv_cleanup();
+        return -1;
+    }
+
+    LOG_I(MODULE_TAG " 自动加载并启动完成");
+    return 0;
+}
+// 注册到系统初始化段
+MODULE_INIT(_capture_auto_init);
