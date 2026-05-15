@@ -11,7 +11,8 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 /* USB 摄像头最大缓冲区数 */
-#define CAMERA_USB_MAX_BUF      4
+#include "vision_ai_config.h"
+#define CAM_USB_MAX_BUF             CONFIG_CAPTURE_BUF_COUNT      // 摄像头最大缓冲区数量
 
 /**
  * @brief USB 摄像头私有子类（完全封装，对外不可见）
@@ -24,8 +25,8 @@ typedef struct {
     uint32_t           pixel_fmt;
     camera_capability_t cap;     /* 设备能力（全自检结果） */
 
-    void               *buf[CAMERA_USB_MAX_BUF];
-    size_t              buf_len[CAMERA_USB_MAX_BUF];
+    void               *buf[CAM_USB_MAX_BUF];
+    size_t              buf_len[CAM_USB_MAX_BUF];
     int                 buf_cnt;
 } camera_usb_t;
 
@@ -103,7 +104,7 @@ static int camera_usb_init(camera_base_t *base_me)
     me->base.fps = fps;
 
     // ====================== 【自检 7】申请缓冲区 ======================
-    me->buf_cnt = CAMERA_USB_MAX_BUF;
+    me->buf_cnt = CAM_USB_MAX_BUF;
     ret = v4l2_reqbufs(me->fd, &me->buf_cnt);
     if (ret < 0) {
         perror("[USB Camera] reqbufs failed");
