@@ -3,13 +3,14 @@
   ******************************************************************************
   * @file           face_detect_srv.c
   * @brief          人脸检测服务模块
-  * @details        【架构规范版】
+  * @details        【架构规范版 - 适配最新FrameLink】
   *                 1. 数据总线回调：仅帧引用+入队，零耗时操作
   *                 2. 严格遵循FrameLink数据链路层消费者接口规范
   *                 3. 工作线程：独立处理AI耗时推理，与总线完全解耦
-  *                 4. 引用计数自动管理，多服务安全共享视频帧
+  *                 4. 原子引用计数自动管理，多服务安全共享视频帧
   *                 5. 层级边界：采集服务→DataBus→FrameLink→AI服务 清晰解耦
   *                 6. AI模型：自动适配640x360原始帧，内部缩放至320x240最优分辨率
+  *                 7. 不透明句柄设计：禁止直接访问帧内部成员
   * @author         Luo
   * @date           2026
   ******************************************************************************
@@ -26,9 +27,6 @@
 #define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME   /**< 系统事件总线名称 */
 #define VIDEO_DATA_BUS            "video"              /**< 视频数据总线名称 */
 #define FRAME_LINK_NAME           "main_cam"           /**< 帧链路名称（与采集服务一致） */
-
-/* 数据类型定义（全局枚举） */
-#define DATA_TYPE_VIDEO_FRAME     DATA_TYPE_VIDEO_FRAME
 
 /* AI模型配置（全局训练最优参数） */
 #define AI_MODEL_PATH             CONFIG_AI_MODEL_PATH
@@ -69,6 +67,7 @@
 /**
  * @brief 人脸检测服务控制块（单例模式）
  * @note  管理服务所有资源、线程、队列、总线句柄
+ * @note  适配FrameLink不透明句柄：frame_handle_t
  */
 typedef struct {
     ai_model_handle_t            *ai_model;           /**< AI模型句柄 */
@@ -82,7 +81,7 @@ typedef struct {
     pthread_mutex_t               lock;                /**< 线程安全互斥锁 */
 
     /* AI内部缓冲队列：解耦数据总线回调与耗时推理 */
-    frame_t*                      frame_queue[AI_PROCESS_QUEUE_SIZE];
+    frame_handle_t                frame_queue[AI_PROCESS_QUEUE_SIZE];
     uint32_t                      queue_front;         /**< 队列头指针 */
     uint32_t                      queue_rear;          /**< 队列尾指针 */
     uint32_t                      queue_count;         /**< 队列元素计数 */
@@ -101,8 +100,8 @@ static face_detect_srv_t s_face_srv;
  * ============================================================================*/
 static void    face_srv_lock(void);
 static void    face_srv_unlock(void);
-static bool    face_queue_enqueue(frame_t *frame);
-static frame_t* face_queue_dequeue(void);
+static bool    face_queue_enqueue(frame_handle_t frame);
+static frame_handle_t face_queue_dequeue(void);
 static void    face_srv_cleanup(void);
 static void    data_bus_frame_cb(data_bus_item_handle_t item, void *user_data);
 static void    event_bus_cb(const event_t *event, void *user_data);
@@ -137,10 +136,10 @@ static inline void face_srv_unlock(void)
  * ============================================================================*/
 /**
  * @brief  帧入队（数据总线→工作线程缓冲）
- * @param  frame: 待处理视频帧指针
+ * @param  frame: FrameLink不透明帧句柄
  * @retval true:入队成功 false:队列满
  */
-static bool face_queue_enqueue(frame_t *frame)
+static bool face_queue_enqueue(frame_handle_t frame)
 {
     bool ret = false;
 
@@ -159,11 +158,11 @@ static bool face_queue_enqueue(frame_t *frame)
 
 /**
  * @brief  帧出队（工作线程获取待处理帧）
- * @retval 帧指针 NULL:队列为空
+ * @retval frame_handle_t:帧句柄 NULL:队列为空
  */
-static frame_t* face_queue_dequeue(void)
+static frame_handle_t face_queue_dequeue(void)
 {
-    frame_t *frame = NULL;
+    frame_handle_t frame = NULL;
 
     face_srv_lock();
     if (s_face_srv.queue_count > 0)
@@ -182,11 +181,11 @@ static frame_t* face_queue_dequeue(void)
  * ============================================================================*/
 /**
  * @brief  视频数据总线回调
- * @param  item: 数据总线项（存储frame_t*句柄）
+ * @param  item: 数据总线项（存储frame_handle_t句柄）
  * @param  user_data: 用户自定义参数
- * @details 严格遵守架构规范：
+ * @details 严格遵守FrameLink架构规范：
  *          1. 不执行任何耗时操作（无推理、无打印、无拷贝）
- *          2. 仅做：帧引用 + 入队缓冲 + 释放总线项
+ *          2. 仅做：获取句柄 + 引用帧 + 入队缓冲 + 释放总线项
  *          3. 立即返回，不阻塞总线调度
  * @return 无
  */
@@ -202,21 +201,28 @@ static void data_bus_frame_cb(data_bus_item_handle_t item, void *user_data)
         return;
     }
 
-    // 从总线获取帧指针（零拷贝）
-    frame_t *frame = (frame_t *)data_bus_get_readonly_ptr(item);
-    if (!frame)
+    // 从总线获取FrameLink不透明句柄（零拷贝）
+    frame_handle_t bus_frame = NULL;
+    const void *bus_ptr = data_bus_get_readonly_ptr(item);
+    if (!bus_ptr)
+    {
+        data_bus_release(item);
+        return;
+    }
+    bus_frame = *(frame_handle_t *)bus_ptr;
+
+    // FrameLink规范：通过总线句柄引用帧（引用计数+1，防止被回收）
+    frame_handle_t proc_frame = NULL;
+    if (frame_link_consumer_get_by_bus(FRAME_LINK_NAME, bus_frame, &proc_frame) != FL_OK)
     {
         data_bus_release(item);
         return;
     }
 
-    // FrameLink规范：引用帧（引用计数+1，防止被回收）
-    frame_link_ref_frame(FRAME_LINK_NAME, frame);
-
-    // 入队缓冲队列，失败则取消引用
-    if (!face_queue_enqueue(frame))
+    // 入队缓冲队列，失败则释放帧引用
+    if (!face_queue_enqueue(proc_frame))
     {
-        frame_link_unref_frame(FRAME_LINK_NAME, frame);
+        frame_link_consumer_put(proc_frame);
     }
 
     // 释放总线包装项（不释放帧本体）
@@ -285,18 +291,20 @@ static void event_bus_cb(const event_t *event, void *user_data)
  * @brief  AI人脸检测工作线程
  * @param  arg: 线程参数
  * @details 核心流程：
- *          1. 从缓冲队列获取帧
- *          2. 调用AI模型推理（640x360→320x240自动缩放）
- *          3. 人脸坐标映射至原始分辨率
- *          4. 释放帧（引用计数-1）
- *          5. 发布处理完成事件
+ *          1. 从缓冲队列获取帧句柄
+ *          2. 通过FrameLink接口获取只读数据指针
+ *          3. 调用AI模型推理（640x360→320x240自动缩放）
+ *          4. 人脸坐标映射至原始分辨率
+ *          5. 释放帧引用（引用计数-1）
+ *          6. 发布处理完成事件
  * @return 线程返回值
  */
 static void *face_work_thread(void *arg)
 {
     (void)arg;
     face_detect_srv_t *srv = &s_face_srv;
-    frame_t *proc_frame = NULL;
+    frame_handle_t proc_frame = NULL;
+    frame_info_t frame_info = {0};
 
     LOG_I(MODULE_TAG " 工作线程启动，等待视频帧数据...");
 
@@ -309,7 +317,7 @@ static void *face_work_thread(void *arg)
             continue;
         }
 
-        // 获取待处理帧
+        // 获取待处理帧句柄
         proc_frame = face_queue_dequeue();
         if (!proc_frame)
         {
@@ -321,9 +329,14 @@ static void *face_work_thread(void *arg)
         srv->face_num = 0;
         memset(srv->faces, 0, sizeof(srv->faces));
 
+        // ====================== FrameLink规范：获取帧只读数据 ======================
+        const uint8_t *frame_data = frame_get_readonly_ptr(proc_frame);
+        // 获取帧元数据（帧ID、分辨率等）
+        frame_get_info(proc_frame, &frame_info);
+
         // ====================== AI核心推理 ======================
         // 直接传入摄像头原始YUYV数据，模型内部自动缩放至320x240
-        ai_model_mnn_infer_yuyv(proc_frame->data,
+        ai_model_mnn_infer_yuyv((void *)frame_data,
                                 CAPTURE_WIDTH,
                                 CAPTURE_HEIGHT,
                                 srv->faces,
@@ -339,16 +352,15 @@ static void *face_work_thread(void *arg)
         // 日志输出检测结果
         if (srv->face_num > 0)
         {
-            LOG_I(MODULE_TAG " 帧[%u] 检测到 %d 张人脸", proc_frame->index, srv->face_num);
+            LOG_I(MODULE_TAG " 帧[%u] 检测到 %d 张人脸", frame_info.frame_id, srv->face_num);
         }
         else 
         {   
-            LOG_I(MODULE_TAG " 帧[%u] 未检测到人脸:%d", proc_frame->index, srv->face_num );
+            LOG_I(MODULE_TAG " 帧[%u] 未检测到人脸", frame_info.frame_id);
         }
 
-        // ====================== 帧生命周期管理 ======================
-        // 取消引用：FrameLink自动回收帧内存
-        frame_link_unref_frame(FRAME_LINK_NAME, proc_frame);
+        // ====================== FrameLink规范：释放帧引用 ======================
+        frame_link_consumer_put(proc_frame);
 
         // 发布AI处理完成事件
         event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_FACE_PROCESS_DONE, MODULE_NAME);
@@ -397,7 +409,7 @@ static int face_srv_start(void)
 
     // 发布服务就绪事件
     event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_FACE_READY, MODULE_NAME);
-    LOG_I(MODULE_TAG " 服务启动成功，遵循FrameLink规范运行");
+    LOG_I(MODULE_TAG " 服务启动成功，遵循最新FrameLink规范运行");
 
     return 0;
 }
@@ -407,13 +419,13 @@ static int face_srv_start(void)
  * ============================================================================*/
 /**
  * @brief  服务全量资源清理
- * @details 停止线程 → 清空队列 → 取消订阅 → 销毁模型 → 释放锁
+ * @details 停止线程 → 清空队列释放帧 → 取消订阅 → 销毁模型 → 释放锁
  * @return 无
  */
 static void face_srv_cleanup(void)
 {
     face_detect_srv_t *srv = &s_face_srv;
-    frame_t *frame = NULL;
+    frame_handle_t frame = NULL;
 
     LOG_W(MODULE_TAG " 开始安全释放所有资源...");
 
@@ -426,10 +438,10 @@ static void face_srv_cleanup(void)
         srv->work_thread = 0;
     }
 
-    // 2. 清空缓冲队列，释放所有未处理帧
+    // 2. 清空缓冲队列，释放所有未处理帧（FrameLink规范）
     while ((frame = face_queue_dequeue()) != NULL)
     {
-        frame_link_unref_frame(FRAME_LINK_NAME, frame);
+        frame_link_consumer_put(frame);
     }
 
     // 3. 取消总线订阅
@@ -516,7 +528,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    LOG_I(MODULE_TAG " 服务初始化完成，FrameLink命名化适配成功");
+    LOG_I(MODULE_TAG " 服务初始化完成，最新FrameLink适配成功");
     return 0;
 }
 
