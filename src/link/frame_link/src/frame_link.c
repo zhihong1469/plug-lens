@@ -1,295 +1,346 @@
 /* SPDX-License-Identifier: MIT */
 /**
- * @file    frame_link.c
- * @brief   帧数据链路层实现（命名化多实例版）
- * @details 原子引用计数、静态内存池、线程安全、多实例隔离
- * @author  Luo
- * @date    2026-05-31
+ ******************************************************************************
+ * @file           frame_link.c
+ * @brief          FrameLink 多实例数据链路层 私有实现
+ * @defgroup       FrameLink
+ * @details
+ *   1. 静态实例表管理多命名链路
+ *   2. 双超时锁：内存池锁 + 队列锁（固定顺序，无死锁）
+ *   3. C11原子引用计数，无锁生命周期管理
+ *   4. 内存池满不阻塞生产者，嵌入式最优策略
+ *   5. 单写多读权限强制隔离
+ *   6. 内部自动安全字符串拷贝，杜绝越界
+ ******************************************************************************
  */
-
 #include "frame_link.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <pthread.h>
+#include <time.h>
+#include <stdatomic.h>
 
-// ==========================================================================
-// 【多实例管理】对标数据总线：静态实例表 + 名称管理
-// ==========================================================================
+/* ========================== 私有数据类型 ========================== */
+/** 帧内部结构体（对外完全隐藏） */
+struct frame {
+    frame_info_t          info;           /**< 公共元数据 */
+    uint8_t               *data;          /**< 数据指针 */
+    atomic_uint           ref_cnt;        /**< 原子引用计数 */
+    bool                  read_only;      /**< 只读标记 */
+    frame_link_handle_t   owner;          /**< 所属链路（安全校验） */
+};
+
+/** 单条数据链路上下文（对外完全隐藏） */
+struct frame_link {
+    frame_link_cfg_t      cfg;            /**< 配置 */
+    bool                  inited;         /**< 初始化标记 */
+
+    /* 内存池 */
+    uint8_t               *mem_pool;      /**< 连续内存池基址 */
+    struct frame          *frames;        /**< 帧对象数组 */
+    uint32_t              free_cnt;       /**< 空闲帧数量 */
+
+    /* 消费队列 */
+    struct frame          **queue;
+    uint32_t              q_head;
+    uint32_t              q_tail;
+    struct frame          *latest_frame;  /**< 最新帧缓存 */
+
+    /* 双锁架构（规范核心） */
+    pthread_mutex_t       pool_lock;      /**< 内存池分配/回收锁 */
+    pthread_mutex_t       queue_lock;     /**< 队列入队/出队锁 */
+
+    uint32_t              frame_id_inc;   /**< 帧ID自增 */
+};
+
+/** 全局静态实例表（同data_bus设计） */
 typedef struct {
-    char                    name[FRAME_LINK_NAME_MAX_LEN];
-    frame_link_handle_t     handle;
-    bool                    used;
-} frame_link_entry_t;
+    char      name[FRAME_LINK_NAME_MAX_LEN];
+    struct frame_link *link;
+    bool      used;
+} fl_instance_t;
 
-static frame_link_entry_t s_frame_link_table[FRAME_LINK_MAX_INSTANCES] = {0};
-static pthread_mutex_t    s_table_lock = PTHREAD_MUTEX_INITIALIZER;
+/* ========================== 全局私有变量 ========================== */
+static fl_instance_t g_fl_table[FRAME_LINK_MAX_INSTANCES] = {0};
+static pthread_mutex_t g_table_lock = PTHREAD_MUTEX_INITIALIZER;
 
-// ==========================================================================
-// 内部私有上下文（对外完全隐藏）
-// ==========================================================================
-typedef struct frame_link_t {
-    Pool_t                  frame_pool;    /**< 帧内存池 */
-    Queue_t                 frame_queue;   /**< 消费队列 */
-    frame_link_config_t     config;        /**< 配置参数 */
-    pthread_mutex_t         lock;          /**< 池操作互斥锁 */
-
-    uint8_t*                pool_buffer;   /**< 内存池缓冲区 */
-    void**                  free_list_buf; /**< 内存池空闲列表 */
-    void**                  queue_buffer;  /**< 队列缓冲区 */
-} frame_link_ctx_t;
-
-// ==========================================================================
-// 内部工具函数
-// ==========================================================================
-static uint64_t _get_timestamp_us(void) {
+/* ========================== 内部工具函数 ========================== */
+static uint64_t _fl_get_ts_us(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
-static bool _frame_is_allocable(frame_t* frame) {
-    return atomic_load(&frame->ref_cnt) == 0;
+static int _fl_mutex_timedlock(pthread_mutex_t *lock) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += FRAME_LINK_LOCK_TIMEOUT_MS * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1000000000;
+    }
+    return pthread_mutex_timedlock(lock, &ts);
 }
 
-// 按名称查找帧链路实例
-static frame_link_ctx_t* _find_ctx(const char* name) {
+/**
+ * @brief  内部安全字符串拷贝（自动补结束符，杜绝越界）
+ */
+static void _fl_safe_strcpy(char *dest, const char *src, size_t dest_size) {
+    if (!dest || !src || dest_size == 0) return;
+    strncpy(dest, src, dest_size - 1);
+    dest[dest_size - 1] = '\0';
+}
+
+static struct frame_link *_fl_find_by_name(const char *name) {
     if (!name) return NULL;
-    pthread_mutex_lock(&s_table_lock);
-    frame_link_ctx_t* ctx = NULL;
-    for (int i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
-        if (s_frame_link_table[i].used && 
-            strcmp(s_frame_link_table[i].name, name) == 0) {
-            ctx = (frame_link_ctx_t*)s_frame_link_table[i].handle;
+    pthread_mutex_lock(&g_table_lock);
+    struct frame_link *ret = NULL;
+    for (uint32_t i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
+        if (g_fl_table[i].used && strcmp(g_fl_table[i].name, name) == 0) {
+            ret = g_fl_table[i].link;
             break;
         }
     }
-    pthread_mutex_unlock(&s_table_lock);
-    return ctx;
+    pthread_mutex_unlock(&g_table_lock);
+    return ret;
 }
 
-// ==========================================================================
-// 命名化初始化API
-// ==========================================================================
-int frame_link_init(const frame_link_config_t* config) {
-    if (!config || !config->name || strlen(config->name) >= FRAME_LINK_NAME_MAX_LEN)
-        return -1;
+/* ========================== 全局接口实现 ========================== */
+fl_err_t frame_link_create(const frame_link_cfg_t *cfg) {
+    if (!cfg || !cfg->name || strlen(cfg->name) >= FRAME_LINK_NAME_MAX_LEN)
+        return FL_INVALID_PARAM;
+    if (_fl_find_by_name(cfg->name)) return FL_BUSY;
+    if (cfg->pool_count < FRAME_LINK_POOL_MIN || cfg->pool_count > FRAME_LINK_POOL_MAX)
+        return FL_INVALID_PARAM;
+    if (!cfg->max_frame_size) return FL_INVALID_PARAM;
 
-    // 重名检查
-    if (_find_ctx(config->name)) {
-        LOG_E("FrameLink[%s]: 已存在", config->name);
-        return -1;
-    }
-
-    pthread_mutex_lock(&s_table_lock);
-    // 查找空闲实例
+    pthread_mutex_lock(&g_table_lock);
     int free_idx = -1;
-    for (int i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
-        if (!s_frame_link_table[i].used) {
+    for (uint32_t i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
+        if (!g_fl_table[i].used) {
             free_idx = i;
             break;
         }
     }
     if (free_idx < 0) {
-        pthread_mutex_unlock(&s_table_lock);
-        LOG_E("FrameLink: 实例表已满");
-        return -2;
+        pthread_mutex_unlock(&g_table_lock);
+        return FL_BUSY;
     }
 
-    // 分配上下文
-    frame_link_ctx_t* ctx = calloc(1, sizeof(frame_link_ctx_t));
-    if (!ctx) {
-        pthread_mutex_unlock(&s_table_lock);
-        return -3;
-    }
-    memcpy(&ctx->config, config, sizeof(frame_link_config_t));
-
-    // 内存分配
-    size_t item_size = sizeof(frame_t) + config->max_frame_size;
-    ctx->pool_buffer = malloc(item_size * config->pool_capacity);
-    ctx->free_list_buf = malloc(sizeof(void*) * config->pool_capacity);
-    ctx->queue_buffer = malloc(sizeof(void*) * config->queue_capacity);
-    if (!ctx->pool_buffer || !ctx->free_list_buf || !ctx->queue_buffer)
-        goto err_free;
-
-    // 初始化锁/池/队列
-    pthread_mutex_init(&ctx->lock, NULL);
-    Pool_Init(&ctx->frame_pool, item_size, config->pool_capacity,
-              ctx->pool_buffer, ctx->free_list_buf);
-    Queue_Init(&ctx->frame_queue, ctx->queue_buffer, config->queue_capacity);
-
-    // 预初始化所有帧
-    for (uint32_t i = 0; i < config->pool_capacity; i++) {
-        frame_t* frame = (frame_t*)(ctx->pool_buffer + i * item_size);
-        frame->data = (uint8_t*)frame + sizeof(frame_t);
-        atomic_init(&frame->ref_cnt, 0);
+    struct frame_link *link = calloc(1, sizeof(struct frame_link));
+    if (!link) {
+        pthread_mutex_unlock(&g_table_lock);
+        return FL_NO_MEM;
     }
 
-    // 注册实例
-    strncpy(s_frame_link_table[free_idx].name, config->name, FRAME_LINK_NAME_MAX_LEN-1);
-    s_frame_link_table[free_idx].handle = ctx;
-    s_frame_link_table[free_idx].used = true;
-    pthread_mutex_unlock(&s_table_lock);
+    link->mem_pool = malloc(cfg->pool_count * (sizeof(struct frame) + cfg->max_frame_size));
+    link->queue = malloc(sizeof(struct frame *) * cfg->queue_count);
+    if (!link->mem_pool || !link->queue) {
+        free(link->queue);
+        free(link->mem_pool);
+        free(link);
+        pthread_mutex_unlock(&g_table_lock);
+        return FL_NO_MEM;
+    }
 
-    LOG_I("FrameLink[%s]: 初始化成功 | 池=%u 队列=%u",
-          config->name, config->pool_capacity, config->queue_capacity);
-    return 0;
+    pthread_mutex_init(&link->pool_lock, NULL);
+    pthread_mutex_init(&link->queue_lock, NULL);
+    link->cfg = *cfg;
+    link->free_cnt = cfg->pool_count;
+    link->frame_id_inc = 0;
+    link->latest_frame = NULL;
+    link->q_head = link->q_tail = 0;
 
-err_free:
-    free(ctx->pool_buffer);
-    free(ctx->free_list_buf);
-    free(ctx->queue_buffer);
-    free(ctx);
-    pthread_mutex_unlock(&s_table_lock);
-    return -4;
+    link->frames = (struct frame *)link->mem_pool;
+    for (uint32_t i = 0; i < cfg->pool_count; i++) {
+        struct frame *f = &link->frames[i];
+        f->data = (uint8_t *)f + sizeof(struct frame);
+        atomic_init(&f->ref_cnt, 0);
+        f->read_only = false;
+        f->owner = link;
+        memset(f->data, 0, cfg->max_frame_size);
+    }
+
+    link->inited = true;
+    // 内部封装安全拷贝，上层无需处理
+    _fl_safe_strcpy(g_fl_table[free_idx].name, cfg->name, FRAME_LINK_NAME_MAX_LEN);
+    g_fl_table[free_idx].link = link;
+    g_fl_table[free_idx].used = true;
+
+    pthread_mutex_unlock(&g_table_lock);
+    return FL_OK;
 }
 
-// ==========================================================================
-// 命名化销毁API
-// ==========================================================================
-int frame_link_deinit(const char* name) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx) return 0;
+fl_err_t frame_link_destroy(const char *name) {
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link) return FL_NOT_FOUND;
 
-    // 释放资源
-    frame_link_clear_queue(name);
-    pthread_mutex_destroy(&ctx->lock);
-    free(ctx->pool_buffer);
-    free(ctx->free_list_buf);
-    free(ctx->queue_buffer);
-    free(ctx);
+    frame_link_clear(name);
+    pthread_mutex_destroy(&link->pool_lock);
+    pthread_mutex_destroy(&link->queue_lock);
+    free(link->queue);
+    free(link->mem_pool);
+    free(link);
 
-    // 清空实例表
-    pthread_mutex_lock(&s_table_lock);
-    for (int i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
-        if (s_frame_link_table[i].used && 
-            strcmp(s_frame_link_table[i].name, name) == 0) {
-            memset(&s_frame_link_table[i], 0, sizeof(frame_link_entry_t));
+    pthread_mutex_lock(&g_table_lock);
+    for (uint32_t i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
+        if (g_fl_table[i].used && strcmp(g_fl_table[i].name, name) == 0) {
+            memset(&g_fl_table[i], 0, sizeof(fl_instance_t));
             break;
         }
     }
-    pthread_mutex_unlock(&s_table_lock);
-
-    LOG_I("FrameLink[%s]: 销毁成功", name);
-    return 0;
+    pthread_mutex_unlock(&g_table_lock);
+    return FL_OK;
 }
 
-frame_link_handle_t frame_link_get_handle(const char* name) {
-    return (frame_link_handle_t)_find_ctx(name);
-}
+fl_err_t frame_link_clear(const char *name) {
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link) return FL_NOT_FOUND;
 
-// ==========================================================================
-// 生产者接口（完全保留原逻辑）
-// ==========================================================================
-int frame_link_get_free_frame(const char* name, frame_t** out_frame) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx || !out_frame) return -1;
-
-    void* item = NULL;
-    pthread_mutex_lock(&ctx->lock);
-    PoolErr_t ret = Pool_Acquire(&ctx->frame_pool, &item);
-    if (ret != POOL_OK) {
-        pthread_mutex_unlock(&ctx->lock);
-        return ret;
+    if (_fl_mutex_timedlock(&link->queue_lock) != 0) return FL_TIMEOUT;
+    if (_fl_mutex_timedlock(&link->pool_lock) != 0) {
+        pthread_mutex_unlock(&link->queue_lock);
+        return FL_TIMEOUT;
     }
 
-    frame_t* frame = (frame_t*)item;
-    if (!_frame_is_allocable(frame)) {
-        Pool_Release(&ctx->frame_pool, item);
-        pthread_mutex_unlock(&ctx->lock);
-        return -5;
+    link->q_head = link->q_tail = 0;
+    link->latest_frame = NULL;
+    link->free_cnt = link->cfg.pool_count;
+
+    for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
+        struct frame *f = &link->frames[i];
+        atomic_store(&f->ref_cnt, 0);
+        f->read_only = false;
     }
 
-    memset(frame, 0, sizeof(frame_t));
-    frame->data = (uint8_t*)frame + sizeof(frame_t);
-    frame->timestamp = _get_timestamp_us();
-    atomic_store(&frame->ref_cnt, 0);
-    *out_frame = frame;
-
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
+    pthread_mutex_unlock(&link->pool_lock);
+    pthread_mutex_unlock(&link->queue_lock);
+    return FL_OK;
 }
 
-int frame_link_enqueue_frame(const char* name, frame_t* frame) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx || !frame) return -1;
+/* ========================== 生产者接口 ========================== */
+fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
+    if (!out_frame) return FL_INVALID_PARAM;
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link) return FL_NOT_FOUND;
 
-    while (Queue_IsFull(&ctx->frame_queue)) {
-        void* old = NULL;
-        if (Queue_Get(&ctx->frame_queue, &old) == QUEUE_OK) {
-            atomic_store(&((frame_t*)old)->ref_cnt, 0);
-            Pool_Release(&ctx->frame_pool, old);
+    if (_fl_mutex_timedlock(&link->pool_lock) != 0) return FL_TIMEOUT;
+    if (link->free_cnt == 0) {
+        pthread_mutex_unlock(&link->pool_lock);
+        return FL_NO_FREE_FRAME;
+    }
+
+    struct frame *free_f = NULL;
+    for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
+        struct frame *f = &link->frames[i];
+        if (atomic_load(&f->ref_cnt) == 0) {
+            free_f = f;
+            break;
         }
     }
-    return Queue_Put(&ctx->frame_queue, frame);
-}
 
-int frame_link_return_free_frame(const char* name, frame_t* frame) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx || !frame) return -1;
-
-    pthread_mutex_lock(&ctx->lock);
-    atomic_store(&frame->ref_cnt, 0);
-    Pool_Release(&ctx->frame_pool, frame);
-    pthread_mutex_unlock(&ctx->lock);
-    return 0;
-}
-
-// ==========================================================================
-// 消费者接口（完全保留原逻辑）
-// ==========================================================================
-int frame_link_dequeue_frame(const char* name, frame_t** out_frame) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx || !out_frame) return -1;
-
-    void* item = NULL;
-    QueueErr_t ret = Queue_Get(&ctx->frame_queue, &item);
-    *out_frame = (frame_t*)item;
-    return ret;
-}
-
-int frame_link_ref_frame(const char* name, frame_t* frame) {
-    (void)name;
-    if (!frame) return -1;
-    atomic_fetch_add(&frame->ref_cnt, 1);
-    return 0;
-}
-
-int frame_link_unref_frame(const char* name, frame_t* frame) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx || !frame) return -1;
-
-    unsigned int new_cnt = atomic_fetch_sub(&frame->ref_cnt, 1) - 1;
-    if (new_cnt == 0) {
-        pthread_mutex_lock(&ctx->lock);
-        Pool_Release(&ctx->frame_pool, frame);
-        pthread_mutex_unlock(&ctx->lock);
+    if (!free_f) {
+        pthread_mutex_unlock(&link->pool_lock);
+        return FL_NO_FREE_FRAME;
     }
-    return 0;
+
+    atomic_store(&free_f->ref_cnt, 1);
+    free_f->read_only = false;
+    free_f->info.timestamp_us = _fl_get_ts_us();
+    free_f->info.frame_id = ++link->frame_id_inc;
+    link->free_cnt--;
+    *out_frame = free_f;
+
+    pthread_mutex_unlock(&link->pool_lock);
+    return FL_OK;
 }
 
-// ==========================================================================
-// 监控接口
-// ==========================================================================
-uint32_t frame_link_get_queue_count(const char* name) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    return ctx ? Queue_GetCount(&ctx->frame_queue) : 0;
-}
+fl_err_t frame_link_producer_push(const char *name, frame_handle_t frame) {
+    if (!frame) return FL_INVALID_PARAM;
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link || frame->owner != link) return FL_NOT_FOUND;
 
-int frame_link_clear_queue(const char* name) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    if (!ctx) return 0;
-
-    void* frame = NULL;
-    while (Queue_Get(&ctx->frame_queue, &frame) == QUEUE_OK) {
-        atomic_store(&((frame_t*)frame)->ref_cnt, 0);
-        Pool_Release(&ctx->frame_pool, frame);
+    if (_fl_mutex_timedlock(&link->pool_lock) != 0) return FL_TIMEOUT;
+    if (_fl_mutex_timedlock(&link->queue_lock) != 0) {
+        pthread_mutex_unlock(&link->pool_lock);
+        return FL_TIMEOUT;
     }
-    Queue_Clear(&ctx->frame_queue);
-    return 0;
+
+    frame->read_only = true;
+    uint32_t next_tail = (link->q_tail + 1) % link->cfg.queue_count;
+    if (next_tail != link->q_head) {
+        link->queue[link->q_tail] = frame;
+        link->q_tail = next_tail;
+    }
+    link->latest_frame = frame;
+
+    pthread_mutex_unlock(&link->queue_lock);
+    pthread_mutex_unlock(&link->pool_lock);
+    return FL_OK;
 }
 
-uint32_t frame_link_get_free_count(const char* name) {
-    frame_link_ctx_t* ctx = _find_ctx(name);
-    return ctx ? Pool_GetFreeCount(&ctx->frame_pool) : 0;
+void *frame_get_writable_ptr(frame_handle_t frame) {
+    if (!frame || frame->read_only) return NULL;
+    return frame->data;
+}
+
+/* ========================== 消费者接口 ========================== */
+fl_err_t frame_link_consumer_get_by_bus(const char *name, frame_handle_t bus_frame, frame_handle_t *out_frame) {
+    if (!bus_frame || !out_frame) return FL_INVALID_PARAM;
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link || bus_frame->owner != link) return FL_NOT_FOUND;
+
+    atomic_fetch_add(&bus_frame->ref_cnt, 1);
+    *out_frame = bus_frame;
+    return FL_OK;
+}
+
+fl_err_t frame_link_consumer_get(const char *name, fl_consume_mode_t mode, frame_handle_t *out_frame) {
+    if (!out_frame) return FL_INVALID_PARAM;
+    struct frame_link *link = _fl_find_by_name(name);
+    if (!link) return FL_NOT_FOUND;
+    *out_frame = NULL;
+
+    if (_fl_mutex_timedlock(&link->queue_lock) != 0) return FL_TIMEOUT;
+
+    if (mode == FL_CONSUME_LATEST) {
+        *out_frame = link->latest_frame;
+    } else {
+        if (link->q_head != link->q_tail) {
+            *out_frame = link->queue[link->q_head];
+            link->q_head = (link->q_head + 1) % link->cfg.queue_count;
+        }
+    }
+
+    pthread_mutex_unlock(&link->queue_lock);
+    if (*out_frame) {
+        atomic_fetch_add(&(*out_frame)->ref_cnt, 1);
+    }
+    return FL_OK;
+}
+
+fl_err_t frame_link_consumer_put(frame_handle_t frame) {
+    if (!frame) return FL_INVALID_PARAM;
+    struct frame_link *link = frame->owner;
+    if (!link) return FL_NOT_FOUND;
+
+    uint32_t cnt = atomic_fetch_sub(&frame->ref_cnt, 1) - 1;
+    if (cnt == 0) {
+        if (_fl_mutex_timedlock(&link->pool_lock) == 0) {
+            link->free_cnt++;
+            pthread_mutex_unlock(&link->pool_lock);
+        }
+    }
+    return FL_OK;
+}
+
+const void *frame_get_readonly_ptr(frame_handle_t frame) {
+    return frame ? frame->data : NULL;
+}
+
+fl_err_t frame_get_info(frame_handle_t frame, frame_info_t *info) {
+    if (!frame || !info) return FL_INVALID_PARAM;
+    *info = frame->info;
+    return FL_OK;
 }

@@ -138,8 +138,8 @@ typedef enum {
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 // 帧链路配置
-#define CONFIG_FRAME_LINK_POOL_SIZE 4
-#define CONFIG_FRAME_LINK_QUEUE_SIZE 2
+#define CONFIG_FRAME_LINK_POOL_SIZE 8
+#define CONFIG_FRAME_LINK_QUEUE_SIZE 4
 
 // AI模型配置
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
