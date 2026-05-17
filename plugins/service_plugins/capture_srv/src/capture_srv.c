@@ -181,7 +181,6 @@ static void *capture_work_thread(void *arg)
 {
     (void)arg;
     capture_srv_t *srv = &s_capture;
-    // 不透明句柄：FrameLink标准帧句柄
     frame_handle_t frame = NULL;
     data_bus_item_handle_t data_item = NULL;
     uint64_t current_ts;
@@ -197,98 +196,105 @@ static void *capture_work_thread(void *arg)
           srv->width, srv->height, srv->fps, AI_TARGET_FPS);
 
     while (srv->thread_running) {
+        // 每次循环重置句柄
+        frame = NULL;
+        data_item = NULL;
+        cam_buf = NULL;
+
         // 暂停状态处理
         if (srv->is_paused) {
             usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // ============== 1. 【仓库】生产者获取空闲帧 ==============
+        // ============== 【修复1】第一步：先读摄像头原始数据（你的初心） ==============
+        if (camera_get_frame(srv->cam, &cam_buf, &cam_len) != 0) {
+            usleep(CAP_FRAME_WAIT_US);
+            continue;
+        }
+
+        // ============== 【修复2】第二步：软件降频判断 ==============
+        srv->downsample_cnt++;
+        bool send_to_bus = (srv->downsample_cnt >= FPS_DOWNSAMPLE_STEP);
+        
+        // 不达标：直接丢弃摄像头数据，不申请任何帧！
+        if (!send_to_bus) {
+            srv->frame_count++;
+            goto fps_stats; // 直接跳转到FPS统计，不操作帧
+        }
+
+        // ============== 【修复3】第三步：降频达标 → 才申请空闲帧 ==============
+        srv->downsample_cnt = 0;
         fl_ret = frame_link_producer_get(FRAME_LINK_NAME, &frame);
         if (fl_ret != FL_OK) {
             if (fl_ret == FL_NO_FREE_FRAME) {
                 LOG_D(MODULE_TAG " 内存池满，丢弃当前帧");
             }
-            usleep(CAP_FRAME_WAIT_US);
-            continue;
+            // 【调试打印1】获取帧失败
+            LOG_D(MODULE_TAG " frame_link_producer_get 失败，ret=%d", fl_ret);
+            goto fps_stats;
         }
-
-        // ============== 2. 硬件采集一帧图像 ==============
-        if (camera_get_frame(srv->cam, &cam_buf, &cam_len) != 0) {
-            // 采集失败：归还帧给仓库
-            frame_link_consumer_put(frame);
-            frame = NULL;
-            usleep(CAP_FRAME_WAIT_US);
-            continue;
-        }
-
-        // ============== 3. 【生产者唯一写】填充帧数据 ==============
+        // ########################### 调试点1：成功获取帧 ###########################
+        LOG_D(MODULE_TAG " ✅ 成功获取空闲帧 | 句柄地址=%p | 链路=%s", frame, FRAME_LINK_NAME);
+        // ============== 第四步：填充帧数据 ==============
         writable_buf = frame_get_writable_ptr(frame);
         if (!writable_buf) {
-            LOG_E(MODULE_TAG " 获取可写指针失败，权限异常");
+            LOG_E(MODULE_TAG " 获取可写指针失败");
             frame_link_consumer_put(frame);
             frame = NULL;
-            continue;
+            goto fps_stats;
         }
-
+        // ########################### 调试点2：帧可写指针有效 ###########################
+        LOG_D(MODULE_TAG " ✅ 帧可写指针=%p | 摄像头数据地址=%p | 数据长度=%zu", 
+              writable_buf, cam_buf, cam_len);
         if (cam_len > frame_data_size) {
-            LOG_W(MODULE_TAG " 帧数据长度异常，截断处理");
             cam_len = frame_data_size;
         }
-        // 零拷贝写入（唯一写权限）
         memcpy(writable_buf, cam_buf, cam_len);
 
-        // ============== 4. 填充帧元数据（官方接口） ==============
+        // ============== 第五步：填充帧元数据 ==============
         info.width = srv->width;
         info.height = srv->height;
         info.format = srv->frame_fmt;
         info.data_size = cam_len;
-        // 帧ID/时间戳由FrameLink内部自动生成，无需手动赋值
 
-        // ============== 5. AI软件降频过滤 ==============
-        srv->downsample_cnt++;
-        bool send_to_bus = (srv->downsample_cnt >= FPS_DOWNSAMPLE_STEP);
-        if (send_to_bus) {
-            srv->downsample_cnt = 0;
-
-            // ============== 6. 【仓库】推送帧到链路 → 变为只读 ==============
-            fl_ret = frame_link_producer_push(FRAME_LINK_NAME, frame);
-            if (fl_ret != FL_OK) {
-                LOG_E(MODULE_TAG " FrameLink推送帧失败");
-                frame_link_consumer_put(frame);
-                frame = NULL;
-                continue;
-            }
-
-            // ============== 7. 【发票员】DataBus仅广播帧句柄（零拷贝） ==============
-            if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
-                               DATA_TYPE_VIDEO_FRAME,
-                               sizeof(frame_handle_t),
-                               MODULE_NAME,
-                               &data_item) == 0)
-            {
-                // 仅写入帧句柄，不复制任何图像数据
-                frame_handle_t *bus_ptr = (frame_handle_t *)data_bus_get_writable_ptr(data_item);
-                *bus_ptr = frame;
-
-                // 广播句柄给所有消费者
-                data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
-                // 释放DataBus的引用（不影响FrameLink的帧生命周期）
-                data_bus_release(data_item);
-                data_item = NULL;
-
-                // 发布帧就绪事件
-                event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_FRAME_READY, MODULE_NAME);
-            }
+        // ============== 第六步：推送链路 + 发布总线 ==============
+        fl_ret = frame_link_producer_push(FRAME_LINK_NAME, frame);
+        if (fl_ret != FL_OK) {
+            LOG_E(MODULE_TAG " FrameLink推送帧失败");
+            frame_link_consumer_put(frame);
+            frame = NULL;
+            goto fps_stats;
+        }
+        // ########################### 调试点3：成功推送帧到链路 ###########################
+        LOG_D(MODULE_TAG " ✅ 帧推入FrameLink成功 | ret=%d", fl_ret);
+        // DataBus发布
+        if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
+                           DATA_TYPE_VIDEO_FRAME,
+                           sizeof(frame_handle_t),
+                           MODULE_NAME,
+                           &data_item) == 0)
+        {
+            frame_handle_t *bus_ptr = (frame_handle_t *)data_bus_get_writable_ptr(data_item);
+            *bus_ptr = frame;
+            // ########################### 调试点4：数据总线传递句柄 ###########################
+            LOG_D(MODULE_TAG " ✅ 数据总线赋值句柄=%p | 总线名称=%s", 
+                  *bus_ptr, VIDEO_DATA_BUS_NAME);
+            data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
+            data_bus_release(data_item);
+            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_FRAME_READY, MODULE_NAME);
+        } else {
+            LOG_E(MODULE_TAG " ❌ data_bus_alloc 分配失败");
         }
 
-        // ============== 8. 【核心】生产者释放自身引用 ==============
-        // 生命周期交由FrameLink管理，消费者通过引用计数使用
+        // ============== 第七步：生产者释放自身引用（唯一一次） ==============
+        // ########################### 调试点5：生产者释放帧 ###########################
+        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 句柄=%p", frame);
         frame_link_consumer_put(frame);
         frame = NULL;
-        srv->frame_count++;
 
-        // ============== FPS统计 ==============
+        // ============== FPS统计（公共出口） ==============
+fps_stats:
         gettimeofday(&tv, NULL);
         current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
         if (current_ts - srv->last_fps_ts >= CAP_FPS_INTERVAL_MS) {
@@ -302,7 +308,6 @@ static void *capture_work_thread(void *arg)
     LOG_I(MODULE_TAG " 工作线程退出");
     return NULL;
 }
-
 // ==========================================================================
 // 服务启动：启动采集线程
 // ==========================================================================
@@ -476,4 +481,4 @@ static int _capture_auto_init(void)
     LOG_I(MODULE_TAG " 自动加载完成,等待系统启动指令");
     return 0;
 }
-MODULE_INIT(_capture_auto_init);
+MODULE_INIT_LEVEL(INIT_DEVICE, _capture_auto_init);  

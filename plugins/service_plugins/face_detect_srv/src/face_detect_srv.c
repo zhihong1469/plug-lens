@@ -225,8 +225,6 @@ static void data_bus_frame_cb(data_bus_item_handle_t item, void *user_data)
         frame_link_consumer_put(proc_frame);
     }
 
-    // 释放总线包装项（不释放帧本体）
-    data_bus_release(item);
 }
 
 /* =============================================================================
@@ -391,8 +389,11 @@ static int face_srv_start(void)
                              &srv->data_sub);
     if (ret != 0)
     {
-        LOG_E(MODULE_TAG " 视频数据总线订阅失败");
-        return -1;
+        // 增加详细错误信息
+        if (ret == -1) LOG_E("订阅失败：参数错误/总线未初始化");
+        else if (ret == -2) LOG_E("订阅失败：订阅者数量已满");
+        else LOG_E("订阅失败：未知错误码%d", ret);
+        return ret;
     }
 
     // 启动AI工作线程
@@ -548,8 +549,6 @@ static int face_srv_auto_init(void)
     LOG_I(MODULE_TAG " 自动加载完成，等待系统启动指令");
     return 0;
 }
-
-// 注册到系统初始化段，开机自动加载
-MODULE_INIT(face_srv_auto_init);
-
+// 注册为【服务级，优先级3】
+MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init); 
 /******************************* End of file **********************************/

@@ -302,5 +302,4 @@ static int __demo_auto_init(void)
     LOG_I(MODULE_TAG " 加载完成");
     return 0;
 }
-
-MODULE_INIT(__demo_auto_init);
+MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
