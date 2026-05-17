@@ -224,8 +224,10 @@ fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
     if (!out_frame) return FL_INVALID_PARAM;
     struct frame_link *link = _fl_find_by_name(name);
     if (!link) return FL_NOT_FOUND;
-
     if (_fl_mutex_timedlock(&link->pool_lock) != 0) return FL_TIMEOUT;
+
+    // ====================== 调试打印1：看空闲帧 ======================
+    printf("[FL_DEBUG] 空闲帧数量: %u\n", link->free_cnt); 
     if (link->free_cnt == 0) {
         pthread_mutex_unlock(&link->pool_lock);
         return FL_NO_FREE_FRAME;
@@ -234,6 +236,8 @@ fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
     struct frame *free_f = NULL;
     for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
         struct frame *f = &link->frames[i];
+    // ====================== 新增：打印每个帧的真实引用计数 ======================
+    printf("[FL_CHECK] 帧%d 真实引用: %u\n", i, atomic_load(&f->ref_cnt));
         if (atomic_load(&f->ref_cnt) == 0) {
             free_f = f;
             break;
@@ -250,6 +254,10 @@ fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
     free_f->info.timestamp_us = _fl_get_ts_us();
     free_f->info.frame_id = ++link->frame_id_inc;
     link->free_cnt--;
+
+    // ########################### 调试：帧初始化状态 ###########################
+    printf("[FL_PRODUCE] 帧ID=%u | 引用计数=%u | 数据地址=%p\n",
+           free_f->info.frame_id, atomic_load(&free_f->ref_cnt), free_f->data);    
     *out_frame = free_f;
 
     pthread_mutex_unlock(&link->pool_lock);
@@ -325,7 +333,20 @@ fl_err_t frame_link_consumer_put(frame_handle_t frame) {
     struct frame_link *link = frame->owner;
     if (!link) return FL_NOT_FOUND;
 
+    // ====================== 新增：防重复释放兜底（必加） ======================
+    uint32_t old_cnt = atomic_load(&frame->ref_cnt);
+    if (old_cnt == 0) {
+        printf("[FL_ERROR] 帧%u 已空闲，禁止重复释放！\n", frame->info.frame_id);
+        return FL_INVALID_PARAM;
+    }
+
+    // 原有逻辑不变
     uint32_t cnt = atomic_fetch_sub(&frame->ref_cnt, 1) - 1;
+
+    // ########################### 调试：帧释放后的引用计数 ###########################
+    printf("[FL_CONSUME] 帧ID=%u | 释放后引用=%u | 空闲帧数量=%u\n",
+           frame->info.frame_id, cnt, link->free_cnt);
+
     if (cnt == 0) {
         if (_fl_mutex_timedlock(&link->pool_lock) == 0) {
             link->free_cnt++;
