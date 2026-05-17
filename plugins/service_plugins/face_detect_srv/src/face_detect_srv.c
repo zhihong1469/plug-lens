@@ -224,7 +224,8 @@ static void data_bus_frame_cb(data_bus_item_handle_t item, void *user_data)
     {
         frame_link_consumer_put(proc_frame);
     }
-
+    // 释放总线包装项（不释放帧本体）
+    data_bus_release(item);
 }
 
 /* =============================================================================

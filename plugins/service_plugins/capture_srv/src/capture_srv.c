@@ -281,7 +281,6 @@ static void *capture_work_thread(void *arg)
             LOG_D(MODULE_TAG " ✅ 数据总线赋值句柄=%p | 总线名称=%s", 
                   *bus_ptr, VIDEO_DATA_BUS_NAME);
             data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
-            data_bus_release(data_item);
             event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_FRAME_READY, MODULE_NAME);
         } else {
             LOG_E(MODULE_TAG " ❌ data_bus_alloc 分配失败");

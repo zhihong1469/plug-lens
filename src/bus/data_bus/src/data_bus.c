@@ -220,7 +220,17 @@ int data_bus_alloc(const char *name, data_type_t type, size_t size,
     // ✅ 仅锁内存池，细粒度无竞争
     pthread_mutex_lock(&ctx->pool_lock);
     data_item_t *item = _data_bus_find_free_item(ctx);
-    if (!item) { pthread_mutex_unlock(&ctx->pool_lock); return -1; }
+    if (!item) 
+    { 
+        LOG_E("[BUS DEBUG] Pool full! Total=%d, Used=", ctx->max_items);
+        for (int i = 0; i < ctx->max_items; i++) {
+            data_item_t *it = &ctx->items[i];
+            LOG_E("  Item[%d]: ref=%d, published=%d, in_use=%d", 
+                  i, it->info.ref_count, it->published, it->in_use);
+        }
+        pthread_mutex_unlock(&ctx->pool_lock); 
+        return -1; 
+    }
 
     _data_bus_reset_item(item);
     item->info.type = type;
@@ -248,22 +258,24 @@ int data_bus_publish(const char *name, data_bus_item_handle_t item) {
 
     if (!ctx || ctx->magic != DATA_BUS_MAGIC || !ditem || ditem->magic != DATA_BUS_ITEM_MAGIC) return -1;
 
-    // ✅ 仅锁发布操作
     pthread_mutex_lock(&ctx->publish_lock);
     if (!ditem->in_use || ditem->published) { pthread_mutex_unlock(&ctx->publish_lock); return -1; }
 
-    // 释放旧数据（原子操作，无锁）
+    // 🔥 修复1：正确释放旧数据（判断条件改对！）
     if (ctx->latest_item_held) {
+        // fetch_sub 返回 减之前的值，等于1说明减完就是0，必须重置
         unsigned int cnt = atomic_fetch_sub(&ctx->latest_item_held->info.ref_count, 1);
-        if (cnt == 1) _data_bus_reset_item(ctx->latest_item_held);
+        if (cnt == 1) {
+            _data_bus_reset_item(ctx->latest_item_held);
+        }
     }
 
-    // 发布新数据
+    // 🔥 修复2：删除多余的 +1 ！！！（这是万恶之源）
+    // atomic_fetch_add(&ditem->info.ref_count, 1); ← 删掉这行！
+
     ditem->published = true;
-    atomic_fetch_add(&ditem->info.ref_count, 1);
     ctx->latest_item_held = ditem;
 
-    // 通知订阅者
     _data_bus_notify_subscribers(ctx, ditem);
     pthread_mutex_unlock(&ctx->publish_lock);
     return 0;
@@ -409,7 +421,6 @@ static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *i
         if (s->valid && (s->type == DATA_TYPE_INVALID || s->type == item->info.type)) {
             atomic_fetch_add(&item->info.ref_count, 1);
             s->cb((data_bus_item_handle_t)item, s->user_data);
-            data_bus_release((data_bus_item_handle_t)item);
         }
     }
 }
