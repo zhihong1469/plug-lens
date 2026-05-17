@@ -1,11 +1,10 @@
-/* 自定义段链接脚本：仅定义 initcall 段边界 */
 SECTIONS
 {
-    /* 统一段名：.my_initcall */
-    .my_initcall ALIGN(4) : {
-        PROVIDE(__start_my_initcall = .);
-        KEEP(*(.my_initcall))  /* 【关键】和段名保持一致，带点 */
-        PROVIDE(__stop_my_initcall = .);
-    }
+    . = ALIGN(4);
+    .my_initcall_0 : { PROVIDE(__start_my_initcall_0 = .); KEEP(*(.my_initcall_0)); PROVIDE(__stop_my_initcall_0 = .); }
+    .my_initcall_1 : { PROVIDE(__start_my_initcall_1 = .); KEEP(*(.my_initcall_1)); PROVIDE(__stop_my_initcall_1 = .); }
+    .my_initcall_2 : { PROVIDE(__start_my_initcall_2 = .); KEEP(*(.my_initcall_2)); PROVIDE(__stop_my_initcall_2 = .); }
+    .my_initcall_3 : { PROVIDE(__start_my_initcall_3 = .); KEEP(*(.my_initcall_3)); PROVIDE(__stop_my_initcall_3 = .); }
+    .my_initcall_4 : { PROVIDE(__start_my_initcall_4 = .); KEEP(*(.my_initcall_4)); PROVIDE(__stop_my_initcall_4 = .); }
 }
 INSERT AFTER .data;
