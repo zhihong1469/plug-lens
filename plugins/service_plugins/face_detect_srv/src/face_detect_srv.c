@@ -65,26 +65,32 @@
  * 私有类型定义（扩展AI专属链路句柄）
  * ============================================================================*/
 typedef struct {
-    ai_model_handle_t            *ai_model;
-    FaceInfo_C                    faces[MAX_FACES];
-    int                           face_num;
+    // 8字节 指针/句柄 放最前
+    ai_model_handle_t            *ai_model;       // AI模型句柄    8/4B
+    frame_link_handle_t           ai_rgb_link;     // RGB链路句柄    8/4B
+    data_bus_subscription_handle_t data_sub;       // 数据总线订阅   8/4B
 
-    pthread_t                     work_thread;
-    bool                          thread_running;
-    bool                          is_paused;
-    bool                          is_started;
-    pthread_mutex_t               lock;
+    // 8字节 线程/锁
+    pthread_t                     work_thread;     // 工作线程      8B
+    pthread_mutex_t               lock;            // 线程互斥锁    8/4B
 
-    frame_handle_t                frame_queue[AI_PROCESS_QUEUE_SIZE];
-    uint32_t                      queue_front;
-    uint32_t                      queue_rear;
-    uint32_t                      queue_count;
+    // 8字节 数组
+    FaceInfo_C                    faces[MAX_FACES];// 人脸信息数组
 
-    int                           evt_sub_id;
-    data_bus_subscription_handle_t data_sub;
+    // 8字节 帧队列
+    frame_handle_t                frame_queue[AI_PROCESS_QUEUE_SIZE]; // 帧队列
 
-    // 🔥 新增：AI专属RGB数据链路资源
-    frame_link_handle_t           ai_rgb_link;         // AI专属RGB链路句柄
+    // 4字节 数值
+    uint32_t                      queue_front;     // 队列头指针    4B
+    uint32_t                      queue_rear;      // 队列尾指针    4B
+    uint32_t                      queue_count;     // 队列计数      4B
+    int                           face_num;        // 检测到人脸数  4B
+    int                           evt_sub_id;      // 事件订阅ID    4B
+
+    // 1字节 布尔（紧凑放最后，浪费最小）
+    bool                          thread_running;  // 线程运行标志  1B
+    bool                          is_paused;       // 暂停标志      1B
+    bool                          is_started;      // 启动标志      1B
 } face_detect_srv_t;
 
 /* =============================================================================

@@ -15,6 +15,7 @@
 #include "data_bus.h"
 #include "event_bus.h"
 #include "frame_link.h"
+#include "utils.h"
 #include "vision_ai_config.h"
 #include "camera_usb.h"
 #include <stdlib.h>
@@ -61,28 +62,27 @@
 // 采集服务 私有结构体（静态单例，外部完全不可见）
 // ==========================================================================
 typedef struct {
-    camera_base_t          *cam;
+    // 8字节 指针/句柄
+    camera_base_t          *cam;           // 子类基指针 8/4B
+    // 8字节 线程/锁
+    pthread_t               work_thread;   // 工作线程 8B
+    pthread_mutex_t         lock;          // 线程锁 8/4B
+    // 8字节 计数/时间戳
+    uint64_t                frame_count;   // 帧总数 8B
+    uint64_t                last_fps_ts;   // 上一帧时间戳 8B
+    // 4字节 配置/参数
+    uint32_t                width;         // 宽度 4B
+    uint32_t                height;        // 高度 4B
+    uint32_t                fps;           // 帧率 4B
+    frame_format_t          frame_fmt;     // 帧格式 4B
+    uint32_t                downsample_cnt;// 降频计数 4B
+    int                     evt_sub_id;    // 事件订阅ID 4B
 
-    pthread_t               work_thread;
-    bool                    thread_running;
-    bool                    is_paused;
-    bool                    is_started;
-    pthread_mutex_t         lock;
-
-    uint32_t                width;
-    uint32_t                height;
-    uint32_t                fps;
-    frame_format_t          frame_fmt;        // 对齐FrameLink标准格式枚举
-
-    uint64_t                frame_count;
-    uint64_t                last_fps_ts;
-
-    // 软件降频计数器
-    uint32_t                downsample_cnt;
-
-    int                     evt_sub_id;
+    // 1字节 bool（紧凑放最后）
+    bool                    thread_running;// 线程运行 1B
+    bool                    is_paused;     // 暂停 1B
+    bool                    is_started;    // 已启动 1B
 } capture_srv_t;
-
 // 静态单例（服务自治，无对外暴露）
 static capture_srv_t s_capture;
 
@@ -250,7 +250,7 @@ static void *capture_work_thread(void *arg)
         if (cam_len > frame_data_size) {
             cam_len = frame_data_size;
         }
-        memcpy(writable_buf, cam_buf, cam_len);
+        memcpy(writable_buf, cam_buf, utils_min(cam_len, MAX_FRAME_SIZE));
 
         // ============== 第五步：填充帧元数据 ==============
         info.width = srv->width;

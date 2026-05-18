@@ -92,14 +92,13 @@ typedef enum {
  * @note  存储帧的描述信息，由内核自动管理时间戳/帧ID，禁止外部修改
  */
 typedef struct {
-    uint32_t            width;          /**< 帧宽度（像素） */
-    uint32_t            height;         /**< 帧高度（像素） */
-    frame_format_t      format;         /**< 帧数据格式 @ref frame_format_t */
-    uint32_t            data_size;      /**< 实际有效数据长度（字节） */
-    uint64_t            timestamp_us;   /**< 帧时间戳（系统 monotonic 时钟，微秒）*/
-    uint32_t            frame_id;       /**< 帧唯一ID（内核自增，禁止外部覆盖）*/
+    uint64_t        timestamp_us;   // 时间戳(us)  8B
+    uint32_t        width;          // 帧宽度      4B
+    uint32_t        height;         // 帧高度      4B
+    uint32_t        data_size;      // 数据长度    4B
+    uint32_t        frame_id;       // 帧ID        4B
+    frame_format_t  format;         // 数据格式    4B
 } frame_info_t;
-
 /**
  * @brief 帧链路句柄（外部透明指针）
  * @note  上层无需关注内部实现，仅作为句柄传递

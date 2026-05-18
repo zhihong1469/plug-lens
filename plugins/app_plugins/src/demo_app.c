@@ -32,17 +32,18 @@
 // 应用上下文
 // ==========================================================================
 typedef struct {
-    volatile bool           app_running;
-    volatile bool           is_paused;
-    // 订阅ID
-    int                     sub_sys;
-    int                     sub_capture;
-    int                     sub_face;
-    // 服务状态
-    bool                    cap_ready;
-    bool                    face_ready;
-    // 键盘防抖（关键修复）
-    volatile bool           key_processing;
+    // 8字节 对齐占位（保证整体结构最优）
+    int                     sub_sys;        // 系统订阅ID  4B
+    int                     sub_capture;    // 采集订阅ID  4B
+    int                     sub_face;       // 人脸订阅ID  4B
+    // 1字节 volatile 状态（紧凑排列）
+    volatile bool           app_running;    // 运行状态    1B
+    volatile bool           is_paused;      // 暂停状态    1B
+    volatile bool           key_processing; // 键盘防抖    1B
+    
+    // 1字节 服务状态
+    bool                    cap_ready;      // 采集就绪    1B
+    bool                    face_ready;     // 人脸就绪    1B
 } demo_app_t;
 
 static demo_app_t s_demo;

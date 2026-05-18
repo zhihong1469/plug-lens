@@ -61,8 +61,8 @@ typedef void (*data_bus_callback_t)(data_bus_item_handle_t item, void *user_data
 // 总线配置结构体（与原有代码完全兼容）
 // ==========================================================================
 typedef struct {
-    uint32_t max_items;         // 最大缓存数据项数（内存池大小，建议≥8）
     size_t max_item_size;       // 单条数据最大大小（如视频帧：640*360*2）
+    uint32_t max_items;         // 最大缓存数据项数（内存池大小，建议≥8）
     uint32_t max_subscribers;   // 最大订阅者数量（如LCD+AI+推流）
     const char *name;          // 总线唯一名称（如："video_bus"）
 } data_bus_config_t;
