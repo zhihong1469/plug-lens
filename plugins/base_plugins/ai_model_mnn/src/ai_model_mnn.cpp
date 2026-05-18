@@ -12,55 +12,33 @@ using namespace std;
 // MNN 子类私有数据
 // ==========================
 typedef struct {
-    UltraFaceMNN*    ultra_face;
-    int              ai_w;
-    int              ai_h;
-    uint8_t*         yuyv_frame;
-    vector<FaceInfo_MNN> curr_faces;
+    UltraFaceMNN*            ultra_face;
+    int                      ai_w;
+    int                      ai_h;
+    const uint8_t*           yuyv_frame;
+    uint8_t*                 external_bgr_buf;
+    vector<FaceInfo_MNN>     curr_faces;
 } mnn_priv_t;
 
-// 全局单例（供旧接口使用）
 static ai_model_handle_t* g_mnn_handle = nullptr;
 static mnn_priv_t*        g_priv        = nullptr;
 
 // ==========================
-// 1. 初始化
+// 初始化
 // ==========================
 static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
 {
-    // ====================== 新增调试日志 ======================
-    printf("[AI_INIT_DEBUG] ================== AI初始化开始 ==================\n");
-    printf("[AI_INIT_DEBUG] 入参handle=%p\n", handle);
+    if (!handle) return AI_MODEL_ERR_PARAM;
 
-    if (!handle) {
-        printf("[AI_INIT_ERROR] handle为空！\n");
-        return AI_MODEL_ERR_PARAM;
-    }
-
-    // 1. 申请私有数据
     mnn_priv_t* priv = new(nothrow) mnn_priv_t;
-    printf("[AI_INIT_DEBUG] new mnn_priv_t = %p\n", priv);
-    if (!priv) {
-        printf("[AI_INIT_ERROR] 内存不足，创建priv失败！\n");
-        return AI_MODEL_ERR_NO_MEM;
-    }
+    if (!priv) return AI_MODEL_ERR_NO_MEM;
+    memset(priv, 0, sizeof(mnn_priv_t));
 
-    // 2. 创建UltraFace实例
     priv->ultra_face = new(nothrow) UltraFaceMNN();
-    printf("[AI_INIT_DEBUG] new UltraFaceMNN = %p\n", priv->ultra_face);
     if (!priv->ultra_face) {
-        printf("[AI_INIT_ERROR] 创建UltraFace失败！\n");
         delete priv;
         return AI_MODEL_ERR_NO_MEM;
     }
-
-    // 3. 核心：模型初始化（99%概率死在这里！）
-    printf("[AI_INIT_DEBUG] 开始加载模型：path=%s | w=%d | h=%d | score=%.2f | iou=%.2f\n",
-           handle->config.model_path,
-           handle->config.input_width,
-           handle->config.input_height,
-           handle->config.score_thresh,
-           handle->config.iou_thresh);
 
     int ret = priv->ultra_face->init(
         handle->config.model_path,
@@ -69,34 +47,30 @@ static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
         handle->config.score_thresh,
         handle->config.iou_thresh
     );
-    printf("[AI_INIT_DEBUG] UltraFace init 返回值=%d\n", ret);
 
     if (ret != MNN_FACE_OK) {
-        printf("[AI_INIT_ERROR] 模型初始化失败！请检查模型文件/路径！\n");
         delete priv->ultra_face;
         delete priv;
         return AI_MODEL_ERR_INIT;
     }
 
-    // 4. 初始化成功，赋值全局g_priv（关键！）
     priv->ai_w = handle->config.input_width;
     priv->ai_h = handle->config.input_height;
     handle->user_data = priv;
     
     g_priv = priv;
     g_mnn_handle = handle;
-    printf("[AI_INIT_SUCCESS] ================== AI初始化完成！g_priv=%p ==================\n", g_priv);
 
     return AI_MODEL_OK;
 }
 
 // ==========================
-// 2. 输入图像
+// 输入数据
 // ==========================
-static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle,
-                                   uint8_t* data, uint32_t len)
+static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle, uint8_t* data, uint32_t len)
 {
     if (!handle || !data) return AI_MODEL_ERR_PARAM;
+
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_ERR_INIT;
 
@@ -105,19 +79,23 @@ static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle,
 }
 
 // ==========================
-// 3. 推理
+// 推理
 // ==========================
 static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
 {
     if (!handle) return AI_MODEL_ERR_PARAM;
+
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
-    if (!priv || !priv->yuyv_frame) return AI_MODEL_ERR_INIT;
+    if (!priv || !priv->yuyv_frame || !priv->external_bgr_buf) {
+        return AI_MODEL_ERR_INIT;
+    }
 
     priv->curr_faces.clear();
     int ret = priv->ultra_face->detect(
         priv->yuyv_frame,
         priv->ai_w,
         priv->ai_h,
+        priv->external_bgr_buf,
         priv->curr_faces
     );
 
@@ -125,13 +103,14 @@ static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
 }
 
 // ==========================
-// 4. 获取结果
+// 获取结果
 // ==========================
 static ai_model_err_t mnn_ai_get_result(ai_model_handle_t* handle,
                                        ai_model_detect_result_t* results,
                                        uint32_t* result_count)
 {
     if (!handle || !results || !result_count) return AI_MODEL_ERR_PARAM;
+
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_ERR_INIT;
 
@@ -147,15 +126,17 @@ static ai_model_err_t mnn_ai_get_result(ai_model_handle_t* handle,
         results[i].score = f.score;
         results[i].class_id = 0;
     }
+
     return AI_MODEL_OK;
 }
 
 // ==========================
-// 5. 反初始化
+// 反初始化
 // ==========================
 static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
 {
     if (!handle) return AI_MODEL_ERR_PARAM;
+
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_OK;
 
@@ -173,7 +154,7 @@ static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
 }
 
 // ==========================
-// C-OOP 操作表
+// 虚函数表
 // ==========================
 static const ai_model_ops_t g_mnn_ai_ops = {
     .init       = mnn_ai_init,
@@ -184,26 +165,20 @@ static const ai_model_ops_t g_mnn_ai_ops = {
 };
 
 // ==========================
-// 创建接口
+// 创建模型
 // ==========================
 ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
 {
-    // ====================== 新增调试日志 ======================
-    printf("[AI_CREATE_DEBUG] 模型创建入口！config=%p | model_path=%s\n", 
-           config, config ? config->model_path : "NULL");
-    
-    ai_model_handle_t* handle = ai_model_create(config, &g_mnn_ai_ops);
-    
-    printf("[AI_CREATE_DEBUG] 模型创建完成！返回handle=%p\n", handle);
-    return handle;
+    return ai_model_create(config, &g_mnn_ai_ops);
 }
 
 // ==========================
-// 实用C接口（完整保留）
+// 工具接口
 // ==========================
 void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 {
     if (!face || !g_priv) return;
+
     float sw = (float)cam_w / g_priv->ai_w;
     float sh = (float)cam_h / g_priv->ai_h;
     face->x1 *= sw;
@@ -223,37 +198,30 @@ bool ai_model_mnn_is_ready(void)
     return g_priv && g_priv->ultra_face && g_priv->ultra_face->is_ready();
 }
 
+// ==========================
+// 🔥 核心优化：内部自动设置 BGR 缓存，无需上层手动调用！
+// ==========================
 int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
+                            uint8_t* external_bgr_buf,
                             FaceInfo_C* out_faces, int max_faces, int* out_face_num)
 {
-    // ====================== 调试日志：入参检查 ======================
-    printf("[AI_MNN_DEBUG] 推理入口 | 数据指针=%p | 摄像头宽=%d | 高=%d | 输出数组=%p\n",
-           yuyv_data, cam_w, cam_h, out_faces);
-    printf("[AI_MNN_DEBUG] 全局私有数据=%p | 模型实例=%p\n",
-           g_priv, g_priv ? g_priv->ultra_face : NULL);
-
-    // 原参数检查
-    if (!g_priv || !out_faces || !out_face_num) {
-        printf("[AI_MNN_ERROR] 入参非法！返回 MNN_FACE_ERR_INPUT\n");
+    // 1. 参数校验
+    if (!g_priv || !out_faces || !out_face_num || !external_bgr_buf) {
         return MNN_FACE_ERR_INPUT;
     }
 
-    vector<FaceInfo_MNN> faces;
-    // ====================== 调试日志：调用核心detect ======================
-    int ret = g_priv->ultra_face->detect(yuyv_data, cam_w, cam_h, faces);
-    printf("[AI_MNN_DEBUG] detect() 执行完成，返回码=%d\n", ret);
+    // 2. ✅ 自动设置外部BGR缓存（内部处理，永不遗漏）
+    g_priv->external_bgr_buf = external_bgr_buf;
 
-    // 原错误返回
+    // 3. 执行推理
+    vector<FaceInfo_MNN> faces;
+    int ret = g_priv->ultra_face->detect(yuyv_data, cam_w, cam_h, external_bgr_buf, faces);
     if (ret != MNN_FACE_OK) {
-        printf("[AI_MNN_ERROR] 核心detect推理失败！错误码=%d\n", ret);
         return ret;
     }
 
-    // ====================== 调试日志：结果数量 ======================
+    // 4. 输出结果
     *out_face_num = min((int)faces.size(), max_faces);
-    printf("[AI_MNN_DEBUG] 检测到人脸数量=%d | 实际输出=%d\n",
-           (int)faces.size(), *out_face_num);
-
     for (int i = 0; i < *out_face_num; i++) {
         out_faces[i].x1 = faces[i].x1;
         out_faces[i].y1 = faces[i].y1;
@@ -262,6 +230,6 @@ int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
         out_faces[i].score = faces[i].score;
     }
 
-    printf("[AI_MNN_DEBUG] 推理全部成功！\n");
     return MNN_FACE_OK;
 }
+

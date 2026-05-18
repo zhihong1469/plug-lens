@@ -43,7 +43,7 @@
 #define CAPTURE_FPS               CONFIG_CAPTURE_FPS         // 固定30
 #define CAPTURE_FORMAT_CFG        CONFIG_CAPTURE_FORMAT      // 0=YUYV 1=NV12 2=MJPEG
 #define CAPTURE_BUF_CNT           CONFIG_CAPTURE_BUF_COUNT   // 摄像头缓冲区数量
-
+#define MAX_FRAME_SIZE            CAPTURE_WIDTH * CAPTURE_HEIGHT * 2  // 最大帧大小
 // 帧链路配置（来源：vision_ai_config.h）
 #define FRAME_LINK_POOL_SIZE       CONFIG_FRAME_LINK_POOL_SIZE
 #define FRAME_LINK_QUEUE_SIZE      CONFIG_FRAME_LINK_QUEUE_SIZE
@@ -240,7 +240,7 @@ static void *capture_work_thread(void *arg)
         writable_buf = frame_get_writable_ptr(frame);
         if (!writable_buf) {
             LOG_E(MODULE_TAG " 获取可写指针失败");
-            frame_link_consumer_put(frame);
+            frame_link_put(frame);  // 🔥 替换新接口
             frame = NULL;
             goto fps_stats;
         }
@@ -262,7 +262,7 @@ static void *capture_work_thread(void *arg)
         fl_ret = frame_link_producer_push(FRAME_LINK_NAME, frame);
         if (fl_ret != FL_OK) {
             LOG_E(MODULE_TAG " FrameLink推送帧失败");
-            frame_link_consumer_put(frame);
+            frame_link_put(frame);  // 🔥 替换新接口
             frame = NULL;
             goto fps_stats;
         }
@@ -289,7 +289,7 @@ static void *capture_work_thread(void *arg)
         // ============== 第七步：生产者释放自身引用（唯一一次） ==============
         // ########################### 调试点5：生产者释放帧 ###########################
         LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 帧ID=%u | 句柄=%p", info.frame_id, frame);
-        frame_link_consumer_put(frame);
+        frame_link_put(frame);  // 🔥 替换新接口
         frame = NULL;
 
         // ============== FPS统计（公共出口） ==============
@@ -307,6 +307,7 @@ fps_stats:
     LOG_I(MODULE_TAG " 工作线程退出");
     return NULL;
 }
+
 // ==========================================================================
 // 服务启动：启动采集线程
 // ==========================================================================
@@ -408,7 +409,7 @@ static int capture_srv_init(void)
     // 3. 【仓库】创建FrameLink命名链路
     frame_link_cfg_t fl_cfg = {0};
     strcpy(fl_cfg.name, FRAME_LINK_NAME);  // 直接拷贝，内部自动安全处理
-    fl_cfg.max_frame_size = srv->width * srv->height * 2;
+    fl_cfg.max_frame_size = MAX_FRAME_SIZE;
     fl_cfg.pool_count     = FRAME_LINK_POOL_SIZE;
     fl_cfg.queue_count    = FRAME_LINK_QUEUE_SIZE;
     
@@ -477,7 +478,7 @@ static int _capture_auto_init(void)
     if (capture_srv_init() != 0) {
         return -1;
     }
-    LOG_I(MODULE_TAG " 自动加载完成,等待系统启动指令");
+    LOG_I(MODULE_TAG "_capture_auto_init 自动加载完成,等待系统启动指令");
     return 0;
 }
 MODULE_INIT_LEVEL(INIT_DEVICE, _capture_auto_init);  

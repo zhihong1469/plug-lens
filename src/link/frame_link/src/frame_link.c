@@ -1,60 +1,39 @@
 /* SPDX-License-Identifier: MIT */
-/**
- ******************************************************************************
- * @file           frame_link.c
- * @brief          FrameLink 多实例数据链路层 私有实现
- * @defgroup       FrameLink
- * @details
- *   1. 静态实例表管理多命名链路
- *   2. 双超时锁：内存池锁 + 队列锁（固定顺序，无死锁）
- *   3. C11原子引用计数，无锁生命周期管理
- *   4. 内存池满不阻塞生产者，嵌入式最优策略
- *   5. 单写多读权限强制隔离
- *   6. 内部自动安全字符串拷贝，杜绝越界
- ******************************************************************************
- */
 #include "frame_link.h"
+#include "mem_adapter.h"
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
 #include <stdatomic.h>
 
 /* ========================== 私有数据类型 ========================== */
-/** 帧内部结构体（对外完全隐藏） */
 struct frame {
-    frame_info_t          info;           /**< 公共元数据 */
-    uint8_t               *data;          /**< 数据指针 */
-    atomic_uint           ref_cnt;        /**< 原子引用计数 */
-    bool                  read_only;      /**< 只读标记 */
-    frame_link_handle_t   owner;          /**< 所属链路（安全校验） */
+    frame_info_t          info;
+    uint8_t               *data;
+    atomic_uint           ref_cnt;
+    bool                  read_only;
+    frame_link_handle_t   owner;
 };
 
-/** 单条数据链路上下文（对外完全隐藏） */
 struct frame_link {
-    frame_link_cfg_t      cfg;            /**< 配置 */
-    bool                  inited;         /**< 初始化标记 */
+    frame_link_cfg_t      cfg;
+    bool                  inited;
 
-    /* 内存池 */
-    uint8_t               *mem_pool;      /**< 连续内存池基址 */
-    struct frame          *frames;        /**< 帧对象数组 */
-    uint32_t              free_cnt;       /**< 空闲帧数量 */
+    uint8_t               *mem_pool;
+    uint32_t              frame_total_size;  // 🔥 新增：单帧总大小(结构体+数据区)，编译期对齐
+    uint32_t              free_cnt;
 
-    /* 消费队列 */
     struct frame          **queue;
     uint32_t              q_head;
     uint32_t              q_tail;
-    struct frame          *latest_frame;  /**< 最新帧缓存 */
+    struct frame          *latest_frame;
 
-    /* 双锁架构（规范核心） */
-    pthread_mutex_t       pool_lock;      /**< 内存池分配/回收锁 */
-    pthread_mutex_t       queue_lock;     /**< 队列入队/出队锁 */
-
-    uint32_t              frame_id_inc;   /**< 帧ID自增 */
+    pthread_mutex_t       pool_lock;
+    pthread_mutex_t       queue_lock;
+    uint32_t              frame_id_inc;
 };
 
-/** 全局静态实例表（同data_bus设计） */
 typedef struct {
     char      name[FRAME_LINK_NAME_MAX_LEN];
     struct frame_link *link;
@@ -83,9 +62,6 @@ static int _fl_mutex_timedlock(pthread_mutex_t *lock) {
     return pthread_mutex_timedlock(lock, &ts);
 }
 
-/**
- * @brief  内部安全字符串拷贝（自动补结束符，杜绝越界）
- */
 static void _fl_safe_strcpy(char *dest, const char *src, size_t dest_size) {
     if (!dest || !src || dest_size == 0) return;
     strncpy(dest, src, dest_size - 1);
@@ -128,18 +104,24 @@ fl_err_t frame_link_create(const frame_link_cfg_t *cfg) {
         return FL_BUSY;
     }
 
-    struct frame_link *link = calloc(1, sizeof(struct frame_link));
+    struct frame_link *link = mem_calloc(1, sizeof(struct frame_link));
     if (!link) {
         pthread_mutex_unlock(&g_table_lock);
         return FL_NO_MEM;
     }
 
-    link->mem_pool = malloc(cfg->pool_count * (sizeof(struct frame) + cfg->max_frame_size));
-    link->queue = malloc(sizeof(struct frame *) * cfg->queue_count);
+    // 🔥 核心修复1：计算单帧总大小(自动包含结构体对齐填充)
+    const uint32_t frame_total_size = sizeof(struct frame) + cfg->max_frame_size;
+    link->frame_total_size = frame_total_size;
+
+    // 内存池总大小 = 帧数 × 单帧总大小
+    link->mem_pool = mem_alloc(cfg->pool_count * frame_total_size);
+    // 队列分配
+    link->queue = mem_alloc(sizeof(struct frame *) * cfg->queue_count);
     if (!link->mem_pool || !link->queue) {
-        free(link->queue);
-        free(link->mem_pool);
-        free(link);
+        mem_free(link->queue);
+        mem_free(link->mem_pool);
+        mem_free(link);
         pthread_mutex_unlock(&g_table_lock);
         return FL_NO_MEM;
     }
@@ -152,18 +134,25 @@ fl_err_t frame_link_create(const frame_link_cfg_t *cfg) {
     link->latest_frame = NULL;
     link->q_head = link->q_tail = 0;
 
-    link->frames = (struct frame *)link->mem_pool;
+    // 🔥 核心修复2：独立块模式初始化每个帧
+    // 内存布局：[帧0结构体][帧0数据区][帧1结构体][帧1数据区]...[帧N结构体][帧N数据区]
     for (uint32_t i = 0; i < cfg->pool_count; i++) {
-        struct frame *f = &link->frames[i];
+        // 第i个帧的结构体地址 = 内存池基址 + i × 单帧总大小
+        struct frame *f = (struct frame *)(link->mem_pool + i * frame_total_size);
+        // 数据区地址 = 自身结构体地址 + 结构体大小(自动对齐)
         f->data = (uint8_t *)f + sizeof(struct frame);
+        
         atomic_init(&f->ref_cnt, 0);
         f->read_only = false;
         f->owner = link;
         memset(f->data, 0, cfg->max_frame_size);
+
+        // 调试打印：验证内存布局(首次运行可打开，确认无重叠)
+        // printf("[FL_INIT] 帧%d: 结构体=%p, 数据区=%p, 结束=%p\n",
+        //        i, f, f->data, f->data + cfg->max_frame_size);
     }
 
     link->inited = true;
-    // 内部封装安全拷贝，上层无需处理
     _fl_safe_strcpy(g_fl_table[free_idx].name, cfg->name, FRAME_LINK_NAME_MAX_LEN);
     g_fl_table[free_idx].link = link;
     g_fl_table[free_idx].used = true;
@@ -179,9 +168,10 @@ fl_err_t frame_link_destroy(const char *name) {
     frame_link_clear(name);
     pthread_mutex_destroy(&link->pool_lock);
     pthread_mutex_destroy(&link->queue_lock);
-    free(link->queue);
-    free(link->mem_pool);
-    free(link);
+    
+    mem_free(link->queue);
+    mem_free(link->mem_pool);
+    mem_free(link);
 
     pthread_mutex_lock(&g_table_lock);
     for (uint32_t i = 0; i < FRAME_LINK_MAX_INSTANCES; i++) {
@@ -208,10 +198,12 @@ fl_err_t frame_link_clear(const char *name) {
     link->latest_frame = NULL;
     link->free_cnt = link->cfg.pool_count;
 
+    // 🔥 修复：遍历所有独立帧块
     for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
-        struct frame *f = &link->frames[i];
+        struct frame *f = (struct frame *)(link->mem_pool + i * link->frame_total_size);
         atomic_store(&f->ref_cnt, 0);
         f->read_only = false;
+        memset(&f->info, 0, sizeof(frame_info_t));
     }
 
     pthread_mutex_unlock(&link->pool_lock);
@@ -233,8 +225,9 @@ fl_err_t frame_link_producer_get(const char* name, frame_handle_t* out_frame) {
     }
 
     struct frame *free_f = NULL;
+    // 🔥 修复：遍历所有独立帧块
     for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
-        struct frame *f = &link->frames[i];
+        struct frame *f = (struct frame *)(link->mem_pool + i * link->frame_total_size);
         printf("[FL_CHECK] 帧%d 真实引用: %u\n", i, atomic_load(&f->ref_cnt));
         if (atomic_load(&f->ref_cnt) == 0) {
             free_f = f;
@@ -243,6 +236,7 @@ fl_err_t frame_link_producer_get(const char* name, frame_handle_t* out_frame) {
     }
 
     if (!free_f) {
+        link->free_cnt = 0;
         pthread_mutex_unlock(&link->pool_lock);
         return FL_NO_FREE_FRAME;
     }
@@ -253,7 +247,6 @@ fl_err_t frame_link_producer_get(const char* name, frame_handle_t* out_frame) {
     free_f->info.frame_id = ++link->frame_id_inc;
     link->free_cnt--;
 
-    // 新增：生产者获取帧，打印ID+REF
     printf("[FL_PRODUCE] 帧ID=%u | 引用计数=%u | 数据地址=%p\n",
            free_f->info.frame_id, atomic_load(&free_f->ref_cnt), free_f->data);    
     *out_frame = free_f;
@@ -278,6 +271,8 @@ fl_err_t frame_link_producer_push(const char *name, frame_handle_t frame) {
     if (next_tail != link->q_head) {
         link->queue[link->q_tail] = frame;
         link->q_tail = next_tail;
+    } else {
+        printf("[FL_WARN] 帧队列满，丢弃旧帧\n");
     }
     link->latest_frame = frame;
 
@@ -291,41 +286,36 @@ void *frame_get_writable_ptr(frame_handle_t frame) {
     return frame->data;
 }
 
-/**
- * @brief 生产者设置帧元数据（分辨率、格式、数据长度等）
- * @param frame 帧句柄
- * @param info 元数据结构体指针
- * @return 错误码
- * @note 仅生产者可调用（帧处于可写状态），推送后禁止修改
- */
+// 保护帧ID/时间戳，不被上层覆盖
 fl_err_t frame_set_info(frame_handle_t frame, const frame_info_t *info)
 {
-    // 安全校验：句柄非空、元数据非空、帧处于可写状态（单写规范）
     if (!frame || !info || frame->read_only)
     {
         return FL_INVALID_PARAM;
     }
 
-    // 直接赋值元数据（核心修复）
     frame->info.width = info->width;
     frame->info.height = info->height;
     frame->info.format = info->format;
     frame->info.data_size = info->data_size;
-
+    // 禁止修改：frame_id / timestamp_us 由内核自动生成
     return FL_OK;
 }
 
-// 消费者通过总线获取帧（关键：打印+1后的引用计数）
+// 加锁，线程安全
 fl_err_t frame_link_consumer_get_by_bus(const char* name, frame_handle_t bus_frame, frame_handle_t *out_frame) {
     if (!bus_frame || !out_frame) return FL_INVALID_PARAM;
     struct frame_link *link = _fl_find_by_name(name);
     if (!link || bus_frame->owner != link) return FL_NOT_FOUND;
 
+    if (_fl_mutex_timedlock(&link->pool_lock) != 0) return FL_TIMEOUT;
+    
     atomic_fetch_add(&bus_frame->ref_cnt, 1);
-    // 新增：消费者引用帧，打印ID+最新REF
     printf("[FL_CONSUME_GET] 帧ID=%u | 引用计数+1 → %u | 地址=%p\n",
            bus_frame->info.frame_id, atomic_load(&bus_frame->ref_cnt), bus_frame->data);
     *out_frame = bus_frame;
+
+    pthread_mutex_unlock(&link->pool_lock);
     return FL_OK;
 }
 
@@ -353,8 +343,8 @@ fl_err_t frame_link_consumer_get(const char *name, fl_consume_mode_t mode, frame
     return FL_OK;
 }
 
-// 消费者释放帧（关键：打印-1后的引用计数）
-fl_err_t frame_link_consumer_put(frame_handle_t frame) {
+// 唯一释放接口
+fl_err_t frame_link_put(frame_handle_t frame) {
     if (!frame) return FL_INVALID_PARAM;
     struct frame_link *link = frame->owner;
     if (!link) return FL_NOT_FOUND;
@@ -366,13 +356,13 @@ fl_err_t frame_link_consumer_put(frame_handle_t frame) {
     }
 
     uint32_t cnt = atomic_fetch_sub(&frame->ref_cnt, 1) - 1;
-    // 优化：释放帧，打印ID+最新REF
     printf("[FL_CONSUME_PUT] 帧ID=%u | 引用计数-1 → %u | 地址=%p\n",
            frame->info.frame_id, cnt, frame->data);
 
     if (cnt == 0) {
         if (_fl_mutex_timedlock(&link->pool_lock) == 0) {
             link->free_cnt++;
+            frame->read_only = false;
             printf("[FL_RECYCLE] 帧ID=%u 已回收，空闲帧=%u\n", frame->info.frame_id, link->free_cnt);
             pthread_mutex_unlock(&link->pool_lock);
         }

@@ -1,206 +1,100 @@
+我完全吃透了你的所有诉求、纠结点和核心目标！我们先**一锤定音最终方案**（完美兼容你所有想法，不做二选一），再把**帧ID强绑定**的核心机制讲透，最后给你整理**可直接落地的分阶段实现步骤**，全程贴合你的嵌入式项目、IMX6ULL硬件、无回放需求、解耦服务的核心要求。
 
-[root@100ask:/mnt/run_on_board]# ./vision_ai_app
-[I][log.c:0][log_init] Log system initialized (level=4)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:225][main] Main: ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:226][main] Main: Vision AI Framework Starting...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:227][main] Main: ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:230][main] Main: Initializing TLSF static memory pool (Size: 10 MB)
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:232][main] Main: TLSF memory pool init success!
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:174][_init_signal_handling] Main: Signal handler init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:112][app_exit_pipe_init] Main: Global exit pipe init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:89][app_set_terminal_noncanonical] Main: Terminal set to non-canonical mode
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:184][_main_init_buses] Main: Initializing Event Bus[sys_event]...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:252][event_bus_init] Event Bus[sys_event]: 初始化成功
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:193][_main_init_buses] Main: Event Bus[sys_event] init success
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:69][app_publish_sys_event] Main: Published sys event: SYS_CORE_READY
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/common/initcall/src/initcall.c:40][do_initcalls] [InitCall] 按优先级自动初始化开始
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:210][data_bus_init] Data Bus[video]: 初始化成功
-[V4L2] 设备自检通过: Wed Camera, 总线: usb-ci_hdrc.1-1
-[V4L2] 格式支持: YUYV=YES, MJPEG=YES, NV12=NO
-[V4L2] 控制支持: 曝光=YES, 白平衡=YES, 增益=NO
-[V4L2] 格式设置成功: 640x360, FourCC: YUYV
-[V4L2] 帧率设置成功: 30 fps
-[V4L2] 申请缓冲区成功: 实际数量=4
-[USB Camera] 初始化全自检完成 ✅
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:280][event_bus_subscribe_ex] Bus[sys_event] 订阅成功 ID=1, 自过滤=开启
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:467][capture_srv_init] [CAPTURE] 服务初始化完成 [硬件: 640x360@30FPS | AI降频: 5FPS]
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:480][_capture_auto_init] [CAPTURE] 自动加载完成,等待系统启动指令
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/common/initcall/src/initcall.c:45][do_initcalls] [InitCall] 优先级2 模块初始化成功
-[FACE_SRV_DEBUG] 准备创建AI模型 | 路径=./RFB-320-quant-KL-5792.mnn | 输入尺寸=320x240
-[AI_CREATE_DEBUG] 模型创建入口！config=0x7ebb9bfc | model_path=./RFB-320-quant-KL-5792.mnn
-[AI_CREATE_DEBUG] 模型创建完成！返回handle=0x22813c0
-[FACE_SRV_DEBUG] ai_model_mnn_create 返回=0x22813c0
-[AI_INIT_DEBUG] ================== AI初始化开始 ==================
-[AI_INIT_DEBUG] 入参handle=0x22813c0
-[AI_INIT_DEBUG] new mnn_priv_t = 0x2282a78
-[AI_INIT_DEBUG] new UltraFaceMNN = 0x2282a98
-[AI_INIT_DEBUG] 开始加载模型：path=./RFB-320-quant-KL-5792.mnn | w=320 | h=240 | score=0.65 | iou=0.30
-The device support dot:0, support fp16:0, support i8mm: 0
-[AI_INIT_DEBUG] UltraFace init 返回值=0
-[AI_INIT_SUCCESS] ================== AI初始化完成！g_priv=0x2282a78 ==================
-[FACE_SRV_DEBUG] AI模型初始化成功！
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:280][event_bus_subscribe_ex] Bus[sys_event] 订阅成功 ID=2, 自过滤=开启
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:554][face_srv_init] [FACE_DETECT] 服务初始化完成，最新FrameLink适配成功
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:571][face_srv_auto_init] [FACE_DETECT] 自动加载完成，等待系统启动指令
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/common/initcall/src/initcall.c:46][do_initcalls] [InitCall] 优先级3 模块初始化成功
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:302][__demo_auto_init] [DEMO_APP] 加载完成
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/common/initcall/src/initcall.c:47][do_initcalls] [InitCall] 优先级4 模块初始化成功
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/common/initcall/src/initcall.c:49][do_initcalls] [InitCall] 自动初始化完成，总模块数: 3
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:249][main] Main: System running, waiting for exit signal...
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:280][event_bus_subscribe_ex] Bus[sys_event] 订阅成功 ID=3, 自过滤=开启
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:280][event_bus_subscribe_ex] Bus[sys_event] 订阅成功 ID=4, 自过滤=开启
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/event_bus/src/event_bus.c:280][event_bus_subscribe_ex] Bus[sys_event] 订阅成功 ID=5, 自过滤=开启
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:135][_demo_print_help] [DEMO_APP] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:136][_demo_print_help] [DEMO_APP]  键盘控制：
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:137][_demo_print_help] [DEMO_APP]    s - 恢复系统
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:138][_demo_print_help] [DEMO_APP]    t - 暂停系统
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:139][_demo_print_help] [DEMO_APP]    q - 退出应用
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:140][_demo_print_help] [DEMO_APP]    h - 帮助
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:141][_demo_print_help] [DEMO_APP] ========================================
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:220][demo_app_init] [DEMO_APP] 初始化完成
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:238][demo_app_run] [DEMO_APP] 运行中，按 q 退出
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:351][_capture_event_cb] [CAPTURE] 收到系统就绪事件，服务准备完成
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:250][event_bus_cb] [FACE_DETECT] 收到系统核心就绪事件
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:66][_demo_sys_event_cb] [DEMO_APP] 系统核心初始化完成
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:153][_demo_handle_key] [DEMO_APP] 执行命令: s
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:361][_capture_event_cb] [CAPTURE] 收到启动指令，开始初始化采集
-[USB Camera] 开始采集
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:337][capture_srv_start] [CAPTURE] 服务启动成功，硬件采集运行中
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:261][event_bus_cb] [FACE_DETECT] 收到启动指令，初始化人脸检测服务
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:423][face_srv_start] [FACE_DETECT] 服务启动成功，遵循最新FrameLink规范运行
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:103][_demo_cap_event_cb] [DEMO_APP] 采集服务就绪
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:196][capture_work_thread] [CAPTURE] 工作线程启动，硬件采集: 640x360@30FPS | AI软件降频: 5FPS
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:310][face_work_thread] [FACE_DETECT] 工作线程启动，等待视频帧数据...
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:302][capture_work_thread] [CAPTURE] 采集总FPS: 1 | AI有效FPS: 5
-[FL_DEBUG] 空闲帧数量: 8
-[FL_CHECK] 帧0 真实引用: 0
-[FL_PRODUCE] 帧ID=1 | 引用计数=1 | 数据地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:238][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x75f4a008 | 链路=main_cam
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:249][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x75f4a038 | 摄像头数据地址=0x75e68000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:270][capture_work_thread] [CAPTURE] ✅ 帧推入FrameLink成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:282][capture_work_thread] [CAPTURE] ✅ 数据总线赋值句柄=0x75f4a008 | 总线名称=video
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:213][data_bus_frame_cb] [FACE_DETECT]received frame from bus, frame_handle=0x75f4a008
-[FL_CONSUME_GET] 帧ID=1 | 引用计数+1 → 2 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:291][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 帧ID=0 | 句柄=0x75f4a008
-[FL_CONSUME_PUT] 帧ID=1 | 引用计数-1 → 1 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:337][face_work_thread] [FACE_DETECT] 处理帧ID=0x75f4a038 | 分辨率=640x360
-[AI_MNN_DEBUG] 推理入口 | 数据指针=0x75f4a038 | 摄像头宽=640 | 高=360 | 输出数组=0xa5048c
-[AI_MNN_DEBUG] 全局私有数据=0x2282a78 | 模型实例=0x2282a98
-[AI_MNN_DEBUG] UltraFace 内部detect | 就绪状态=1 | 数据指针=0x75f4a038
-[AI_MNN_DEBUG] YUYV转换成功，输出图像数据指针=0x74b14040
-[AI_MNN_DEBUG] YUYV转BGR完成，返回码=0 | BGR图尺寸=640x360
-[AI_MNN_DEBUG] 图像缩放完成 → 模型尺寸320x240
-[AI_MNN_DEBUG] 开始执行MNN模型推理...
-[FL_DEBUG] 空闲帧数量: 7
-[FL_CHECK] 帧0 真实引用: 1
-[FL_CHECK] 帧1 真实引用: 2145878247
-[FL_CHECK] 帧2 真实引用: 2145878247
-[FL_CHECK] 帧3 真实引用: 2145878247
-[FL_CHECK] 帧4 真实引用: 2042595265
-[FL_CHECK] 帧5 真实引用: 2076018107
-[FL_CHECK] 帧6 真实引用: 2061533920
-[FL_CHECK] 帧7 真实引用: 2044428507
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:231][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:234][capture_work_thread] [CAPTURE] frame_link_producer_get 失败，ret=-6
-[FL_DEBUG] 空闲帧数量: 7
-[FL_CHECK] 帧0 真实引用: 1
-[FL_CHECK] 帧1 真实引用: 2145878247
-[FL_CHECK] 帧2 真实引用: 2145878247
-[FL_CHECK] 帧3 真实引用: 2145878247
-[FL_CHECK] 帧4 真实引用: 2042595265
-[FL_CHECK] 帧5 真实引用: 2076018107
-[FL_CHECK] 帧6 真实引用: 2061533920
-[FL_CHECK] 帧7 真实引用: 2044428507
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:231][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:234][capture_work_thread] [CAPTURE] frame_link_producer_get 失败，ret=-6
-[AI_MNN_DEBUG] MNN模型推理执行完成
-[AI_MNN_DEBUG] 获取输出张量：scores=0x228f000, boxes=0x228da88
-[AI_MNN_DEBUG] 生成人脸框数量=0
-[AI_MNN_DEBUG] detect() 执行完成，返回码=0
-[AI_MNN_DEBUG] 检测到人脸数量=0 | 实际输出=0
-[AI_MNN_DEBUG] 推理全部成功！
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:367][face_work_thread] [FACE_DETECT] 帧[1] 未检测到人脸
-[FL_CONSUME_PUT] 帧ID=1 | 引用计数-1 → 0 | 地址=0x75f4a038
-[FL_RECYCLE] 帧ID=1 已回收，空闲帧=8
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/app_plugins/src/demo_app.c:121][_demo_face_event_cb] [DEMO_APP] 人脸服务就绪
-[FL_DEBUG] 空闲帧数量: 8
-[FL_CHECK] 帧0 真实引用: 0
-[FL_PRODUCE] 帧ID=2 | 引用计数=1 | 数据地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:238][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x75f4a008 | 链路=main_cam
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:249][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x75f4a038 | 摄像头数据地址=0x75d86000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:270][capture_work_thread] [CAPTURE] ✅ 帧推入FrameLink成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:282][capture_work_thread] [CAPTURE] ✅ 数据总线赋值句柄=0x75f4a008 | 总线名称=video
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:213][data_bus_frame_cb] [FACE_DETECT]received frame from bus, frame_handle=0x75f4a008
-[FL_CONSUME_GET] 帧ID=2 | 引用计数+1 → 2 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:291][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 帧ID=0 | 句柄=0x75f4a008
-[FL_CONSUME_PUT] 帧ID=2 | 引用计数-1 → 1 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:337][face_work_thread] [FACE_DETECT] 处理帧ID=0x75f4a038 | 分辨率=640x360
-[AI_MNN_DEBUG] 推理入口 | 数据指针=0x75f4a038 | 摄像头宽=640 | 高=360 | 输出数组=0xa5048c
-[AI_MNN_DEBUG] 全局私有数据=0x2282a78 | 模型实例=0x2282a98
-[AI_MNN_DEBUG] UltraFace 内部detect | 就绪状态=1 | 数据指针=0x75f4a038
-[AI_MNN_DEBUG] YUYV转换成功，输出图像数据指针=0x74b14040
-[AI_MNN_DEBUG] YUYV转BGR完成，返回码=0 | BGR图尺寸=640x360
-[AI_MNN_DEBUG] 图像缩放完成 → 模型尺寸320x240
-[AI_MNN_DEBUG] 开始执行MNN模型推理...
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:302][capture_work_thread] [CAPTURE] 采集总FPS: 24 | AI有效FPS: 5
-[FL_DEBUG] 空闲帧数量: 7
-[FL_CHECK] 帧0 真实引用: 1
-[FL_CHECK] 帧1 真实引用: 2145878247
-[FL_CHECK] 帧2 真实引用: 2145878247
-[FL_CHECK] 帧3 真实引用: 2145878247
-[FL_CHECK] 帧4 真实引用: 2025293752
-[FL_CHECK] 帧5 真实引用: 2075559090
-[FL_CHECK] 帧6 真实引用: 2077852377
-[FL_CHECK] 帧7 真实引用: 2043838930
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:231][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:234][capture_work_thread] [CAPTURE] frame_link_producer_get 失败，ret=-6
-[FL_DEBUG] 空闲帧数量: 7
-[FL_CHECK] 帧0 真实引用: 1
-[FL_CHECK] 帧1 真实引用: 2145878247
-[FL_CHECK] 帧2 真实引用: 2145878247
-[FL_CHECK] 帧3 真实引用: 2145878247
-[FL_CHECK] 帧4 真实引用: 2025293752
-[FL_CHECK] 帧5 真实引用: 2075559090
-[FL_CHECK] 帧6 真实引用: 2077852377
-[FL_CHECK] 帧7 真实引用: 2043838930
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:231][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:234][capture_work_thread] [CAPTURE] frame_link_producer_get 失败，ret=-6
-[AI_MNN_DEBUG] MNN模型推理执行完成
-[AI_MNN_DEBUG] 获取输出张量：scores=0x228f000, boxes=0x228da88
-[AI_MNN_DEBUG] 生成人脸框数量=0
-[AI_MNN_DEBUG] detect() 执行完成，返回码=0
-[AI_MNN_DEBUG] 检测到人脸数量=0 | 实际输出=0
-[AI_MNN_DEBUG] 推理全部成功！
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:367][face_work_thread] [FACE_DETECT] 帧[2] 未检测到人脸
-[FL_CONSUME_PUT] 帧ID=2 | 引用计数-1 → 0 | 地址=0x75f4a038
-[FL_RECYCLE] 帧ID=2 已回收，空闲帧=8
-[FL_DEBUG] 空闲帧数量: 8
-[FL_CHECK] 帧0 真实引用: 0
-[FL_PRODUCE] 帧ID=3 | 引用计数=1 | 数据地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:238][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x75f4a008 | 链路=main_cam
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:249][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x75f4a038 | 摄像头数据地址=0x75e68000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:270][capture_work_thread] [CAPTURE] ✅ 帧推入FrameLink成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:282][capture_work_thread] [CAPTURE] ✅ 数据总线赋值句柄=0x75f4a008 | 总线名称=video
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:213][data_bus_frame_cb] [FACE_DETECT]received frame from bus, frame_handle=0x75f4a008
-[FL_CONSUME_GET] 帧ID=3 | 引用计数+1 → 2 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:291][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 帧ID=0 | 句柄=0x75f4a008
-[FL_CONSUME_PUT] 帧ID=3 | 引用计数-1 → 1 | 地址=0x75f4a038
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:337][face_work_thread] [FACE_DETECT] 处理帧ID=0x75f4a038 | 分辨率=640x360
-[AI_MNN_DEBUG] 推理入口 | 数据指针=0x75f4a038 | 摄像头宽=640 | 高=360 | 输出数组=0xa5048c
-[AI_MNN_DEBUG] 全局私有数据=0x2282a78 | 模型实例=0x2282a98
-[AI_MNN_DEBUG] UltraFace 内部detect | 就绪状态=1 | 数据指针=0x75f4a038
-[AI_MNN_DEBUG] YUYV转换成功，输出图像数据指针=0x74b14040
-[AI_MNN_DEBUG] YUYV转BGR完成，返回码=0 | BGR图尺寸=640x360
-[AI_MNN_DEBUG] 图像缩放完成 → 模型尺寸320x240
-[AI_MNN_DEBUG] 开始执行MNN模型推理...
-[FL_DEBUG] 空闲帧数量: 7
-[FL_CHECK] 帧0 真实引用: 1
-[FL_CHECK] 帧1 真实引用: 2145878247
-[FL_CHECK] 帧2 真实引用: 2145878247
-[FL_CHECK] 帧3 真实引用: 2145812711
-[FL_CHECK] 帧4 真实引用: 2075624888
-[FL_CHECK] 帧5 真实引用: 2075427504
-[FL_CHECK] 帧6 真实引用: 2044232408
-[FL_CHECK] 帧7 真实引用: 2077393106
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:231][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:234][capture_work_thread] [CAPTURE] frame_link_producer_get 失败，ret=-6
+# 一、最终方案拍板（解决你所有犹豫，双模式兼容，工业级最优）
+结合你的场景：**嵌入式端、AI慢、推流延迟不可控、不需要存储、要帧-AI强绑定**
+我们不做单选题，直接做**兼容双模式推流**，同时解决所有问题：
+| 推流模式 | 数据格式 | 帧率/延迟 | 携带内容 | 适用场景 |
+|----------|----------|-----------|----------|----------|
+| 模式1（实时流） | 原始YUYV | 高帧率、低延迟 | 纯视频 | 追求实时画面预览 |
+| 模式2（AI流） | AI转换后的RGB | 低帧率、跟随AI速度 | 视频 + 人脸坐标 | 想看带人脸框的远程画面 |
+
+### 核心铁律（全部遵守）
+1. **主链路绝对不动**：仅存摄像头原始YUYV，只读、零修改、零转换
+2. **全服务拉模式**：AI、推流两个慢服务，**只拉主链路最新帧**，自动丢弃旧帧，解决速度差
+3. **帧ID强绑定**：彻底解决AI+推流时间差，100%帧与检测结果对应
+4. **AI专用链路仅1条**：临时缓存RGB图像 + 带帧ID的人脸结果，极简内存
+
+---
+
+# 二、核心机制：帧ID + 人脸结果 强绑定（解决你的最大痛点）
+这是整个架构的灵魂，**简单到极致，绝对不会错位**，我用最通俗的方式讲清楚：
+
+## 1. 基础：每一帧都有唯一身份证 → `帧ID`
+- 采集服务每生产一帧YUYV，自动分配一个**自增数字ID**（1、2、3、4...）
+- 帧ID跟随帧数据存在主FrameLink中，永不重复
+
+## 2. AI服务：推理结果必须「带ID出门」
+1. AI拉取主链路**最新帧**（比如帧ID=5）
+2. AI内部转换RGB、推理人脸
+3. AI输出结果：`{帧ID=5，人脸坐标x1/y1/x2/y2，置信度}`
+4. 把这个**纯数据**存到**AI专用链路**（覆盖式写入，只存最新一条）
+
+## 3. 推流服务：按ID取结果，绝对配对
+1. 推流拉取主链路**最新帧**（比如帧ID=5）
+2. 推流去AI专用链路，找`帧ID=5`的人脸结果
+3. 找到就配对成功，找不到就说明这帧还没推理完/无结果
+4. 推流：要么发纯YUYV，要么发RGB+坐标，**永不乱配**
+
+## 4. 时间差完美解决
+- AI慢、推流快没关系：推流只认**帧ID**，对不上就跳过AI结果，只推视频
+- 不需要队列、不需要缓存多帧，完全适配你的无回放需求
+
+---
+
+# 三、落地实现：分3阶段执行（从快速修复 → 完整架构）
+我们**不一步到位**，先解决当前的**内存踩踏BUG**，再逐步实现绑定、推流，风险最低、开发效率最高：
+
+## 阶段1：短期急救（1天完成，先让系统稳定运行）
+### 目标：修复「内存池满、引用计数踩踏」问题，不改动核心架构
+1. **扩大FrameLink帧内存**
+   - 给每一帧的像素数据增加 `512字节内存隔离区(Padding)`
+   - 总内存池小幅扩容，让AI越界也踩不到帧控制块
+2. **确认主链路只读**
+   - 禁止所有服务（AI/推流）写入主链路数据，仅允许读取
+3. **验证基础功能**
+   - 采集+AI推理正常运行，无内存池报错，无崩溃
+
+## 阶段2：核心架构（2~3天完成，实现帧ID绑定+拉模式）
+### 目标：完成核心机制，解决速度差、帧-AI配对问题
+1. **给FrameLink增加帧ID字段**
+   - 帧结构体新增 `uint32_t frame_id`，采集服务自增赋值
+2. **AI服务改造为拉模式**
+   - 移除主动订阅，改为**定时拉取主链路最新YUYV帧**
+   - 推理结果绑定`frame_id`，存入AI专用缓存
+3. **AI专用链路极简实现**
+   - 仅定义一个结构体：`{frame_id, rgb_buf, face_result}`
+   - 覆盖式写入，不占用额外内存
+4. **验证绑定机制**
+   - 日志打印：帧ID、AI结果ID，确认100%配对
+
+## 阶段3：完整功能（3~5天完成，双模式UDP推流）
+### 目标：实现你要的两种推流模式，全功能闭环
+1. **UDP推流服务开发（拉模式）**
+   - 拉取主链路最新原始YUYV帧
+   - 根据帧ID，匹配AI专用链路的人脸结果
+2. **实现双推流模式**
+   - 模式1：直接打包原始YUYV，UDP高帧率推流
+   - 模式2：复用AI的RGB图像，打包`RGB+人脸坐标`，UDP跟随AI帧率推流
+3. **接口参数优化**
+   - 给AI图像转换函数增加**专用缓存入口参数**
+   - 彻底杜绝内存踩踏（架构级根治）
+4. **全系统联调**
+   - 采集→AI→推流全链路跑通
+   - 实时性、配对准确性、稳定性验证
+
+---
+
+# 四、必须实现的核心功能清单（极简版，无冗余）
+1. FrameLink帧新增 `唯一帧ID`
+2. 全慢服务（AI/推流）改为 **拉最新帧模式**
+3. AI推理结果与 `帧ID` 强绑定存储
+4. 1条AI专用缓存（RGB图像 + 最新人脸数据）
+5. 双模式UDP推流（YUYV实时流 / RGB+AI坐标流）
+6. AI图像转换函数新增**专用缓存参数**（根治内存踩踏）
+
+---
+
+# 五、一句话总结（最终架构灵魂）
+**摄像头生产原始YUYV主链路（只读），AI拉最新帧推理并绑定帧ID，推流拉最新帧+按ID配对AI结果，双模式UDP推流自由切换，拉模式解决速度差，帧ID解决配对问题，全程不修改主链路、极简内存、完美适配你的嵌入式场景！**
+
+这个方案完全匹配你所有的需求、顾虑和未来规划，没有任何妥协，是嵌入式实时视觉AI最稳定、最高效的落地方式！
