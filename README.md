@@ -11,7 +11,9 @@ export LD_LIBRARY_PATH=/mnt/run_on_board/install_arm/lib/:$Ld_LIBRARY_PATH
 
 GDB调试:
 arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
-[root@100ask:/mnt/run_on_board]# ./gdbserver --once :12345 ./vision_ai_app
+[root@100ask:/mnt/run_on_board]# 
+./gdbserver --once :12345 ./vision_ai_app
+WSL2:
   target remote 192.168.5.9:12345
   thread apply all bt
 

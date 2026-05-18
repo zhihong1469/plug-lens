@@ -82,8 +82,8 @@ typedef struct service_ops {
  * @note 所有子类结构体**第一个成员必须是该结构体**，实现C-OOP继承
  */
 typedef struct service_base {
-    srv_state_t          state;     /**< 服务当前状态（统一状态机） */
     const service_ops_t *ops;       /**< 多态操作表指针（绑定子类实现） */
+    srv_state_t          state;     /**< 服务当前状态（统一状态机） */
     const char          *name;      /**< 服务名称（用于调试/标识） */
 } service_base_t;
 

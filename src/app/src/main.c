@@ -22,11 +22,19 @@
 #include "initcall.h"
 #include "event_bus.h"
 #include "data_bus.h"
+#include "mem_adapter.h"  // 新增：TLSF内存适配层头文件
 
 // ==================================================================================
 // 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
 // ==================================================================================
 #define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
+// ==================================================================================
+// 【核心新增】TLSF静态内存池配置（嵌入式Linux 生产级大小）
+// 大小规划：256MB = 32帧视频(128MB) + 事件总线/模块内存(64MB) + 冗余余量(64MB)
+// 可根据硬件调整：128MB / 64MB
+// ==================================================================================
+#define MEM_POOL_SIZE         (20 * 1024 * 1024UL)  // x MB 静态内存池
+static uint8_t s_mem_pool[MEM_POOL_SIZE] __attribute__((aligned(8))); // 8字节对齐，TLSF要求
 
 // ==================================================================================
 // 全局上下文：仅保留系统底层资源，无任何业务变量 + 无总线句柄（已删除）
@@ -213,26 +221,31 @@ int main(int argc, char **argv)
     g_app_ctx.app_running = true;
 
     // 1. 日志初始化
-    log_init(LOG_LEVEL_INFO);
+    log_init(LOG_LEVEL_DEBUG);
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
 
-    // 2. 系统底层初始化
+    // 2. 【核心新增】初始化TLSF静态内存池（必须第一个执行，所有内存分配之前）
+    LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);
+    mem_init(s_mem_pool, MEM_POOL_SIZE);
+    LOG_I("Main: TLSF memory pool init success!");
+
+    // 3. 系统底层初始化
     _init_signal_handling();
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();
 
-    // 3. 核心总线初始化
+    // 4. 核心总线初始化（事件+数据）
     if (_main_init_buses() != 0) goto error_exit;
 
     // 【新增】V4.0强制：双总线初始化完成 → 发布核心就绪事件（依赖注入触发）
     app_publish_sys_event(EVENT_TYPE_SYS_CORE_READY);
 
-    // 4. 自动加载所有业务模块
+    // 5. 自动加载所有业务模块
     do_initcalls();
 
-    // 5. 底层等待退出（业务逻辑在app.c/服务中实现）
+    // 6. 底层等待退出（业务逻辑在app.c/服务中实现）
     LOG_I("Main: System running, waiting for exit signal...");
     while (g_app_ctx.app_running) {
         pause(); // 休眠等待信号，零CPU占用

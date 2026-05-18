@@ -11,22 +11,22 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 /* USB 摄像头最大缓冲区数 */
-#define CAMERA_USB_MAX_BUF      4
+#include "vision_ai_config.h"
+#define CAM_USB_MAX_BUF             CONFIG_CAPTURE_BUF_COUNT      // 摄像头最大缓冲区数量
 
 /**
  * @brief USB 摄像头私有子类（完全封装，对外不可见）
  * V3.0 规则：基类必须放在第一个成员
  */
 typedef struct {
-    camera_base_t      base;
-    int                fd;
-    const char        *dev_path;
-    uint32_t           pixel_fmt;
-    camera_capability_t cap;     /* 设备能力（全自检结果） */
-
-    void               *buf[CAMERA_USB_MAX_BUF];
-    size_t              buf_len[CAMERA_USB_MAX_BUF];
-    int                 buf_cnt;
+    camera_base_t        base;                           // 基类指针
+    camera_capability_t  cap;                            // 相机能力集
+    void                *buf[CONFIG_CAPTURE_BUF_COUNT];  // 数据缓冲区 8/4B x N
+    size_t               buf_len[CONFIG_CAPTURE_BUF_COUNT];// 长度 4/8B x N
+    const char          *dev_path;                       // 设备路径 8/4B
+    uint32_t             pixel_fmt;                      // 像素格式 4B
+    int                  fd;                             // 文件描述符 4B
+    int                  buf_cnt;                        // 缓冲区数量 4B
 } camera_usb_t;
 
 /* ============================================================================
@@ -103,7 +103,7 @@ static int camera_usb_init(camera_base_t *base_me)
     me->base.fps = fps;
 
     // ====================== 【自检 7】申请缓冲区 ======================
-    me->buf_cnt = CAMERA_USB_MAX_BUF;
+    me->buf_cnt = CAM_USB_MAX_BUF;
     ret = v4l2_reqbufs(me->fd, &me->buf_cnt);
     if (ret < 0) {
         perror("[USB Camera] reqbufs failed");
@@ -276,7 +276,7 @@ camera_base_t *camera_usb_create(const char *dev_path,
     if (!dev_path || width <= 0 || height <= 0)
         return NULL;
 
-    camera_usb_t *me = calloc(1, sizeof(*me));
+    camera_usb_t *me = mem_calloc(1, sizeof(*me));
     if (!me) return NULL;
 
     me->base.ops        = &g_camera_usb_ops;
@@ -299,6 +299,6 @@ void camera_usb_destroy(camera_base_t *base_me)
     if (!base_me) return;
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
     camera_deinit(base_me);
-    free(me);
+    mem_free(me);
     printf("[USB Camera] 销毁成功\n");
 }
