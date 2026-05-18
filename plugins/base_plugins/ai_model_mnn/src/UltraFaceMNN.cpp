@@ -65,44 +65,73 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
 }
 
 int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
-    if (!yuyv_data || width <=0 || height <=0) return MNN_FACE_ERR_INPUT;
+    if (!yuyv_data || width <=0 || height <=0) {
+        printf("[AI_MNN_ERROR] YUYV转换入参错误\n");
+        return MNN_FACE_ERR_INPUT;
+    }
     cv::Mat yuyv(height, width, CV_8UC2, (void*)yuyv_data);
     cv::cvtColor(yuyv, out_img, cv::COLOR_YUV2BGR_YUYV);
+
+    // 调试日志
+    printf("[AI_MNN_DEBUG] YUYV转换成功，输出图像数据指针=%p\n", out_img.data);
     return MNN_FACE_OK;
 }
 
 // 【修复】全部使用 FaceInfo_MNN
 int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::vector<FaceInfo_MNN>& face_list) {
-    if (!m_ready || !yuyv_data) return MNN_FACE_ERR_INPUT;
+    // ====================== 调试日志：初始检查 ======================
+    printf("[AI_MNN_DEBUG] UltraFace 内部detect | 就绪状态=%d | 数据指针=%p\n",
+           m_ready, yuyv_data);
+
+    if (!m_ready || !yuyv_data) {
+        printf("[AI_MNN_ERROR] 模型未就绪/数据空！返回 MNN_FACE_ERR_INPUT\n");
+        return MNN_FACE_ERR_INPUT;
+    }
     face_list.clear();
 
     cv::Mat bgr_img;
+    // ====================== 调试日志：YUYV转BGR ======================
     int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, bgr_img);
-    if (ret != MNN_FACE_OK) return ret;
+    printf("[AI_MNN_DEBUG] YUYV转BGR完成，返回码=%d | BGR图尺寸=%dx%d\n",
+           ret, bgr_img.cols, bgr_img.rows);
+    if (ret != MNN_FACE_OK) {
+        printf("[AI_MNN_ERROR] YUYV转BGR失败！\n");
+        return ret;
+    }
 
     cv::Mat ai_img;
+    // ====================== 调试日志：缩放图像 ======================
     cv::resize(bgr_img, ai_img, cv::Size(m_ai_w, m_ai_h));
+    printf("[AI_MNN_DEBUG] 图像缩放完成 → 模型尺寸%dx%d\n", m_ai_w, m_ai_h);
 
+    // 模型预处理
     m_interpreter->resizeSession(m_session);
     std::shared_ptr<MNN::CV::ImageProcess> pretreat(
         MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
     );
     pretreat->convert(ai_img.data, m_ai_w, m_ai_h, ai_img.step[0], m_input_tensor);
 
+    // ====================== 调试日志：执行推理 ======================
+    printf("[AI_MNN_DEBUG] 开始执行MNN模型推理...\n");
     m_interpreter->runSession(m_session);
+    printf("[AI_MNN_DEBUG] MNN模型推理执行完成\n");
 
+    // 获取输出张量
     MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
     MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
+    printf("[AI_MNN_DEBUG] 获取输出张量：scores=%p, boxes=%p\n", tensor_scores, tensor_boxes);
 
     MNN::Tensor scores_host(tensor_scores, tensor_scores->getDimensionType());
     MNN::Tensor boxes_host(tensor_boxes, tensor_boxes->getDimensionType());
     tensor_scores->copyToHostTensor(&scores_host);
     tensor_boxes->copyToHostTensor(&boxes_host);
 
+    // 生成检测框 + NMS
     std::vector<FaceInfo_MNN> bbox_collection;
     generate_bbox(bbox_collection, &scores_host, &boxes_host);
     nms(bbox_collection, face_list);
 
+    printf("[AI_MNN_DEBUG] 生成人脸框数量=%zu\n", face_list.size());
     return MNN_FACE_OK;
 }
 

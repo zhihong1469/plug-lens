@@ -257,7 +257,7 @@ static void *capture_work_thread(void *arg)
         info.height = srv->height;
         info.format = srv->frame_fmt;
         info.data_size = cam_len;
-
+        frame_set_info(frame, &info);
         // ============== 第六步：推送链路 + 发布总线 ==============
         fl_ret = frame_link_producer_push(FRAME_LINK_NAME, frame);
         if (fl_ret != FL_OK) {
@@ -288,7 +288,7 @@ static void *capture_work_thread(void *arg)
 
         // ============== 第七步：生产者释放自身引用（唯一一次） ==============
         // ########################### 调试点5：生产者释放帧 ###########################
-        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 句柄=%p", frame);
+        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 帧ID=%u | 句柄=%p", info.frame_id, frame);
         frame_link_consumer_put(frame);
         frame = NULL;
 

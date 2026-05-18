@@ -220,13 +220,12 @@ fl_err_t frame_link_clear(const char *name) {
 }
 
 /* ========================== 生产者接口 ========================== */
-fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
+fl_err_t frame_link_producer_get(const char* name, frame_handle_t* out_frame) {
     if (!out_frame) return FL_INVALID_PARAM;
     struct frame_link *link = _fl_find_by_name(name);
     if (!link) return FL_NOT_FOUND;
     if (_fl_mutex_timedlock(&link->pool_lock) != 0) return FL_TIMEOUT;
 
-    // ====================== 调试打印1：看空闲帧 ======================
     printf("[FL_DEBUG] 空闲帧数量: %u\n", link->free_cnt); 
     if (link->free_cnt == 0) {
         pthread_mutex_unlock(&link->pool_lock);
@@ -236,8 +235,7 @@ fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
     struct frame *free_f = NULL;
     for (uint32_t i = 0; i < link->cfg.pool_count; i++) {
         struct frame *f = &link->frames[i];
-    // ====================== 新增：打印每个帧的真实引用计数 ======================
-    printf("[FL_CHECK] 帧%d 真实引用: %u\n", i, atomic_load(&f->ref_cnt));
+        printf("[FL_CHECK] 帧%d 真实引用: %u\n", i, atomic_load(&f->ref_cnt));
         if (atomic_load(&f->ref_cnt) == 0) {
             free_f = f;
             break;
@@ -255,7 +253,7 @@ fl_err_t frame_link_producer_get(const char *name, frame_handle_t *out_frame) {
     free_f->info.frame_id = ++link->frame_id_inc;
     link->free_cnt--;
 
-    // ########################### 调试：帧初始化状态 ###########################
+    // 新增：生产者获取帧，打印ID+REF
     printf("[FL_PRODUCE] 帧ID=%u | 引用计数=%u | 数据地址=%p\n",
            free_f->info.frame_id, atomic_load(&free_f->ref_cnt), free_f->data);    
     *out_frame = free_f;
@@ -293,13 +291,40 @@ void *frame_get_writable_ptr(frame_handle_t frame) {
     return frame->data;
 }
 
-/* ========================== 消费者接口 ========================== */
-fl_err_t frame_link_consumer_get_by_bus(const char *name, frame_handle_t bus_frame, frame_handle_t *out_frame) {
+/**
+ * @brief 生产者设置帧元数据（分辨率、格式、数据长度等）
+ * @param frame 帧句柄
+ * @param info 元数据结构体指针
+ * @return 错误码
+ * @note 仅生产者可调用（帧处于可写状态），推送后禁止修改
+ */
+fl_err_t frame_set_info(frame_handle_t frame, const frame_info_t *info)
+{
+    // 安全校验：句柄非空、元数据非空、帧处于可写状态（单写规范）
+    if (!frame || !info || frame->read_only)
+    {
+        return FL_INVALID_PARAM;
+    }
+
+    // 直接赋值元数据（核心修复）
+    frame->info.width = info->width;
+    frame->info.height = info->height;
+    frame->info.format = info->format;
+    frame->info.data_size = info->data_size;
+
+    return FL_OK;
+}
+
+// 消费者通过总线获取帧（关键：打印+1后的引用计数）
+fl_err_t frame_link_consumer_get_by_bus(const char* name, frame_handle_t bus_frame, frame_handle_t *out_frame) {
     if (!bus_frame || !out_frame) return FL_INVALID_PARAM;
     struct frame_link *link = _fl_find_by_name(name);
     if (!link || bus_frame->owner != link) return FL_NOT_FOUND;
 
     atomic_fetch_add(&bus_frame->ref_cnt, 1);
+    // 新增：消费者引用帧，打印ID+最新REF
+    printf("[FL_CONSUME_GET] 帧ID=%u | 引用计数+1 → %u | 地址=%p\n",
+           bus_frame->info.frame_id, atomic_load(&bus_frame->ref_cnt), bus_frame->data);
     *out_frame = bus_frame;
     return FL_OK;
 }
@@ -328,28 +353,27 @@ fl_err_t frame_link_consumer_get(const char *name, fl_consume_mode_t mode, frame
     return FL_OK;
 }
 
+// 消费者释放帧（关键：打印-1后的引用计数）
 fl_err_t frame_link_consumer_put(frame_handle_t frame) {
     if (!frame) return FL_INVALID_PARAM;
     struct frame_link *link = frame->owner;
     if (!link) return FL_NOT_FOUND;
 
-    // ====================== 新增：防重复释放兜底（必加） ======================
     uint32_t old_cnt = atomic_load(&frame->ref_cnt);
     if (old_cnt == 0) {
         printf("[FL_ERROR] 帧%u 已空闲，禁止重复释放！\n", frame->info.frame_id);
         return FL_INVALID_PARAM;
     }
 
-    // 原有逻辑不变
     uint32_t cnt = atomic_fetch_sub(&frame->ref_cnt, 1) - 1;
-
-    // ########################### 调试：帧释放后的引用计数 ###########################
-    printf("[FL_CONSUME] 帧ID=%u | 释放后引用=%u | 空闲帧数量=%u\n",
-           frame->info.frame_id, cnt, link->free_cnt);
+    // 优化：释放帧，打印ID+最新REF
+    printf("[FL_CONSUME_PUT] 帧ID=%u | 引用计数-1 → %u | 地址=%p\n",
+           frame->info.frame_id, cnt, frame->data);
 
     if (cnt == 0) {
         if (_fl_mutex_timedlock(&link->pool_lock) == 0) {
             link->free_cnt++;
+            printf("[FL_RECYCLE] 帧ID=%u 已回收，空闲帧=%u\n", frame->info.frame_id, link->free_cnt);
             pthread_mutex_unlock(&link->pool_lock);
         }
     }

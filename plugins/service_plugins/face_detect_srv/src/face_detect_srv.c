@@ -170,12 +170,12 @@ static frame_handle_t face_queue_dequeue(void)
         frame = s_face_srv.frame_queue[s_face_srv.queue_front];
         s_face_srv.queue_front = (s_face_srv.queue_front + 1) % AI_PROCESS_QUEUE_SIZE;
         s_face_srv.queue_count--;
+
     }
     face_srv_unlock();
 
     return frame;
 }
-
 /* =============================================================================
  * 数据总线回调函数【核心：零耗时、仅引用、不入队】
  * ============================================================================*/
@@ -210,11 +210,12 @@ static void data_bus_frame_cb(data_bus_item_handle_t item, void *user_data)
         return;
     }
     bus_frame = *(frame_handle_t *)bus_ptr;
-
+    LOG_I(MODULE_TAG "received frame from bus, frame_handle=%p", bus_frame);
     // FrameLink规范：通过总线句柄引用帧（引用计数+1，防止被回收）
     frame_handle_t proc_frame = NULL;
     if (frame_link_consumer_get_by_bus(FRAME_LINK_NAME, bus_frame, &proc_frame) != FL_OK)
     {
+        LOG_E(MODULE_TAG"frame_link_consumer_get_by_bus failed for frame_handle=%p", bus_frame);
         data_bus_release(item);
         return;
     }
@@ -222,6 +223,7 @@ static void data_bus_frame_cb(data_bus_item_handle_t item, void *user_data)
     // 入队缓冲队列，失败则释放帧引用
     if (!face_queue_enqueue(proc_frame))
     {
+        LOG_E(MODULE_TAG "face_queue_enqueue failed for frame_handle=%p", proc_frame);
         frame_link_consumer_put(proc_frame);
     }
     // 释放总线包装项（不释放帧本体）
@@ -332,15 +334,22 @@ static void *face_work_thread(void *arg)
         const uint8_t *frame_data = frame_get_readonly_ptr(proc_frame);
         // 获取帧元数据（帧ID、分辨率等）
         frame_get_info(proc_frame, &frame_info);
-
+        LOG_D(MODULE_TAG " 处理帧ID=%p | 分辨率=%ux%u", frame_data, frame_info.width, frame_info.height);
         // ====================== AI核心推理 ======================
         // 直接传入摄像头原始YUYV数据，模型内部自动缩放至320x240
-        ai_model_mnn_infer_yuyv((void *)frame_data,
+        int ret = ai_model_mnn_infer_yuyv((void *)frame_data,
                                 CAPTURE_WIDTH,
                                 CAPTURE_HEIGHT,
                                 srv->faces,
                                 MAX_FACES,
                                 &srv->face_num);
+
+        if (ret != 0)
+        {
+            LOG_E(MODULE_TAG " AI推理失败");
+            frame_link_consumer_put(proc_frame);
+            continue;
+        }
 
         // 人脸坐标映射：模型输出→原始摄像头分辨率（必须调用）
         for (int i = 0; i < srv->face_num; i++)
@@ -506,14 +515,26 @@ static int face_srv_init(void)
         .score_thresh  = AI_SCORE_THRESH,
         .iou_thresh    = AI_IOU_THRESH
     };
+    // ====================== 新增调试日志 ======================
+    printf("[FACE_SRV_DEBUG] 准备创建AI模型 | 路径=%s | 输入尺寸=%dx%d\n",
+           AI_MODEL_PATH, AI_INPUT_WIDTH, AI_INPUT_HEIGHT);
+
     srv->ai_model = ai_model_mnn_create(&ai_cfg);
+    printf("[FACE_SRV_DEBUG] ai_model_mnn_create 返回=%p\n", srv->ai_model);
+
     if (!srv->ai_model)
     {
         LOG_E(MODULE_TAG " AI模型初始化失败");
         pthread_mutex_destroy(&srv->lock);
         return -1;
     }
-
+    // ====================== 【修复】必须添加这一行！======================
+    ret = ai_model_init(srv->ai_model);
+    if (ret != AI_MODEL_OK) {
+        LOG_E(MODULE_TAG " AI模型初始化执行失败！");
+        return -1;
+    }
+    printf("[FACE_SRV_DEBUG] AI模型初始化成功！\n");
     // 订阅系统事件总线
     event_subscriber_t evt_sub = {
         .event_type = EVENT_TYPE_INVALID,
