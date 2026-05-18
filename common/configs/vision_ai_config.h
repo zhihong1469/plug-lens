@@ -82,6 +82,28 @@ typedef enum {
     EVENT_TYPE_DEMO_MAX            = 0x4FFF
 } event_type_t;
 
+
+// ==========================================================================
+// 2. 数据类型枚举 → 用来区分不同数据（你的核心：RGB视频 + AI结果）
+// ==========================================================================
+typedef enum {
+    DATA_TYPE_INVALID = 0,         // 无效类型
+
+    // 视频数据
+    DATA_TYPE_VIDEO_FRAME = 0x01,  // 通用视频帧
+    DATA_TYPE_VIDEO_FRAME_YUV420,  // YUV格式帧
+    DATA_TYPE_VIDEO_FRAME_RGB,     // 【你的核心】RGB原始帧
+
+    // AI数据
+    DATA_TYPE_AI_RESULT = 0x10,    // 【你的核心】人脸检测结果
+
+    // 音频数据（你用不到）
+    DATA_TYPE_AUDIO_FRAME = 0x20,
+    DATA_TYPE_AUDIO_PCM,
+
+    DATA_TYPE_MAX = 0xFF
+} data_type_t;
+
 // ==========================================================================
 // 三、
 // ==========================================================================
@@ -109,15 +131,15 @@ typedef enum {
 #define CONFIG_CAPTURE_WIDTH 640
 #define CONFIG_CAPTURE_HEIGHT 360
 #define CONFIG_CAPTURE_FORMAT 0  // 0=YUYV 1=NV12 2=MJPEG
-#define CONFIG_CAPTURE_FPS 4
+#define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 // 帧链路配置
-#define CONFIG_FRAME_LINK_POOL_SIZE 4
-#define CONFIG_FRAME_LINK_QUEUE_SIZE 2
+#define CONFIG_FRAME_LINK_POOL_SIZE 8
+#define CONFIG_FRAME_LINK_QUEUE_SIZE 4
 
 // AI模型配置
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"

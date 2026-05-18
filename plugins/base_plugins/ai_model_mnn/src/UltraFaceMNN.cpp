@@ -64,33 +64,50 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
     return MNN_FACE_OK;
 }
 
-int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
-    if (!yuyv_data || width <=0 || height <=0) return MNN_FACE_ERR_INPUT;
-    cv::Mat yuyv(height, width, CV_8UC2, (void*)yuyv_data);
-    cv::cvtColor(yuyv, out_img, cv::COLOR_YUV2BGR_YUYV);
+// 🔥 重构：直接写入外部BGR缓冲区，无内部内存分配
+int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_buf) {
+    if (!yuyv_data || !bgr_buf || width <=0 || height <=0) {
+        return MNN_FACE_ERR_INPUT;
+    }
+
+    cv::Mat yuyv_mat(height, width, CV_8UC2, (void*)yuyv_data);
+    cv::Mat bgr_mat(height, width, CV_8UC3, bgr_buf);
+    cv::cvtColor(yuyv_mat, bgr_mat, cv::COLOR_YUV2BGR_YUYV);
+
     return MNN_FACE_OK;
 }
 
-// 【修复】全部使用 FaceInfo_MNN
-int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::vector<FaceInfo_MNN>& face_list) {
-    if (!m_ready || !yuyv_data) return MNN_FACE_ERR_INPUT;
+// 🔥 重构：使用外部缓存，无内部临时图像，彻底解决内存踩踏
+int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h,
+                         uint8_t* external_bgr_buf,
+                         std::vector<FaceInfo_MNN>& face_list) {
+    if (!m_ready || !yuyv_data || !external_bgr_buf) {
+        return MNN_FACE_ERR_INPUT;
+    }
     face_list.clear();
 
-    cv::Mat bgr_img;
-    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, bgr_img);
-    if (ret != MNN_FACE_OK) return ret;
+    // 写入外部专属缓冲区
+    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, external_bgr_buf);
+    if (ret != MNN_FACE_OK) {
+        return ret;
+    }
 
+    // 包裹外部缓冲区，不拷贝内存
+    cv::Mat bgr_img(cam_h, cam_w, CV_8UC3, external_bgr_buf);
     cv::Mat ai_img;
     cv::resize(bgr_img, ai_img, cv::Size(m_ai_w, m_ai_h));
 
+    // 模型预处理
     m_interpreter->resizeSession(m_session);
     std::shared_ptr<MNN::CV::ImageProcess> pretreat(
         MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
     );
     pretreat->convert(ai_img.data, m_ai_w, m_ai_h, ai_img.step[0], m_input_tensor);
 
+    // 推理
     m_interpreter->runSession(m_session);
 
+    // 获取输出
     MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
     MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
 
@@ -99,6 +116,7 @@ int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::ve
     tensor_scores->copyToHostTensor(&scores_host);
     tensor_boxes->copyToHostTensor(&boxes_host);
 
+    // 后处理
     std::vector<FaceInfo_MNN> bbox_collection;
     generate_bbox(bbox_collection, &scores_host, &boxes_host);
     nms(bbox_collection, face_list);

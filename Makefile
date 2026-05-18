@@ -51,6 +51,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/common/pool/inc \
 	-I$(TOPDIR)/common/img_proc/inc \
 	-I$(TOPDIR)/common/initcall/inc \
+	-I$(TOPDIR)/common/mem_adapter/inc \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/src/base/camera/inc \
 	-I$(TOPDIR)/src/base/ai_model/inc \
@@ -60,7 +61,8 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/src/app/inc \
 	-I$(TOPDIR)/src/link/frame_link/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
-	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4
+	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
+	-I$(TOPDIR)/third_lib/tlsf-master
 
 # 导出全局路径（所有子模块自动可用）
 export GLOBAL_INC
