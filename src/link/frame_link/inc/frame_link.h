@@ -118,6 +118,8 @@ fl_err_t frame_link_producer_push(const char *name, frame_handle_t frame);
  */
 void *frame_get_writable_ptr(frame_handle_t frame);
 
+
+fl_err_t frame_set_info(frame_handle_t frame, const frame_info_t *info);
 /* ========================== 消费者接口 ========================== */
 /**
  * @brief  通过DataBus句柄绑定帧（持证取帧）
