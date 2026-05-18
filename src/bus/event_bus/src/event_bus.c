@@ -245,6 +245,8 @@ int event_bus_init(const event_bus_config_t *config) {
     atomic_init(&ctx->drop_count, 0);
 
     strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
+    s_bus_table[free_idx].name[BUS_NAME_MAX_LEN-1] = '\0';
+    ctx->config.name = s_bus_table[free_idx].name;
     s_bus_table[free_idx].bus = ctx;
     s_bus_table[free_idx].used = true;
 

@@ -27,6 +27,13 @@
 // ==========================================================================
 // 全局配置与宏定义
 // ==========================================================================
+#ifdef __x86_64__
+#define MEM_ALIGN_MASK  7  // 64位：8字节对齐
+#else
+#define MEM_ALIGN_MASK  3  // 32位：4字节对齐
+#endif
+#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK)
+
 #define MAX_DATA_BUS            4
 #define BUS_NAME_MAX_LEN        16
 #define DATA_BUS_MAGIC          0xA55A5AA5u  // 魔法数：防非法指针
@@ -41,8 +48,8 @@
 // 多实例管理（原有逻辑不变）
 // ==========================================================================
 typedef struct {
-    char name[BUS_NAME_MAX_LEN];
     struct data_bus_t *bus;
+    char name[BUS_NAME_MAX_LEN];
     bool used;
 } data_bus_entry_t;
 
@@ -58,44 +65,41 @@ struct data_bus_item_info {
     data_type_t type;
     uint64_t timestamp;
     uint32_t data_size;
-    atomic_uint ref_count;    // C11原子引用计数 ✅ 无锁优化
+    atomic_uint ref_count;    // C11原子引用计数 固定 4 字节
     const char *producer;
 };
 
-// 数据项结构体（新增魔法数，删除ref_lock）
 typedef struct data_bus_item_t {
-    uint32_t magic;                      // 魔法数：安全校验 ✅
-    struct data_bus_item_info info;
-    void *data_ptr;
-    bool in_use;
-    bool published;
+    void                 *data_ptr;      // 数据指针        8/4B
+    struct data_bus_item_info  info;          // 条目信息结构体
+    uint32_t              magic;         // 魔法数(安全校验) 4B
+    bool                  in_use;        // 使用标记        1B
+    bool                  published;     // 发布标记        1B
 } data_item_t;
 
 // 订阅者结构体（不变）
 typedef struct data_bus_subscription_t {
-    data_type_t type;
     data_bus_callback_t cb;
+    data_type_t type;
     void *user_data;
     bool valid;
 } data_subscriber_t;
 
 // 总线上下文（细粒度锁优化 + 魔法数）
 typedef struct data_bus_t {
-    uint32_t magic;                      // 魔法数：安全校验 ✅
-    data_bus_config_t config;
-    data_item_t *items;
-    data_subscriber_t *subscribers;
-    uint32_t max_items;
-    uint32_t max_subscribers;
-    size_t max_item_size;
-    data_item_t *latest_item_held;
-    void *memory_pool;
-
-    // 🔴 原全局大锁 → 拆分三把细粒度锁 ✅ 核心优化
-    pthread_mutex_t pool_lock;     // 保护：内存池/alloc/free
-    pthread_mutex_t sub_lock;      // 保护：订阅者列表
-    pthread_mutex_t publish_lock;  // 保护：发布/最新数据
-    pthread_rwlock_t  rwlock;      // 保留：拉模式读写锁
+    data_item_t *items;             // 数据项数组 8/4B
+    data_subscriber_t *subscribers; // 订阅者数组 8/4B
+    void *memory_pool;              // 内存池基址 8/4B
+    data_item_t *latest_item_held;  // 最新数据项 8/4B
+    data_bus_config_t config;       // 总线配置
+    pthread_mutex_t pool_lock;      // 内存池锁 4/8B
+    pthread_mutex_t sub_lock;       // 订阅锁 4/8B
+    pthread_mutex_t publish_lock;   // 发布锁 4/8B
+    pthread_rwlock_t rwlock;        // 读写锁 8B
+    size_t max_item_size;           // 最大数据尺寸 4/8B
+    uint32_t max_items;             // 最大项数 4B
+    uint32_t max_subscribers;       // 最大订阅数 4B
+    uint32_t magic;                 // 校验魔法数 4B
 } data_bus_context_t;
 
 // 数据类型字符串（不变）
@@ -175,6 +179,7 @@ int data_bus_init(const data_bus_config_t *config) {
     ctx->config = *config;
     ctx->max_items = config->max_items ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
     ctx->max_item_size = config->max_item_size ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
+    ctx->max_item_size = ALIGN_UP(ctx->max_item_size);
     ctx->max_subscribers = config->max_subscribers ? config->max_subscribers : DATA_BUS_MAX_SUBSCRIBERS_DEFAULT;
     ctx->latest_item_held = NULL;
 
@@ -203,6 +208,8 @@ int data_bus_init(const data_bus_config_t *config) {
 
     // 注册实例
     strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
+    s_bus_table[free_idx].name[BUS_NAME_MAX_LEN-1] = '\0'; // 强制补结束符
+    ctx->config.name = s_bus_table[free_idx].name; // 覆盖为全局数组指针
     s_bus_table[free_idx].bus = ctx;
     s_bus_table[free_idx].used = true;
 

@@ -12,6 +12,12 @@
     #define POOL_UNLOCK(pool)  ((void)0)
 #endif
 
+#ifdef __x86_64__
+#define MEM_ALIGN_MASK  7  // 64位：8字节对齐
+#else
+#define MEM_ALIGN_MASK  3  // 32位：4字节对齐
+#endif
+#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK)
 // ==========================================================================
 // API 实现
 // ==========================================================================
@@ -28,7 +34,7 @@ void Pool_Init(Pool_t *pool,
     }
 
     // 初始化基本参数
-    pool->item_size = item_size;
+    pool->item_size = ALIGN_UP(item_size);
     pool->pool_capacity = pool_capacity;
     pool->memory_pool = memory_buffer;
     pool->free_list = free_list_buffer;
@@ -39,12 +45,12 @@ void Pool_Init(Pool_t *pool,
     // 将所有对象指针压入空闲列表
     for (uint32_t i = 0; i < pool_capacity; i++) {
         // 计算第 i 个对象的地址
-        pool->free_list[i] = (uint8_t*)memory_buffer + (i * item_size);
+        pool->free_list[i] = (uint8_t*)memory_buffer + (i * pool->item_size);
     }
     pool->top = pool_capacity; // 栈顶指向最后一个元素的下一个位置
 
     // 清零内存（可选，根据需求）
-    memset(memory_buffer, 0, item_size * pool_capacity);
+    memset(memory_buffer, 0, pool->item_size * pool_capacity);
 
 #if POOL_ENABLE_THREAD_SAFE
     pthread_mutex_init(&pool->mutex, NULL);

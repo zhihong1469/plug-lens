@@ -7,15 +7,21 @@
 #include <time.h>
 #include <stdatomic.h>
 
+#ifdef __x86_64__
+#define MEM_ALIGN_MASK  7  // 64位：8字节对齐
+#else
+#define MEM_ALIGN_MASK  3  // 32位：4字节对齐
+#endif
+#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK)
+
 /* ========================== 私有数据类型 ========================== */
 struct frame {
-    frame_info_t          info;
-    uint8_t               *data;
-    atomic_uint           ref_cnt;
-    bool                  read_only;
-    frame_link_handle_t   owner;
+    frame_info_t          info;      // 最大
+    uint8_t               *data;     // 指针
+    frame_link_handle_t   owner;     // 指针
+    atomic_uint           ref_cnt;   // 4
+    bool                  read_only; // 1
 };
-
 struct frame_link {
     frame_link_cfg_t      cfg;
     bool                  inited;
@@ -111,7 +117,8 @@ fl_err_t frame_link_create(const frame_link_cfg_t *cfg) {
     }
 
     // 🔥 核心修复1：计算单帧总大小(自动包含结构体对齐填充)
-    const uint32_t frame_total_size = sizeof(struct frame) + cfg->max_frame_size;
+    const size_t aligned_max_frame_size = ALIGN_UP(cfg->max_frame_size);
+    const uint32_t frame_total_size = sizeof(struct frame) + aligned_max_frame_size;
     link->frame_total_size = frame_total_size;
 
     // 内存池总大小 = 帧数 × 单帧总大小

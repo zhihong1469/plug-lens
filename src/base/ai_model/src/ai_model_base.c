@@ -1,4 +1,5 @@
 #include "ai_model_base.h"
+#include "mem_adapter.h"
 #include <stdlib.h>
 #include <string.h>
 

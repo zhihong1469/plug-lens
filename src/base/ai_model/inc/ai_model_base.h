@@ -42,11 +42,11 @@ typedef enum {
  * @note  所有检测模型（人脸/目标）共用配置
  */
 typedef struct {
-    const char *model_path;   /**< 模型文件路径（.mnn/.rknn）*/
-    uint32_t    input_width;  /**< 模型要求输入宽度 */
-    uint32_t    input_height; /**< 模型要求输入高度 */
-    float       score_thresh; /**< 置信度阈值（0~1）*/
-    float       iou_thresh;   /**< NMS非极大值抑制阈值 */
+    const char      *model_path;       // 模型路径 8/4B
+    uint32_t         input_width;      // 输入宽度 4B
+    uint32_t         input_height;     // 输入高度 4B
+    float            score_thresh;     // 置信度阈值 4B
+    float            iou_thresh;       // NMS阈值 4B
 } ai_model_config_t;
 
 // ==========================
@@ -71,9 +71,9 @@ typedef struct ai_model_ops ai_model_ops_t;
  * @note  上层业务仅操作该句柄，无需关心内部实现
  */
 typedef struct {
-    void *user_data;                  /**< 子类私有数据（MNN/RKNN内部句柄）*/
     const ai_model_ops_t *ops;        /**< 多态操作函数表 */
     ai_model_config_t config;         /**< 模型配置副本 */
+    void *user_data;                  /**< 子类私有数据（MNN/RKNN内部句柄）*/
 } ai_model_handle_t;
 
 /**

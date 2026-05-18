@@ -19,15 +19,14 @@
  * V3.0 规则：基类必须放在第一个成员
  */
 typedef struct {
-    camera_base_t      base;
-    int                fd;
-    const char        *dev_path;
-    uint32_t           pixel_fmt;
-    camera_capability_t cap;     /* 设备能力（全自检结果） */
-
-    void               *buf[CAM_USB_MAX_BUF];
-    size_t              buf_len[CAM_USB_MAX_BUF];
-    int                 buf_cnt;
+    camera_base_t        base;                           // 基类指针
+    camera_capability_t  cap;                            // 相机能力集
+    void                *buf[CONFIG_CAPTURE_BUF_COUNT];  // 数据缓冲区 8/4B x N
+    size_t               buf_len[CONFIG_CAPTURE_BUF_COUNT];// 长度 4/8B x N
+    const char          *dev_path;                       // 设备路径 8/4B
+    uint32_t             pixel_fmt;                      // 像素格式 4B
+    int                  fd;                             // 文件描述符 4B
+    int                  buf_cnt;                        // 缓冲区数量 4B
 } camera_usb_t;
 
 /* ============================================================================

@@ -64,12 +64,12 @@ typedef enum {
  *          大数据请使用数据总线，事件总线仅传递通知
  */
 typedef struct {
-    event_type_t      type;         /**< 事件类型（全局唯一枚举） */
-    event_priority_t  priority;     /**< 事件优先级 */
-    const char       *source;       /**< 事件发布者标识（模块名） */
-    uint64_t          timestamp;    /**< 事件产生时间戳(us) */
-    void             *data;         /**< 事件附加数据指针 */
-    uint32_t          data_len;     /**< 附加数据长度 */
+    uint64_t          timestamp;    /**< 时间戳(us)      8B */
+    void             *data;         /**< 附加数据指针    8/4B */
+    const char       *source;       /**< 发布者模块名    8/4B */
+    uint32_t          data_len;     /**< 数据长度        4B */
+    event_type_t      type;         /**< 事件类型        4B */
+    event_priority_t  priority;     /**< 事件优先级      4B */
 } event_t;
 
 /**
@@ -84,9 +84,9 @@ typedef void (*event_callback_t)(const event_t *event, void *user_data);
  * @details 用于向总线注册事件监听
  */
 typedef struct {
-    event_type_t      event_type;        /**< 订阅的事件类型，INVALID=订阅所有事件 */
     event_callback_t  callback;          /**< 事件触发回调函数 */
     void             *user_data;         /**< 回调自定义参数 */
+    event_type_t      event_type;        /**< 订阅的事件类型，INVALID=订阅所有事件 */
     bool              skip_self_published;/**< 是否跳过自己发布的事件：true=跳过，false=接收 */
 } event_subscriber_t;
 

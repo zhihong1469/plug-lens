@@ -45,14 +45,14 @@ typedef struct camera_base camera_base_t;
  *          用于上层查询设备支持的格式、参数等特性
  */
 typedef struct {
-    char device_name[32];    /**< 设备名称（如：USB Camera） */
-    char bus_info[32];       /**< 总线信息（如：usb-ci_hdrc.1-1） */
-    bool support_yuyv;       /**< 是否支持YUYV像素格式 */
-    bool support_mjpeg;      /**< 是否支持MJPEG像素格式 */
-    bool support_nv12;       /**< 是否支持NV12像素格式 */
-    bool support_exposure;   /**< 是否支持手动曝光调节 */
-    bool support_white_balance; /**< 是否支持手动白平衡调节 */
-    bool support_gain;       /**< 是否支持手动增益调节 */
+    char device_name[32];                // 设备名 32B
+    char bus_info[32];                  // 总线信息 32B
+    bool support_yuyv;                  // 支持YUYV 1B
+    bool support_mjpeg;                 // 支持MJPEG 1B
+    bool support_nv12;                  // 支持NV12 1B
+    bool support_exposure;              // 支持曝光 1B
+    bool support_white_balance;         // 支持白平衡 1B
+    bool support_gain;                  // 支持增益 1B
 } camera_capability_t;
 
 /**
