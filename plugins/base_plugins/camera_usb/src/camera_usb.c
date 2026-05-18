@@ -277,7 +277,7 @@ camera_base_t *camera_usb_create(const char *dev_path,
     if (!dev_path || width <= 0 || height <= 0)
         return NULL;
 
-    camera_usb_t *me = calloc(1, sizeof(*me));
+    camera_usb_t *me = mem_calloc(1, sizeof(*me));
     if (!me) return NULL;
 
     me->base.ops        = &g_camera_usb_ops;
@@ -300,6 +300,6 @@ void camera_usb_destroy(camera_base_t *base_me)
     if (!base_me) return;
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
     camera_deinit(base_me);
-    free(me);
+    mem_free(me);
     printf("[USB Camera] 销毁成功\n");
 }

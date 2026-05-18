@@ -7,7 +7,7 @@ ai_model_handle_t *ai_model_create(const ai_model_config_t *config,
 {
     if (!config || !ops) return NULL;
 
-    ai_model_handle_t *handle = (ai_model_handle_t *)malloc(sizeof(ai_model_handle_t));
+    ai_model_handle_t *handle = (ai_model_handle_t *)mem_alloc(sizeof(ai_model_handle_t));
     if (!handle) return NULL;
 
     memcpy(&handle->config, config, sizeof(ai_model_config_t));
@@ -21,7 +21,7 @@ void ai_model_destroy(ai_model_handle_t *handle)
 {
     if (handle) {
         ai_model_deinit(handle);
-        free(handle);
+        mem_free(handle);
     }
 }
 
