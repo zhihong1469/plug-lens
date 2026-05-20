@@ -8,22 +8,22 @@ set(CMAKE_IMPORT_FILE_VERSION 1)
 # Import target "libjpeg-turbo::jpeg" for configuration "Release"
 set_property(TARGET libjpeg-turbo::jpeg APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(libjpeg-turbo::jpeg PROPERTIES
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libjpeg.so.62.3.0"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libjpeg.so.62.4.0"
   IMPORTED_SONAME_RELEASE "libjpeg.so.62"
   )
 
 list(APPEND _cmake_import_check_targets libjpeg-turbo::jpeg )
-list(APPEND _cmake_import_check_files_for_libjpeg-turbo::jpeg "${_IMPORT_PREFIX}/lib/libjpeg.so.62.3.0" )
+list(APPEND _cmake_import_check_files_for_libjpeg-turbo::jpeg "${_IMPORT_PREFIX}/lib/libjpeg.so.62.4.0" )
 
 # Import target "libjpeg-turbo::turbojpeg" for configuration "Release"
 set_property(TARGET libjpeg-turbo::turbojpeg APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(libjpeg-turbo::turbojpeg PROPERTIES
-  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libturbojpeg.so.0.2.0"
+  IMPORTED_LOCATION_RELEASE "${_IMPORT_PREFIX}/lib/libturbojpeg.so.0.4.0"
   IMPORTED_SONAME_RELEASE "libturbojpeg.so.0"
   )
 
 list(APPEND _cmake_import_check_targets libjpeg-turbo::turbojpeg )
-list(APPEND _cmake_import_check_files_for_libjpeg-turbo::turbojpeg "${_IMPORT_PREFIX}/lib/libturbojpeg.so.0.2.0" )
+list(APPEND _cmake_import_check_files_for_libjpeg-turbo::turbojpeg "${_IMPORT_PREFIX}/lib/libturbojpeg.so.0.4.0" )
 
 # Import target "libjpeg-turbo::turbojpeg-static" for configuration "Release"
 set_property(TARGET libjpeg-turbo::turbojpeg-static APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)

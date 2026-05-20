@@ -8,6 +8,7 @@ cp output/vision_ai_app ~/nfs/run_on_board/
 [root@100ask:/mnt/run_on_board]#
 export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/mnt/run_on_board/install_arm/lib/:$Ld_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/libjpeg:$LD_LIBRARY_PATH
 
 GDB调试:
 arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
