@@ -24,7 +24,7 @@
 // ==========================================================================
 #define MODULE_NAME               "DEMO_APP"
 #define MODULE_TAG                "[DEMO_APP]"
-#define SYS_EVENT_BUS_NAME        "sys_event"
+#define APP_EVENT_BUS_NAME        SYS_EVENT_BUS_NAME
 #define APP_LOOP_WAIT_US          30000   // 30ms 主循环等待
 #define KEY_DEBOUNCE_US           50000   // 50ms 键盘防抖（关键修复）
 
@@ -155,13 +155,13 @@ static void _demo_handle_key(char cmd)
 
     switch (cmd) {
         case 's': case 'S':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_RESUME, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_RESUME, MODULE_NAME);
             break;
         case 't': case 'T':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_PAUSE, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_PAUSE, MODULE_NAME);
             break;
         case 'q': case 'Q':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_SHUTDOWN, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_SHUTDOWN, MODULE_NAME);
             break;
         case 'h': case 'H':
             _demo_print_help();
@@ -194,7 +194,7 @@ static int demo_app_init(void)
         .callback = _demo_sys_event_cb,
         .skip_self_published = true  // 关键：自己发的事件自己不收
     };
-    srv->sub_sys = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &sys_sub, MODULE_NAME);
+    srv->sub_sys = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &sys_sub, MODULE_NAME);
 
     // 2. 精准订阅采集服务事件（修复区间订阅错误）
     event_subscriber_t cap_sub = {
@@ -202,7 +202,7 @@ static int demo_app_init(void)
         .callback = _demo_cap_event_cb,
         .skip_self_published = true
     };
-    srv->sub_capture = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &cap_sub, MODULE_NAME);
+    srv->sub_capture = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &cap_sub, MODULE_NAME);
 
     // 3. 精准订阅人脸服务事件
     event_subscriber_t face_sub = {
@@ -210,7 +210,7 @@ static int demo_app_init(void)
         .callback = _demo_face_event_cb,
         .skip_self_published = true
     };
-    srv->sub_face = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &face_sub, MODULE_NAME);
+    srv->sub_face = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &face_sub, MODULE_NAME);
 
     if (srv->sub_sys <0 || srv->sub_capture <0 || srv->sub_face <0) {
         LOG_E(MODULE_TAG " 订阅失败");
@@ -228,7 +228,7 @@ static int demo_app_init(void)
 static void demo_app_run(void)
 {
     demo_app_t *srv = &s_demo;
-    int bus_fd = event_bus_get_wait_fd(SYS_EVENT_BUS_NAME);
+    int bus_fd = event_bus_get_wait_fd(APP_EVENT_BUS_NAME);
 
     if (bus_fd < 0) {
         LOG_E(MODULE_TAG " 获取总线FD失败");
@@ -252,7 +252,7 @@ static void demo_app_run(void)
 
         // 处理事件总线
         if (FD_ISSET(bus_fd, &read_fds)) {
-            event_bus_dispatch(SYS_EVENT_BUS_NAME);
+            event_bus_dispatch(APP_EVENT_BUS_NAME);
         }
 
         // 处理键盘（极简无残留）
@@ -274,9 +274,9 @@ static void demo_app_run(void)
 static void demo_app_deinit(void)
 {
     demo_app_t *srv = &s_demo;
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_face);
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_capture);
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_sys);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_face);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_capture);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_sys);
     LOG_I(MODULE_TAG " 资源清理完成");
 }
 

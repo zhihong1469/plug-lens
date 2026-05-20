@@ -2,19 +2,18 @@
 /**
  ******************************************************************************
  * @file           capture_srv.c
- * @brief          视频采集服务 - FrameLink 标准合规生产者
+ * @brief          视频采集服务 - DataBus 纯推模式标准生产者
  * @author         System Team
- * @date           2025
- * @version        V2.0 适配全新FrameLink终极合规版
+ * @date           2026
+ * @version        V3.0 彻底移除FrameLink，纯DataBus架构
  * @constraint     全局唯一生产者 | 绝不阻塞线程 | 零拷贝共享 | 消费者只读
- * @core_flow      摄像头取帧 → FrameLink(仓库)获取空闲帧 → 填充数据 → 推送链路
- *                → DataBus(发票员)广播帧句柄 → 生产者释放自身引用
+ * @core_flow      摄像头取帧 → DataBus申请空闲内存 → 填充数据 → 发布总线
+ *                → 自动通知所有订阅者 → 生产者释放自身引用
  ******************************************************************************
  */
 #include "log.h"
 #include "data_bus.h"
 #include "event_bus.h"
-#include "frame_link.h"
 #include "utils.h"
 #include "vision_ai_config.h"
 #include "camera_usb.h"
@@ -32,10 +31,8 @@
 #define MODULE_TAG            "[CAPTURE]"
 
 // 系统总线名称（全局约定）
-#define SYS_EVENT_BUS_NAME        "sys_event"        // 来源：vision_ai_config.h
-#define VIDEO_DATA_BUS_NAME       "video"            // 采集服务私有数据总线
-// 帧链路名称（命名化管理，对标数据总线，文件私有）
-#define FRAME_LINK_NAME           "main_cam"         // 采集服务帧链路唯一名称
+#define CAPTURE_EVENT_BUS_NAME        SYS_EVENT_BUS_NAME        // 来源：vision_ai_config.h
+#define CAPTURE_DATA_BUS_NAME         VIDEO_DATA_BUS_NAME            // 视频数据总线唯一名称
 
 // 采集核心配置（来源：vision_ai_config.h）
 #define CAPTURE_DEV_PATH          CONFIG_CAPTURE_DEV_PATH    // USB摄像头设备节点
@@ -45,9 +42,6 @@
 #define CAPTURE_FORMAT_CFG        CONFIG_CAPTURE_FORMAT      // 0=YUYV 1=NV12 2=MJPEG
 #define CAPTURE_BUF_CNT           CONFIG_CAPTURE_BUF_COUNT   // 摄像头缓冲区数量
 #define MAX_FRAME_SIZE            CAPTURE_WIDTH * CAPTURE_HEIGHT * 2  // 最大帧大小
-// 帧链路配置（来源：vision_ai_config.h）
-#define FRAME_LINK_POOL_SIZE       CONFIG_FRAME_LINK_POOL_SIZE
-#define FRAME_LINK_QUEUE_SIZE      CONFIG_FRAME_LINK_QUEUE_SIZE
 
 // 服务私有固定配置
 #define CAP_FRAME_WAIT_US         20000   // 20ms 取帧等待
@@ -74,7 +68,7 @@ typedef struct {
     uint32_t                width;         // 宽度 4B
     uint32_t                height;        // 高度 4B
     uint32_t                fps;           // 帧率 4B
-    frame_format_t          frame_fmt;     // 帧格式 4B
+    uint32_t                v4l2_format;   // V4L2摄像头格式 4B
     uint32_t                downsample_cnt;// 降频计数 4B
     int                     evt_sub_id;    // 事件订阅ID 4B
 
@@ -97,25 +91,14 @@ static inline void _capture_unlock(void) {
     pthread_mutex_unlock(&s_capture.lock);
 }
 
-// 格式转换：配置 → FrameLink标准格式枚举
-static frame_format_t _capture_get_frame_format(int cfg)
+// 格式转换：配置 → V4L2标准格式枚举
+static uint32_t _capture_get_v4l2_format(int cfg)
 {
     switch (cfg) {
-        case 0:  return FRAME_FMT_YUYV;
-        case 1:  return FRAME_FMT_NV12;
-        case 2:  return FRAME_FMT_MJPEG;
-        default: return FRAME_FMT_YUYV;
-    }
-}
-
-// V4L2格式获取（摄像头驱动用）
-static uint32_t _capture_get_v4l2_format(frame_format_t fmt)
-{
-    switch (fmt) {
-        case FRAME_FMT_YUYV:  return V4L2_PIX_FMT_YUYV;
-        case FRAME_FMT_NV12:  return V4L2_PIX_FMT_NV12;
-        case FRAME_FMT_MJPEG: return V4L2_PIX_FMT_MJPEG;
-        default:              return V4L2_PIX_FMT_YUYV;
+        case 0:  return V4L2_PIX_FMT_YUYV;
+        case 1:  return V4L2_PIX_FMT_NV12;
+        case 2:  return V4L2_PIX_FMT_MJPEG;
+        default: return V4L2_PIX_FMT_YUYV;
     }
 }
 
@@ -139,7 +122,7 @@ static void capture_srv_cleanup(void)
 
     // 2. 取消系统事件订阅
     if (srv->evt_sub_id >= 0) {
-        event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->evt_sub_id);
+        event_bus_unsubscribe(CAPTURE_EVENT_BUS_NAME, srv->evt_sub_id);
         srv->evt_sub_id = -1;
         LOG_I(MODULE_TAG " 事件订阅已取消");
     }
@@ -152,54 +135,49 @@ static void capture_srv_cleanup(void)
         LOG_I(MODULE_TAG " USB摄像头已销毁");
     }
 
-    // 4. 【合规】销毁FrameLink命名链路（仓库销毁）
-    frame_link_destroy(FRAME_LINK_NAME);
-    LOG_I(MODULE_TAG " FrameLink帧链路已销毁");
-
-    // 5. 销毁数据总线（发票员销毁）
-    data_bus_deinit(VIDEO_DATA_BUS_NAME);
+    // 4. 销毁视频数据总线
+    data_bus_deinit(CAPTURE_DATA_BUS_NAME);
     LOG_I(MODULE_TAG " video数据总线已销毁");
 
-    // 6. 销毁线程锁
+    // 5. 销毁线程锁
     pthread_mutex_destroy(&srv->lock);
     LOG_I(MODULE_TAG " 线程锁已销毁");
 
-    // 7. 发布停止事件
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
+    // 6. 发布停止事件
+    event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
     LOG_I(MODULE_TAG " 所有资源释放完成，服务已安全退出");
 }
 
 // ==========================================================================
-// 工作线程：【FrameLink标准生产者】零拷贝 / 无阻塞 / 自动引用计数
+// 工作线程：【DataBus V4.0标准生产者】零拷贝 / 无阻塞 / 自动引用计数
 // 核心规范（强制遵守）：
-// 1. FrameLink(仓库)：唯一管理帧内存、生命周期、引用计数
-// 2. DataBus(发票员)：仅转发帧句柄，不管理任何帧资源
-// 3. 内存池满直接丢弃帧，绝不阻塞生产线程
-// 4. 生产者唯一写权限，推送后变为只读
+// 1. DataBus V4.0：唯一管理帧内存、生命周期、引用计数
+// 2. 内存池满直接丢弃帧，绝不阻塞生产线程
+// 3. 生产者唯一写权限，push发布后变为只读
+// 4. 推模式自动通知所有订阅者
+// 5. 生产者必须在push后释放自身引用
 // ==========================================================================
 static void *capture_work_thread(void *arg)
 {
     (void)arg;
     capture_srv_t *srv = &s_capture;
-    frame_handle_t frame = NULL;
-    data_bus_item_handle_t data_item = NULL;
+    data_bus_item_handle_t item = NULL;
     uint64_t current_ts;
     struct timeval tv;
     void *cam_buf = NULL;
     size_t cam_len = 0;
     const uint32_t frame_data_size = srv->width * srv->height * 2;
-    fl_err_t fl_ret;
     void *writable_buf = NULL;
-    frame_info_t info = {0};
+    int ret = 0;
 
     LOG_I(MODULE_TAG " 工作线程启动，硬件采集: %ux%u@%uFPS | AI软件降频: %uFPS",
           srv->width, srv->height, srv->fps, AI_TARGET_FPS);
 
     while (srv->thread_running) {
         // 每次循环重置句柄
-        frame = NULL;
-        data_item = NULL;
+        item = NULL;
         cam_buf = NULL;
+        writable_buf = NULL;
 
         // 暂停状态处理
         if (srv->is_paused) {
@@ -207,90 +185,71 @@ static void *capture_work_thread(void *arg)
             continue;
         }
 
-        // ============== 【修复1】第一步：先读摄像头原始数据（你的初心） ==============
+        // ============== 第一步：先读摄像头原始数据 ==============
         if (camera_get_frame(srv->cam, &cam_buf, &cam_len) != 0) {
             usleep(CAP_FRAME_WAIT_US);
             continue;
         }
 
-        // ============== 【修复2】第二步：软件降频判断 ==============
+        // ============== 第二步：软件降频判断 ==============
         srv->downsample_cnt++;
         bool send_to_bus = (srv->downsample_cnt >= FPS_DOWNSAMPLE_STEP);
         
-        // 不达标：直接丢弃摄像头数据，不申请任何帧！
+        // 不达标：直接丢弃摄像头数据，不申请任何内存！
         if (!send_to_bus) {
             srv->frame_count++;
-            goto fps_stats; // 直接跳转到FPS统计，不操作帧
+            goto fps_stats; // 直接跳转到FPS统计，不操作总线
         }
 
-        // ============== 【修复3】第三步：降频达标 → 才申请空闲帧 ==============
+        // ============== 第三步：降频达标 → 向DataBus V4.0申请空闲帧 ==============
         srv->downsample_cnt = 0;
-        fl_ret = frame_link_producer_get(FRAME_LINK_NAME, &frame);
-        if (fl_ret != FL_OK) {
-            if (fl_ret == FL_NO_FREE_FRAME) {
+        ret = data_bus_alloc(CAPTURE_DATA_BUS_NAME,
+                                 DATA_TYPE_VIDEO,
+                                 frame_data_size,
+                                 MODULE_NAME,
+                                 &item);
+        if (ret != DATA_BUS_OK) {
+            if (ret == DATA_BUS_ERR_FULL) { // 内存池满
                 LOG_D(MODULE_TAG " 内存池满，丢弃当前帧");
+            } else {
+                LOG_D(MODULE_TAG " data_bus_alloc 失败，ret=%d", ret);
             }
-            // 【调试打印1】获取帧失败
-            LOG_D(MODULE_TAG " frame_link_producer_get 失败，ret=%d", fl_ret);
             goto fps_stats;
         }
-        // ########################### 调试点1：成功获取帧 ###########################
-        LOG_D(MODULE_TAG " ✅ 成功获取空闲帧 | 句柄地址=%p | 链路=%s", frame, FRAME_LINK_NAME);
+        LOG_D(MODULE_TAG " ✅ 成功获取空闲帧 | 句柄地址=%p | 总线=%s", item, CAPTURE_DATA_BUS_NAME);
+
         // ============== 第四步：填充帧数据 ==============
-        writable_buf = frame_get_writable_ptr(frame);
+        writable_buf = data_bus_get_writable_ptr(item);
         if (!writable_buf) {
             LOG_E(MODULE_TAG " 获取可写指针失败");
-            frame_link_put(frame);  // 🔥 替换新接口
-            frame = NULL;
+            data_bus_release(item); // FIX: 异常必须释放
+            item = NULL;
             goto fps_stats;
         }
-        // ########################### 调试点2：帧可写指针有效 ###########################
         LOG_D(MODULE_TAG " ✅ 帧可写指针=%p | 摄像头数据地址=%p | 数据长度=%zu", 
               writable_buf, cam_buf, cam_len);
-        if (cam_len > frame_data_size) {
-            cam_len = frame_data_size;
-        }
-        memcpy(writable_buf, cam_buf, utils_min(cam_len, MAX_FRAME_SIZE));
+        
+        // 安全拷贝，防止越界
+        size_t copy_len = utils_min(cam_len, frame_data_size);
+        memcpy(writable_buf, cam_buf, copy_len);
 
-        // ============== 第五步：填充帧元数据 ==============
-        info.width = srv->width;
-        info.height = srv->height;
-        info.format = srv->frame_fmt;
-        info.data_size = cam_len;
-        frame_set_info(frame, &info);
-        // ============== 第六步：推送链路 + 发布总线 ==============
-        fl_ret = frame_link_producer_push(FRAME_LINK_NAME, frame);
-        if (fl_ret != FL_OK) {
-            LOG_E(MODULE_TAG " FrameLink推送帧失败");
-            frame_link_put(frame);  // 🔥 替换新接口
-            frame = NULL;
+        // ============== 第五步：V4.0正式API发布数据到总线 ==============
+        ret = data_bus_push(CAPTURE_DATA_BUS_NAME, item); // FIX: 替换旧版publish为正式push
+        if (ret != DATA_BUS_OK) {
+            LOG_E(MODULE_TAG " DataBus push发布帧失败，ret=%d", ret);
+            data_bus_release(item); // FIX: 发布失败必须释放
+            item = NULL;
             goto fps_stats;
         }
-        // ########################### 调试点3：成功推送帧到链路 ###########################
-        LOG_D(MODULE_TAG " ✅ 帧推入FrameLink成功 | ret=%d", fl_ret);
-        // DataBus发布
-        if (data_bus_alloc(VIDEO_DATA_BUS_NAME,
-                           DATA_TYPE_VIDEO_FRAME,
-                           sizeof(frame_handle_t),
-                           MODULE_NAME,
-                           &data_item) == 0)
-        {
-            frame_handle_t *bus_ptr = (frame_handle_t *)data_bus_get_writable_ptr(data_item);
-            *bus_ptr = frame;
-            // ########################### 调试点4：数据总线传递句柄 ###########################
-            LOG_D(MODULE_TAG " ✅ 数据总线赋值句柄=%p | 总线名称=%s", 
-                  *bus_ptr, VIDEO_DATA_BUS_NAME);
-            data_bus_publish(VIDEO_DATA_BUS_NAME, data_item);
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_FRAME_READY, MODULE_NAME);
-        } else {
-            LOG_E(MODULE_TAG " ❌ data_bus_alloc 分配失败");
-        }
+        LOG_D(MODULE_TAG " ✅ 帧推入DataBus成功 | ret=%d", ret);
 
-        // ============== 第七步：生产者释放自身引用（唯一一次） ==============
-        // ########################### 调试点5：生产者释放帧 ###########################
-        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 帧ID=%u | 句柄=%p", info.frame_id, frame);
-        frame_link_put(frame);  // 🔥 替换新接口
-        frame = NULL;
+        // 发布事件通知（轻量唤醒，不传递数据）
+        event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_PROTO_READY, MODULE_NAME);
+
+        // ============== 第六步：生产者释放自身引用（V4.0强制规范） ==============
+        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 句柄=%p", item);
+        data_bus_release(item);
+        item = NULL;
 
         // ============== FPS统计（公共出口） ==============
 fps_stats:
@@ -332,8 +291,8 @@ static int capture_srv_start(void)
     }
 
     // 发布状态事件
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
+    event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
+    event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
 
     LOG_I(MODULE_TAG " 服务启动成功，硬件采集运行中");
     return 0;
@@ -385,13 +344,12 @@ static void _capture_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 服务初始化：FrameLink+DataBus+摄像头 初始化
+// 服务初始化：DataBus+摄像头 初始化
 // ==========================================================================
 static int capture_srv_init(void)
 {
     capture_srv_t *srv = &s_capture;
     memset(srv, 0, sizeof(capture_srv_t));
-    fl_err_t fl_ret;
 
     // 1. 初始化线程锁
     pthread_mutex_init(&srv->lock, NULL);
@@ -404,62 +362,45 @@ static int capture_srv_init(void)
     srv->width      = CAPTURE_WIDTH;
     srv->height     = CAPTURE_HEIGHT;
     srv->fps        = CAPTURE_FPS;
-    srv->frame_fmt  = _capture_get_frame_format(CAPTURE_FORMAT_CFG);
+    srv->v4l2_format = _capture_get_v4l2_format(CAPTURE_FORMAT_CFG);
 
-    // 3. 【仓库】创建FrameLink命名链路
-    frame_link_cfg_t fl_cfg = {0};
-    strcpy(fl_cfg.name, FRAME_LINK_NAME);  // 直接拷贝，内部自动安全处理
-    fl_cfg.max_frame_size = MAX_FRAME_SIZE;
-    fl_cfg.pool_count     = FRAME_LINK_POOL_SIZE;
-    fl_cfg.queue_count    = FRAME_LINK_QUEUE_SIZE;
-    
-    fl_ret = frame_link_create(&fl_cfg);
-    if (fl_ret != FL_OK) {
-        LOG_E(MODULE_TAG " FrameLink创建失败，错误码:%d", fl_ret);
-        pthread_mutex_destroy(&srv->lock);
-        return -1;
-    }
-
-    // 4. 【发票员】初始化video数据总线
+    // 3. 初始化视频数据总线（V4.0 标准配置）
     data_bus_config_t bus_cfg = {0};
-    bus_cfg.max_items = 8;
-    bus_cfg.max_item_size = sizeof(frame_handle_t);
-    bus_cfg.max_subscribers = 8;
-    bus_cfg.name = VIDEO_DATA_BUS_NAME;
+    bus_cfg.max_items = 8;                // 帧缓存数量
+    bus_cfg.max_item_size = MAX_FRAME_SIZE; // 单帧最大大小
+    bus_cfg.max_subscribers = 8;          // 最大订阅者数量
+    bus_cfg.name = CAPTURE_DATA_BUS_NAME;
     
-    if (data_bus_init(&bus_cfg) != 0) {
-        LOG_E(MODULE_TAG " video数据总线初始化失败");
-        frame_link_destroy(FRAME_LINK_NAME);
+    if (data_bus_init(&bus_cfg) != DATA_BUS_OK) {
+        LOG_E(MODULE_TAG " video数据总线(V4.0)初始化失败");
         pthread_mutex_destroy(&srv->lock);
         return -1;
     }
 
-    // 5. 初始化USB摄像头
+    // 4. 初始化USB摄像头
     srv->cam = camera_usb_create(CAPTURE_DEV_PATH,
                                  srv->width,
                                  srv->height,
-                                 _capture_get_v4l2_format(srv->frame_fmt),
+                                 srv->v4l2_format,
                                  srv->fps);
     if (!srv->cam || camera_init(srv->cam) != 0) {
         LOG_E(MODULE_TAG " USB摄像头初始化失败");
-        data_bus_deinit(VIDEO_DATA_BUS_NAME);
-        frame_link_destroy(FRAME_LINK_NAME);
+        data_bus_deinit(CAPTURE_DATA_BUS_NAME);
         pthread_mutex_destroy(&srv->lock);
         return -1;
     }
 
-    // 6. 订阅系统事件
+    // 5. 订阅系统事件
     event_subscriber_t evt_sub = {0};
     evt_sub.event_type = EVENT_TYPE_INVALID;
     evt_sub.callback = _capture_event_cb;
     evt_sub.user_data = srv;
     
-    srv->evt_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &evt_sub);
+    srv->evt_sub_id = event_bus_subscribe(CAPTURE_EVENT_BUS_NAME, &evt_sub);
     if (srv->evt_sub_id < 0) {
         LOG_E(MODULE_TAG " 订阅事件总线失败");
         camera_usb_destroy(srv->cam);
-        data_bus_deinit(VIDEO_DATA_BUS_NAME);
-        frame_link_destroy(FRAME_LINK_NAME);
+        data_bus_deinit(CAPTURE_DATA_BUS_NAME);
         pthread_mutex_destroy(&srv->lock);
         return -1;
     }
@@ -481,4 +422,4 @@ static int _capture_auto_init(void)
     LOG_I(MODULE_TAG "_capture_auto_init 自动加载完成,等待系统启动指令");
     return 0;
 }
-MODULE_INIT_LEVEL(INIT_DEVICE, _capture_auto_init);  
+MODULE_INIT_LEVEL(INIT_DEVICE, _capture_auto_init);

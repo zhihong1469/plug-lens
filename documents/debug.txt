@@ -1,100 +1,100 @@
-我完全吃透了你的所有诉求、纠结点和核心目标！我们先**一锤定音最终方案**（完美兼容你所有想法，不做二选一），再把**帧ID强绑定**的核心机制讲透，最后给你整理**可直接落地的分阶段实现步骤**，全程贴合你的嵌入式项目、IMX6ULL硬件、无回放需求、解耦服务的核心要求。
-
-# 一、最终方案拍板（解决你所有犹豫，双模式兼容，工业级最优）
-结合你的场景：**嵌入式端、AI慢、推流延迟不可控、不需要存储、要帧-AI强绑定**
-我们不做单选题，直接做**兼容双模式推流**，同时解决所有问题：
-| 推流模式 | 数据格式 | 帧率/延迟 | 携带内容 | 适用场景 |
-|----------|----------|-----------|----------|----------|
-| 模式1（实时流） | 原始YUYV | 高帧率、低延迟 | 纯视频 | 追求实时画面预览 |
-| 模式2（AI流） | AI转换后的RGB | 低帧率、跟随AI速度 | 视频 + 人脸坐标 | 想看带人脸框的远程画面 |
-
-### 核心铁律（全部遵守）
-1. **主链路绝对不动**：仅存摄像头原始YUYV，只读、零修改、零转换
-2. **全服务拉模式**：AI、推流两个慢服务，**只拉主链路最新帧**，自动丢弃旧帧，解决速度差
-3. **帧ID强绑定**：彻底解决AI+推流时间差，100%帧与检测结果对应
-4. **AI专用链路仅1条**：临时缓存RGB图像 + 带帧ID的人脸结果，极简内存
-
----
-
-# 二、核心机制：帧ID + 人脸结果 强绑定（解决你的最大痛点）
-这是整个架构的灵魂，**简单到极致，绝对不会错位**，我用最通俗的方式讲清楚：
-
-## 1. 基础：每一帧都有唯一身份证 → `帧ID`
-- 采集服务每生产一帧YUYV，自动分配一个**自增数字ID**（1、2、3、4...）
-- 帧ID跟随帧数据存在主FrameLink中，永不重复
-
-## 2. AI服务：推理结果必须「带ID出门」
-1. AI拉取主链路**最新帧**（比如帧ID=5）
-2. AI内部转换RGB、推理人脸
-3. AI输出结果：`{帧ID=5，人脸坐标x1/y1/x2/y2，置信度}`
-4. 把这个**纯数据**存到**AI专用链路**（覆盖式写入，只存最新一条）
-
-## 3. 推流服务：按ID取结果，绝对配对
-1. 推流拉取主链路**最新帧**（比如帧ID=5）
-2. 推流去AI专用链路，找`帧ID=5`的人脸结果
-3. 找到就配对成功，找不到就说明这帧还没推理完/无结果
-4. 推流：要么发纯YUYV，要么发RGB+坐标，**永不乱配**
-
-## 4. 时间差完美解决
-- AI慢、推流快没关系：推流只认**帧ID**，对不上就跳过AI结果，只推视频
-- 不需要队列、不需要缓存多帧，完全适配你的无回放需求
-
----
-
-# 三、落地实现：分3阶段执行（从快速修复 → 完整架构）
-我们**不一步到位**，先解决当前的**内存踩踏BUG**，再逐步实现绑定、推流，风险最低、开发效率最高：
-
-## 阶段1：短期急救（1天完成，先让系统稳定运行）
-### 目标：修复「内存池满、引用计数踩踏」问题，不改动核心架构
-1. **扩大FrameLink帧内存**
-   - 给每一帧的像素数据增加 `512字节内存隔离区(Padding)`
-   - 总内存池小幅扩容，让AI越界也踩不到帧控制块
-2. **确认主链路只读**
-   - 禁止所有服务（AI/推流）写入主链路数据，仅允许读取
-3. **验证基础功能**
-   - 采集+AI推理正常运行，无内存池报错，无崩溃
-
-## 阶段2：核心架构（2~3天完成，实现帧ID绑定+拉模式）
-### 目标：完成核心机制，解决速度差、帧-AI配对问题
-1. **给FrameLink增加帧ID字段**
-   - 帧结构体新增 `uint32_t frame_id`，采集服务自增赋值
-2. **AI服务改造为拉模式**
-   - 移除主动订阅，改为**定时拉取主链路最新YUYV帧**
-   - 推理结果绑定`frame_id`，存入AI专用缓存
-3. **AI专用链路极简实现**
-   - 仅定义一个结构体：`{frame_id, rgb_buf, face_result}`
-   - 覆盖式写入，不占用额外内存
-4. **验证绑定机制**
-   - 日志打印：帧ID、AI结果ID，确认100%配对
-
-## 阶段3：完整功能（3~5天完成，双模式UDP推流）
-### 目标：实现你要的两种推流模式，全功能闭环
-1. **UDP推流服务开发（拉模式）**
-   - 拉取主链路最新原始YUYV帧
-   - 根据帧ID，匹配AI专用链路的人脸结果
-2. **实现双推流模式**
-   - 模式1：直接打包原始YUYV，UDP高帧率推流
-   - 模式2：复用AI的RGB图像，打包`RGB+人脸坐标`，UDP跟随AI帧率推流
-3. **接口参数优化**
-   - 给AI图像转换函数增加**专用缓存入口参数**
-   - 彻底杜绝内存踩踏（架构级根治）
-4. **全系统联调**
-   - 采集→AI→推流全链路跑通
-   - 实时性、配对准确性、稳定性验证
-
----
-
-# 四、必须实现的核心功能清单（极简版，无冗余）
-1. FrameLink帧新增 `唯一帧ID`
-2. 全慢服务（AI/推流）改为 **拉最新帧模式**
-3. AI推理结果与 `帧ID` 强绑定存储
-4. 1条AI专用缓存（RGB图像 + 最新人脸数据）
-5. 双模式UDP推流（YUYV实时流 / RGB+AI坐标流）
-6. AI图像转换函数新增**专用缓存参数**（根治内存踩踏）
-
----
-
-# 五、一句话总结（最终架构灵魂）
-**摄像头生产原始YUYV主链路（只读），AI拉最新帧推理并绑定帧ID，推流拉最新帧+按ID配对AI结果，双模式UDP推流自由切换，拉模式解决速度差，帧ID解决配对问题，全程不修改主链路、极简内存、完美适配你的嵌入式场景！**
-
-这个方案完全匹配你所有的需求、顾虑和未来规划，没有任何妥协，是嵌入式实时视觉AI最稳定、最高效的落地方式！
+lease_item_safe] [BUS REF] item=0x4fcf4, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:327][face_work_thread] [FACE_DETECT]未检测到人脸
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f70, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f40, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc64, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fc64 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x130e0c | 摄像头数据地址=0x7623c000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fc64, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 5
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fcf4, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fc64
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc64, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fd24 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x2f2e0c | 摄像头数据地址=0x7615a000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fd24, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 6
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc64, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fd24
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fd24, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:261][capture_work_thread] [CAPTURE] 采集总FPS: 25 | AI有效FPS: 5
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:327][face_work_thread] [FACE_DETECT]未检测到人脸
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f40, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f70, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc04, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fc04 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x4fe0c | 摄像头数据地址=0x7623c000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fc04, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 6
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fd24, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fc04
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc04, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fd54 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x36360c | 摄像头数据地址=0x7615a000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fd54, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 7
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc04, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fd54
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fd54, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:327][face_work_thread] [FACE_DETECT]未检测到人脸
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f70, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f40, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc94, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fc94 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x1a160c | 摄像头数据地址=0x7623c000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fc94, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 7
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fd54, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fc94
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc94, ref=3 -> 2
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:522][data_bus_alloc] [BUS ALLOC] 内存池已满！总线: video
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[0]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[1]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[2]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[3]: ref=2, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[4]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[5]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[6]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[7]: ref=1, published=1, in_use=1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:213][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:327][face_work_thread] [FACE_DETECT]未检测到人脸
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f40, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f70, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc34, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0x4fc34 | 总线=video
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0xc060c | 摄像头数据地址=0x7623c000 | 数据长度=460800
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:611][data_bus_push_acquire] [BUS PUSH] 引用+1 item=0x4fc34, ref=2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:196][data_bus_frame_cb] [FACE_DETECT]帧入队成功，当前队列计数: 7
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc94, ref=2 -> 1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0x4fc34
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4fc34, ref=3 -> 2
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:261][capture_work_thread] [CAPTURE] 采集总FPS: 25 | AI有效FPS: 5
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:522][data_bus_alloc] [BUS ALLOC] 内存池已满！总线: video
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[0]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[1]: ref=2, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[2]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[3]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[4]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[5]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[6]: ref=1, published=1, in_use=1
+[E][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:526][data_bus_alloc]   Item[7]: ref=1, published=1, in_use=1
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:213][capture_work_thread] [CAPTURE] 内存池满，丢弃当前帧
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:327][face_work_thread] [FACE_DETECT]未检测到人脸
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x3d3f70, ref=1 -> 0
+[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=69[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:69][app_publish_sys_event] Main: Published sys event: SYS_SHUTDOWN

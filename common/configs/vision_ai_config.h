@@ -9,10 +9,13 @@ extern "C" {
 #endif
 
 // ==========================================================================
-// 一、全局总线名称（全系统统一，禁止硬编码）
+// 一、全局总线名称（全系统统一，服务禁止硬编码！）
+// 匹配采集服务 + 人脸检测服务 纯DataBus架构
 // ==========================================================================
-#define SYS_EVENT_BUS_NAME        "sys_event"
-#define SYS_DATA_BUS_NAME         "sys_data"
+#define SYS_EVENT_BUS_NAME        "sys_event"      // 系统事件总线
+#define SYS_DATA_BUS_NAME         "sys_data"       // 系统数据总线
+#define VIDEO_DATA_BUS_NAME       "video"          // 摄像头YUYV视频总线（采集服务生产）
+#define AI_RGB_DATA_BUS_NAME       "ai_rgb"         // AI专属RGB数据总线（人脸服务生产）
 
 // ==========================================================================
 // 【全局通用事件类型】（0x0000-0x0FFF）
@@ -56,7 +59,7 @@ typedef enum {
     EVENT_TYPE_CAPTURE_BASE        = 0x2000,
     EVENT_TYPE_CAPTURE_READY,      // 采集服务就绪
     EVENT_TYPE_CAPTURE_RUNNING,    // 采集服务运行中
-    EVENT_TYPE_CAPTURE_FRAME_READY,// 视频帧已发布（通知AI模块）
+    EVENT_TYPE_CAPTURE_PROTO_READY,// 视频帧已发布
     EVENT_TYPE_CAPTURE_STOPPED,    // 采集服务停止
     EVENT_TYPE_CAPTURE_ERROR,      // 采集服务故障
     EVENT_TYPE_CAPTURE_MAX         = 0x2FFF,
@@ -68,7 +71,7 @@ typedef enum {
     EVENT_TYPE_FACE_READY,         // 人脸检测就绪
     EVENT_TYPE_FACE_RUNNING,       // 人脸检测运行中
     EVENT_TYPE_FACE_PROCESS_START, // 开始处理视频帧
-    EVENT_TYPE_FACE_PROCESS_DONE,  // 人脸检测完成（结果已发布）
+    EVENT_TYPE_FACE_PROCESS_DONE,  // 人脸检测完成
     EVENT_TYPE_FACE_STOPPED,       // 人脸检测停止
     EVENT_TYPE_FACE_ERROR,         // 人脸检测故障
     EVENT_TYPE_FACE_MAX            = 0x3FFF,
@@ -82,22 +85,23 @@ typedef enum {
     EVENT_TYPE_DEMO_MAX            = 0x4FFF
 } event_type_t;
 
-
 // ==========================================================================
-// 2. 数据类型枚举 → 用来区分不同数据（你的核心：RGB视频 + AI结果）
+// 二、全局数据类型枚举（✅ 核心修改：100%匹配两个服务的DataBus调用）
+// 采集服务：DATA_TYPE_VIDEO (YUYV原始帧)
+// 人脸服务：DATA_TYPE_VIDEO_RGB (AI处理RGB帧) + DATA_TYPE_AI_RESULT (检测结果)
 // ==========================================================================
 typedef enum {
     DATA_TYPE_INVALID = 0,         // 无效类型
 
     // 视频数据
-    DATA_TYPE_VIDEO_FRAME = 0x01,  // 通用视频帧
-    DATA_TYPE_VIDEO_FRAME_YUV420,  // YUV格式帧
-    DATA_TYPE_VIDEO_FRAME_RGB,     // 【你的核心】RGB原始帧
+    DATA_TYPE_VIDEO = 0x01,  // 摄像头原始YUYV帧（采集服务发布）
+    DATA_TYPE_VIDEO_YUV420,  // YUV格式帧
+    DATA_TYPE_VIDEO_RGB,     // AI处理后RGB帧（人脸服务发布）
 
     // AI数据
-    DATA_TYPE_AI_RESULT = 0x10,    // 【你的核心】人脸检测结果
+    DATA_TYPE_AI_RESULT = 0x10,    // 人脸检测结果数据
 
-    // 音频数据（你用不到）
+    // 音频数据（未使用）
     DATA_TYPE_AUDIO_FRAME = 0x20,
     DATA_TYPE_AUDIO_PCM,
 
@@ -105,12 +109,7 @@ typedef enum {
 } data_type_t;
 
 // ==========================================================================
-// 三、
-// ==========================================================================
-
-
-// ==========================================================================
-// 四、系统全局配置（原有配置完整保留）
+// 三、系统全局配置（完整保留，无修改）
 // ==========================================================================
 #define CONFIG_APP_NAME "Vision AI Demo"
 #define CONFIG_AUTO_START true
@@ -137,9 +136,6 @@ typedef enum {
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
-// 帧链路配置
-#define CONFIG_FRAME_LINK_POOL_SIZE 8
-#define CONFIG_FRAME_LINK_QUEUE_SIZE 4
 
 // AI模型配置
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"

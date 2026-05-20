@@ -748,7 +748,7 @@ static void _demo_app_on_event(const event_t *event, void *user_data)
 static void _demo_app_process_frame(void)
 {
     data_bus_item_handle_t item = NULL;
-    int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO_FRAME, &item);
+    int ret = data_bus_acquire_latest(g_demo_ctx.data_bus, DATA_TYPE_VIDEO, &item);
     if (ret != 0 || item == NULL) {
         return;
     }
@@ -1906,7 +1906,7 @@ static void _capture_srv_on_link_frame(const video_frame_t *frame, void *user_da
     data_bus_item_handle_t item = NULL;
     size_t data_size = frame->length;
     
-    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO_FRAME, data_size, "capture_srv", &item);
+    int ret = data_bus_alloc(ctx->data_bus, DATA_TYPE_VIDEO, data_size, "capture_srv", &item);
     if (ret != 0 || item == NULL) {
         frame_link_put_frame(ctx->link_handle, frame);
         return;
@@ -2193,7 +2193,7 @@ static void _face_detect_srv_fsm_state_relay(const char *module_name,
     // 2. 启动：订阅数据总线
     if (new_state == MODULE_STATE_STARTING) {
         int ret = data_bus_subscribe(ctx->data_bus,
-                                    DATA_TYPE_VIDEO_FRAME,
+                                    DATA_TYPE_VIDEO,
                                     _face_detect_srv_data_cb,
                                     ctx,
                                     &ctx->data_sub);
@@ -3779,9 +3779,9 @@ typedef enum {
     DATA_TYPE_INVALID = 0,
 
     // 视频数据 (0x01 - 0x0F)
-    DATA_TYPE_VIDEO_FRAME = 0x01,
-    DATA_TYPE_VIDEO_FRAME_YUV420,
-    DATA_TYPE_VIDEO_FRAME_RGB,
+    DATA_TYPE_VIDEO = 0x01,
+    DATA_TYPE_VIDEO_YUV420,
+    DATA_TYPE_VIDEO_RGB,
 
     // AI数据 (0x10 - 0x1F)
     DATA_TYPE_AI_RESULT = 0x10,
@@ -3988,7 +3988,7 @@ typedef struct {
 // ==========================================================================
 static const char* g_data_type_str[] = {
     [DATA_TYPE_INVALID] = "INVALID",
-    [DATA_TYPE_VIDEO_FRAME] = "VIDEO_FRAME",
+    [DATA_TYPE_VIDEO] = "VIDEO_FRAME",
     [DATA_TYPE_AI_RESULT] = "AI_RESULT",
     [DATA_TYPE_AUDIO_FRAME] = "AUDIO_FRAME",
 };
