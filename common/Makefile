@@ -13,7 +13,7 @@ SRC_FILES := \
 	img_proc/src/img_proc_c.c \
 	initcall/src/initcall.c \
 	../third_lib/tlsf-master/tlsf.c \
-	mem_adapter/src/mem_adapter.c
+	mem_adapter/src/mem_adapter.c \
 
 # 模块私有路径（common 无独有路径，留空）
 LOCAL_INC :=

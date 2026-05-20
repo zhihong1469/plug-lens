@@ -34,5 +34,15 @@ LDFLAGS := \
 	-L$(TOPDIR)/third_lib/opencv_lib/lib/ \
 	-lopencv_core \
 	-lopencv_imgproc \
-	-lopencv_imgcodecs 
-
+	-lopencv_imgcodecs \
+	-L$(TOPDIR)/third_lib/live555/lib \
+	-L$(TOPDIR)/third_lib/libjpeg_turbo/lib \
+	-lliveMedia \
+	-lgroupsock \
+	-lBasicUsageEnvironment \
+	-lUsageEnvironment \
+	-lturbojpeg \
+	-lssl \
+	-lcrypto \
+	-lstdc++ \
+	-pthread 

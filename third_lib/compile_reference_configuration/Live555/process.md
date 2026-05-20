@@ -63,7 +63,7 @@ GROUPSOCK_DIR = groupsock
 USAGE_ENVIRONMENT_DIR = UsageEnvironment
 BASIC_USAGE_ENVIRONMENT_DIR = BasicUsageEnvironment
 
-# 以下模块全部无用，推流不需要，注释掉
+# 以下模块全部无用，推流不需要，注释掉testProgs
 # TESTPROGS_DIR = testProgs
 # MEDIA_SERVER_DIR = mediaServer
 # PROXY_SERVER_DIR = proxyServer
