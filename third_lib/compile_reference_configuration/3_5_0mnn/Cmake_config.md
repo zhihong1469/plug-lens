@@ -1,7 +1,7 @@
-# https://github.com/alibaba/MNN  【3.5.0】
-# https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
-# https://github.com/opencv/opencv 【4.5.5】
-# 现成 INT8 模型版本和 MNN3.5.0 不兼容
+- https://github.com/alibaba/MNN  【3.5.0】
+- https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
+- https://github.com/opencv/opencv 【4.5.5】
+- 现成 INT8 模型版本和 MNN3.5.0 不兼容
 cd /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-master/build_arm
 rm -rf *
 # 编译宏介绍:https://mnn-docs.readthedocs.io/en/latest/compile/cmake.html?highlight=mnn_build_mini

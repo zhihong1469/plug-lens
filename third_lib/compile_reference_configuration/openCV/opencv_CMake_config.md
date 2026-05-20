@@ -1,3 +1,5 @@
+# 过滤:
+```shell
 luo@Luo1469:~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/opencv-4.5.5$ grep "OCV_OPTION" CMakeLists.txt 
 OCV_OPTION(OPENCV_ENABLE_NONFREE "Enable non-free algorithms" OFF)
 OCV_OPTION(OPENCV_FORCE_3RDPARTY_BUILD   "Force using 3rdparty code from source" OFF)
@@ -145,7 +147,7 @@ OCV_OPTION(OPENCV_DISABLE_THREAD_SUPPORT "Build the library without multi-thread
 OCV_OPTION(OPENCV_SEMIHOSTING         "Build the library for semihosting target (Arm). See https://developer.arm.com/documentation/100863/latest." OFF)
 OCV_OPTION(ENABLE_PYLINT              "Add target with Pylint checks"                            (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
 OCV_OPTION(ENABLE_FLAKE8              "Add target with Python flake8 checker"                    (BUILD_DOCS OR BUILD_EXAMPLES) IF (NOT CMAKE_CROSSCOMPILING AND NOT APPLE_FRAMEWORK) )
-
+```
 
 
 # 最小化、纯电脑端、仅用于视频推流调试的 OpenCV

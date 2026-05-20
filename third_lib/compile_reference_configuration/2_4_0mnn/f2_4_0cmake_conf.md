@@ -1,3 +1,4 @@
+```shell
 luo@Luo1469:~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-2.4.0$ grep "option" ./CMakeLists.txt 
 # complier options
 # build options
@@ -58,7 +59,7 @@ option(MNN_USE_CPP11 "Enable MNN use c++11" ON)
     target_compile_options(MNN_Express PRIVATE -DMNN_INTERNAL_ENABLED)
   target_link_options(MNN PRIVATE "/IGNORE:4049,4217")
       target_link_options(MNN PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:MNN_CUDA>")
-
+```
 
 
 cd /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-2.4.0/build_arm

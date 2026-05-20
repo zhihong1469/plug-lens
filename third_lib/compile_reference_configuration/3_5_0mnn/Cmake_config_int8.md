@@ -1,32 +1,32 @@
-# https://github.com/alibaba/MNN  【3.5.0】
-# https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
-# https://github.com/opencv/opencv 【4.5.5】
+- https://github.com/alibaba/MNN  【3.5.0】
+- https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
+- https://github.com/opencv/opencv 【4.5.5】
 # 现成 INT8 模型版本和 MNN3.5.0 不兼容
-# cd /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-master/build_arm
-# rm -rf *
-# 编译宏介绍:https://mnn-docs.readthedocs.io/en/latest/compile/cmake.html?highlight=mnn_build_mini
-# cmake .. \
-# -DCMAKE_SYSTEM_NAME=Linux \
-# -DCMAKE_SYSTEM_PROCESSOR=armv7-a \
-# -DCMAKE_C_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gcc \
-# -DCMAKE_CXX_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-g++ \
-# -DCMAKE_BUILD_TYPE=Release \
-# -DCMAKE_C_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
-# -DCMAKE_CXX_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
-# -DMNN_BUILD_MINI=OFF \
-# -DMNN_REDUCE_SIZE=OFF \
-# -DMNN_SKIPBUILD_GEOMETRY=OFF \
-# -DMNN_SUPPORT_QUANT_EXTEND=ON \
-# -DMNN_SEP_BUILD=OFF \
-# -DMNN_ARM82=OFF \
-# -DMNN_KLEIDIAI=OFF \
-# -DMNN_BUILD_SHARED_LIBS=ON \
-# -DMNN_BUILD_TEST=OFF \
-# -DMNN_BUILD_TOOLS=ON \
-# -DMNN_BUILD_QUANTOOLS=ON \
-# -DMNN_USE_THREAD_POOL=ON \
-# -DMNN_BUILD_CONVERTER=ON  # 新增：开启模型转换工具
-###############################   以上备用  #############################
+ cd /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-master/build_arm
+ rm -rf *
+ 编译宏介绍:https://mnn-docs.readthedocs.io/en/latest/compile/cmake.html?highlight=mnn_build_mini
+ cmake .. \
+ -DCMAKE_SYSTEM_NAME=Linux \
+ -DCMAKE_SYSTEM_PROCESSOR=armv7-a \
+ -DCMAKE_C_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gcc \
+ -DCMAKE_CXX_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-g++ \
+ -DCMAKE_BUILD_TYPE=Release \
+ -DCMAKE_C_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
+ -DCMAKE_CXX_FLAGS="-march=armv7-a -mfloat-abi=hard -mfpu=neon" \
+ -DMNN_BUILD_MINI=OFF \
+ -DMNN_REDUCE_SIZE=OFF \
+ -DMNN_SKIPBUILD_GEOMETRY=OFF \
+ -DMNN_SUPPORT_QUANT_EXTEND=ON \
+ -DMNN_SEP_BUILD=OFF \
+ -DMNN_ARM82=OFF \
+ -DMNN_KLEIDIAI=OFF \
+ -DMNN_BUILD_SHARED_LIBS=ON \
+ -DMNN_BUILD_TEST=OFF \
+ -DMNN_BUILD_TOOLS=ON \
+ -DMNN_BUILD_QUANTOOLS=ON \
+ -DMNN_USE_THREAD_POOL=ON \
+ -DMNN_BUILD_CONVERTER=ON  # 新增：开启模型转换工具
+--- 以上备用   ---
 
 
 

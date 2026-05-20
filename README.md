@@ -54,3 +54,11 @@ source ~/你的项目路径/scripts/.gdbinit
 ex:.tool/gdb-12.1.tar.xz 用于开发板资源较小无预装GDB，可考虑静态链接gdbserver
 
 ##
+
+
+# thanks 
+- https://github.com/alibaba/MNN  【3.5.0】
+- https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
+- https://github.com/opencv/opencv 【4.5.5】
+- http://www.live555.com/liveMedia/
+- https://github.com/libjpeg-turbo/libjpeg-turbo

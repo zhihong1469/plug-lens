@@ -3,7 +3,6 @@
 #include "log.h"
 #include "queue.h"
 // 帧链接头文件，获取视频格式定义
-#include "frame_link.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -109,7 +108,7 @@ int net_push_srv_start(net_push_srv_handle_t handle) {
     bind(ctx->sock_fd, (const struct sockaddr*)&addr, (socklen_t )sizeof(addr));
 
     // 2. 【新总线适配】订阅数据总线：名称传参，接收VIDEO_FRAME类型数据
-    data_bus_subscribe(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, _data_bus_cb, ctx, &ctx->data_sub);
+    data_bus_subscribe(ctx->config.data_bus_name, DATA_TYPE_VIDEO, _data_bus_cb, ctx, &ctx->data_sub);
     
     // 3. 【新总线适配】订阅事件总线：名称传参，监听SYS_STOP系统停止事件
     event_subscriber_t sub = {
@@ -196,7 +195,7 @@ static void _data_bus_cb(data_bus_item_handle_t item, void* user_data) {
     // 防止总线自动释放，保证数据发送前有效
     // ==============================================
     data_bus_item_handle_t ref_item = NULL;
-    data_bus_acquire_latest(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, &ref_item);
+    data_bus_acquire_latest(ctx->config.data_bus_name, DATA_TYPE_VIDEO, &ref_item);
     if (ref_item) {
         // 将最新帧入队
         Queue_Put(&ctx->send_queue, ref_item);

@@ -4,7 +4,6 @@
 
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
-	link/frame_link/src/frame_link.c \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp \
 	base/service/src/service_base.c \
