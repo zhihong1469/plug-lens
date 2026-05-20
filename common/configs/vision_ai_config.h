@@ -77,12 +77,22 @@ typedef enum {
     EVENT_TYPE_FACE_MAX            = 0x3FFF,
 
     // ======================================
-    // Demo应用事件 (0x4000 ~ 0x4FFF)
+    // 人脸检测服务事件 (0x4000 ~ 0x4FFF)
     // ======================================
-    EVENT_TYPE_DEMO_BASE           = 0x4000,
+    EVENT_TYPE_NET_BASE           = 0x4000,
+    EVENT_TYPE_NET_READY,         // 就绪
+    EVENT_TYPE_NET_PROCESS_START, // 开始处理
+    EVENT_TYPE_NET_PROCESS_DONE,  // 完成
+    EVENT_TYPE_NET_STOPPED,       // 停止
+    EVENT_TYPE_NET_ERROR,         // 故障
+    EVENT_TYPE_NET_MAX            = 0x4FFF,
+    // ======================================
+    // Demo应用事件 (0x6000 ~ 0x6FFF)
+    // ======================================
+    EVENT_TYPE_DEMO_BASE           = 0x6000,
     EVENT_TYPE_DEMO_RUNNING,       // Demo运行中
     EVENT_TYPE_DEMO_EXIT,          // Demo退出
-    EVENT_TYPE_DEMO_MAX            = 0x4FFF
+    EVENT_TYPE_DEMO_MAX            = 0x6FFF
 } event_type_t;
 
 // ==========================================================================

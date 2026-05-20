@@ -20,12 +20,12 @@
 #define MODULE_TAG                "[FACE_DETECT]"
 
 /* 数据总线名称 */
-#define VIDEO_DATA_BUS            "video"                // 主摄像头YUYV总线
-#define AI_RGB_DATA_BUS           "ai_rgb"               // AI专属RGB总线
+#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME                // 主摄像头YUYV总线
+#define AI_RGB_DATA_BUS           AI_RGB_DATA_BUS_NAME               // AI专属RGB总线
 #define CAPTURE_EVENT_BUS         SYS_EVENT_BUS_NAME        // 采集事件总线
 
 /* 资源配置 */
-#define AI_RGB_POOL_SIZE          2                       // AI串行处理，2帧足够
+#define AI_RGB_POOL_SIZE          4                       // AI串行处理，2帧足够
 #define AI_RGB_MAX_SUBSCRIBERS    4
 #define AI_MAX_FACES              MAX_FACES
 
@@ -191,6 +191,7 @@ static void *face_work_thread(void *arg)
     face_detect_srv_t *srv = &s_face_srv;
     data_bus_item_handle_t yuyv_item = NULL;
     data_bus_item_handle_t rgb_item = NULL;
+    data_bus_item_handle_t ai_result_item = NULL;
     int ret;
 
     LOG_I(MODULE_TAG "AI工作线程启动【拉模式+事件唤醒】");
@@ -254,7 +255,7 @@ static void *face_work_thread(void *arg)
             rgb_item = yuyv_item = NULL;
             continue;
         }
-
+        
         /* ============== 人脸坐标映射 ============== */
         if (srv->face_num > 0)
         {
@@ -268,11 +269,11 @@ static void *face_work_thread(void *arg)
         {
             LOG_D(MODULE_TAG "未检测到人脸");
         }
-
+        data_bus_push(AI_RGB_DATA_BUS, rgb_item);
         /* ============== 仅有人脸时：发布AI结果到总线 ============== */
         if (srv->face_num > 0)
         {
-            data_bus_item_handle_t ai_result_item = NULL;
+            
             ret = data_bus_alloc(VIDEO_DATA_BUS,
                                  DATA_TYPE_AI_RESULT,
                                  sizeof(FaceInfo_C) * srv->face_num,
@@ -283,14 +284,14 @@ static void *face_work_thread(void *arg)
                 memcpy(data_bus_get_writable_ptr(ai_result_item),
                        srv->faces,
                        sizeof(FaceInfo_C) * srv->face_num);
-                data_bus_push(VIDEO_DATA_BUS, ai_result_item);
-                data_bus_release(ai_result_item);
+
             }
         }
 
         /* ============== 释放所有帧（严格配对引用计数） ============== */
         data_bus_release(rgb_item);   /* 释放AI临时RGB帧 */
         data_bus_release(yuyv_item);  /* 释放摄像头源帧 */
+        data_bus_release(ai_result_item);
         rgb_item = yuyv_item = NULL;
 
         /* 发布AI处理完成事件 */

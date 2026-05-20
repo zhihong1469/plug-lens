@@ -28,7 +28,6 @@ LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
-	-pthread \
 	-L$(TOPDIR)/third_lib/face_detector/mnn/lib/ \
 	-lMNN \
 	-L$(TOPDIR)/third_lib/opencv_lib/lib/ \
@@ -45,4 +44,6 @@ LDFLAGS := \
 	-lssl \
 	-lcrypto \
 	-lstdc++ \
-	-pthread 
+	-pthread \
+	-L$(TOP_DIR)/third_lib/libjpeg_turbo/lib \
+	-lturbojpeg
