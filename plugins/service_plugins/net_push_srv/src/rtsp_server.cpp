@@ -1,224 +1,182 @@
-// ========================= 头文件说明 =========================
-#include <liveMedia.hh>
-#include <BasicUsageEnvironment.hh>
-#include <GroupsockHelper.hh>
-#include <JPEGVideoRTPSink.hh>
-#include <ByteStreamMemoryBufferSource.hh>
+// 仅使用你提供的官方头文件，无任何额外依赖
+#include "liveMedia.hh"
+#include "BasicUsageEnvironment.hh"
 
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
 
-// ========================= 全局变量 =========================
-UsageEnvironment* env = nullptr;
-TaskScheduler* scheduler = nullptr;
-RTSPServer* rtspServer = nullptr;
-ServerMediaSession* sms = nullptr;
+// ========================= 全局JPEG缓存（线程安全） =========================
+static uint8_t* g_jpeg_buf = NULL;
+static uint32_t g_jpeg_size = 0;
+static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-ByteStreamMemoryBufferSource* g_jpegSource = nullptr;
-RTPSink* g_videoSink = nullptr;
-RTCPInstance* g_rtcp = nullptr;
-Groupsock* rtpGroupsock = nullptr;
-Groupsock* rtcpGroupsock = nullptr;
-
-uint8_t g_dummy_jpeg[] = {0xFF, 0xD8, 0xFF, 0xD9};
-
-// 线程控制
-static pthread_t g_rtsp_tid = 0;
-static volatile bool g_rtsp_running = false;
-static pthread_mutex_t g_rtsp_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// ✅ 修复核心：原子变量 仅声明，不拷贝初始化（避免编译错误）
-static EventLoopWatchVariable g_stop_watch_var;
-
-// 前置声明
-void play();
-void afterPlaying(void* clientData);
-
-// ========================= 播放完成回调 =========================
-void afterPlaying(void* clientData) {
-    (void)clientData;
-    pthread_mutex_lock(&g_rtsp_mutex);
-
-    if (g_videoSink) g_videoSink->stopPlaying();
-    if (g_jpegSource) {
-        Medium::close(g_jpegSource);
-        g_jpegSource = nullptr;
+// ========================= 【核心修复】继承官方JPEGVideoSource（而非FramedSource） =========================
+class LiveJPEGSource : public JPEGVideoSource {
+public:
+    static LiveJPEGSource* createNew(UsageEnvironment& env) {
+        return new LiveJPEGSource(env);
     }
 
-    if (g_rtsp_running) {
-        play();
+    // 静态延时回调（官方调度器要求）
+    static void fetchFrame(void* clientData) {
+        LiveJPEGSource* source = (LiveJPEGSource*)clientData;
+        source->doGetNextFrame();
     }
 
-    pthread_mutex_unlock(&g_rtsp_mutex);
-}
+protected:
+    LiveJPEGSource(UsageEnvironment& env) : JPEGVideoSource(env) {}
+    virtual ~LiveJPEGSource() {}
 
-// ========================= 初始化播放 =========================
-void play() {
-    g_jpegSource = ByteStreamMemoryBufferSource::createNew(*env,
-        g_dummy_jpeg, sizeof(g_dummy_jpeg), False);
+    // -------------------------- 必须实现JPEGVideoSource纯虚函数 --------------------------
+    virtual u_int8_t type()        { return 0; }   // RFC2435标准JPEG类型
+    virtual u_int8_t qFactor()     { return 75; } // 标准JPEG质量因子
+    virtual u_int8_t width()       { return 80; } // 640/8=80 (你的分辨率640x360)
+    virtual u_int8_t height()      { return 45; } // 360/8=45
 
-    if (g_videoSink && g_jpegSource) {
-        g_videoSink->startPlaying(*g_jpegSource, afterPlaying, g_videoSink);
+    // -------------------------- 核心取数据函数（官方标准） --------------------------
+    virtual void doGetNextFrame() {
+        pthread_mutex_lock(&g_jpeg_mutex);
+
+        // 无数据则延时重试（适配你的5FPS低帧率）
+        if (g_jpeg_buf == NULL || g_jpeg_size == 0) {
+            pthread_mutex_unlock(&g_jpeg_mutex);
+            envir().taskScheduler().scheduleDelayedTask(10000, fetchFrame, this);
+            return;
+        }
+
+        // 复制JPEG数据到官方缓冲区
+        fFrameSize = (fMaxSize < g_jpeg_size) ? fMaxSize : g_jpeg_size;
+        memcpy(fTo, g_jpeg_buf, fFrameSize);
+        fNumTruncatedBytes = g_jpeg_size - fFrameSize;
+
+        pthread_mutex_unlock(&g_jpeg_mutex);
+
+        // 通知live555数据就绪（官方强制调用）
+        afterGetting(this);
     }
-}
+};
 
-// ========================= RTSP 服务主线程 =========================
-void* rtsp_server_thread(void* arg) {
+// ========================= 官方标准OnDemand子会话（对齐你的demo） =========================
+class JPEGServerMediaSubsession : public OnDemandServerMediaSubsession {
+public:
+    static JPEGServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
+        return new JPEGServerMediaSubsession(env, reuseFirstSource);
+    }
+
+protected:
+    JPEGServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
+        : OnDemandServerMediaSubsession(env, reuseFirstSource) {}
+
+    // 【官方标准】创建数据源（直接返回LiveJPEGSource，无Framer）
+    virtual FramedSource* createNewStreamSource(unsigned /*clientId*/, unsigned& estBitrate) {
+        estBitrate = 1000; // 官方要求：带宽1Mbps，不可为0
+        return LiveJPEGSource::createNew(envir());
+    }
+
+    // 【官方标准】创建JPEG RTP发送器
+    virtual RTPSink* createNewRTPSink(Groupsock* rtpGroupsock, 
+                                      unsigned char /*payloadType*/, 
+                                      FramedSource* /*source*/) {
+        return JPEGVideoRTPSink::createNew(envir(), rtpGroupsock);
+    }
+};
+
+// ========================= RTSP服务全局变量（对齐官方demo） =========================
+static TaskScheduler* scheduler = NULL;
+static UsageEnvironment* env = NULL;
+static RTSPServer* rtspServer = NULL;
+static pthread_t rtsp_thread;
+static volatile bool rtsp_running = false;
+static EventLoopWatchVariable stop_watch;
+
+// ========================= RTSP服务线程（完全照搬你的官方demo逻辑） =========================
+static void* rtsp_server_thread(void* arg) {
     (void)arg;
-    g_rtsp_running = true;
-    g_stop_watch_var = 0;  // ✅ 修复：运行时赋值，而非初始化时拷贝
+    rtsp_running = true;
+    stop_watch = 0;
 
-    // 1. 创建调度器 + 环境
+    // 1. 初始化环境（官方标准）
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
 
-    // 2. 组播地址配置
-    struct sockaddr_storage destinationAddress;
-    destinationAddress.ss_family = AF_INET;
-    ((struct sockaddr_in&)destinationAddress).sin_addr.s_addr = chooseRandomIPv4SSMAddress(*env);
-
-    const unsigned short rtpPortNum = 18888;
-    const unsigned short rtcpPortNum = rtpPortNum + 1;
-    const unsigned char ttl = 255;
-
-    const Port rtpPort(rtpPortNum);
-    const Port rtcpPort(rtcpPortNum);
-
-    // 3. 创建网络套接字
-    rtpGroupsock = new Groupsock(*env, destinationAddress, rtpPort, ttl);
-    rtpGroupsock->multicastSendOnly();
-    rtcpGroupsock = new Groupsock(*env, destinationAddress, rtcpPort, ttl);
-    rtcpGroupsock->multicastSendOnly();
-
-    // 4. 缓冲区配置
-    OutPacketBuffer::maxSize = 2000000;
-
-    // 5. 创建 JPEG RTP 发送器
-    g_videoSink = JPEGVideoRTPSink::createNew(*env, rtpGroupsock);
-
-    // 6. RTCP
-    const unsigned estimatedSessionBandwidth = 500;
-    const unsigned maxCNAMElen = 100;
-    unsigned char CNAME[maxCNAMElen + 1];
-    gethostname((char*)CNAME, maxCNAMElen);
-    CNAME[maxCNAMElen] = '\0';
-
-    g_rtcp = RTCPInstance::createNew(*env, rtcpGroupsock,
-        estimatedSessionBandwidth, CNAME, g_videoSink, nullptr, True);
-
-    // 7. 启动 RTSP 服务器 (端口 8554)
-    rtspServer = RTSPServer::createNew(*env, 8554);
-    if (!rtspServer) {
-        *env << "Failed to create RTSP server\n";
-        g_rtsp_running = false;
-        return nullptr;
+    // 2. 创建RTSP服务器(8554)（官方标准）
+    rtspServer = RTSPServer::createNew(*env, 8554, NULL);
+    if (rtspServer == NULL) {
+        *env << "RTSP server create failed: " << env->getResultMsg() << "\n";
+        rtsp_running = false;
+        return NULL;
     }
 
-    // 8. 创建媒体会话
-    sms = ServerMediaSession::createNew(*env,
-        "stream", "mjpeg", "IMX655 MJPEG Stream", True);
-    sms->addSubsession(PassiveServerMediaSubsession::createNew(*g_videoSink, g_rtcp));
+    // 3. 创建媒体会话（官方标准）
+    ServerMediaSession* sms = ServerMediaSession::createNew(*env,
+        "stream", "stream", "IMX6ULL JPEG RTSP Stream");
+    
+    // 4. 添加JPEG子会话（多客户端共享流：True）
+    sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
     rtspServer->addServerMediaSession(sms);
 
-    // 打印播放地址
+    // 打印地址
     char* url = rtspServer->rtspURL(sms);
     *env << "=====================================\n";
-    *env << "RTSP URL: " << url << "\n";
+    *env << "RTSP 服务启动成功\n";
+    *env << "播放地址: " << url << "\n";
     *env << "=====================================\n";
     delete[] url;
 
-    // 9. 启动播放
-    play();
+    // 5. 设置大帧缓冲（官方标准，适配JPEG大帧）
+    OutPacketBuffer::maxSize = 2000000;
 
-    // 标准 live555 事件循环
-    env->taskScheduler().doEventLoop(&g_stop_watch_var);
+    // 6. 启动事件循环（官方标准）
+    env->taskScheduler().doEventLoop(&stop_watch);
 
-    // 线程退出清理
-    g_rtsp_running = false;
-    return nullptr;
+    rtsp_running = false;
+    return NULL;
 }
 
-// ========================= C 语言对外接口 =========================
-// 启动服务
+// ========================= 对外C接口（完全不变，兼容你的业务代码） =========================
 extern "C" int rtsp_server_start(void) {
-    pthread_mutex_lock(&g_rtsp_mutex);
-    if (g_rtsp_running || g_rtsp_tid != 0) {
-        pthread_mutex_unlock(&g_rtsp_mutex);
-        return 0;
-    }
-
-    int ret = pthread_create(&g_rtsp_tid, nullptr, rtsp_server_thread, nullptr);
-    pthread_mutex_unlock(&g_rtsp_mutex);
-    usleep(100000);
-    return ret;
+    if (rtsp_running) return 0;
+    return pthread_create(&rtsp_thread, NULL, rtsp_server_thread, NULL);
 }
 
-// 推送 JPEG 帧（线程安全）
 extern "C" void rtsp_server_push_jpeg(const uint8_t* jpeg_buf, uint32_t jpeg_size) {
-    pthread_mutex_lock(&g_rtsp_mutex);
+    if (!jpeg_buf || jpeg_size == 0) return;
 
-    if (!g_rtsp_running || !g_videoSink || !jpeg_buf || jpeg_size == 0) {
-        pthread_mutex_unlock(&g_rtsp_mutex);
-        return;
+    pthread_mutex_lock(&g_jpeg_mutex);
+    // 释放旧缓存
+    if (g_jpeg_buf) free(g_jpeg_buf);
+    // 存储新JPEG帧
+    g_jpeg_buf = (uint8_t*)malloc(jpeg_size);
+    if (g_jpeg_buf) {
+        memcpy(g_jpeg_buf, jpeg_buf, jpeg_size);
+        g_jpeg_size = jpeg_size;
     }
-
-    g_videoSink->stopPlaying();
-    if (g_jpegSource) {
-        Medium::close(g_jpegSource);
-        g_jpegSource = nullptr;
-    }
-
-    g_jpegSource = ByteStreamMemoryBufferSource::createNew(*env,
-        (u_int8_t*)jpeg_buf, jpeg_size, False);
-
-    if (g_jpegSource) {
-        g_videoSink->startPlaying(*g_jpegSource, afterPlaying, g_videoSink);
-    }
-
-    pthread_mutex_unlock(&g_rtsp_mutex);
+    pthread_mutex_unlock(&g_jpeg_mutex);
 }
 
-// 安全停止 RTSP 服务
 extern "C" int rtsp_server_stop(void) {
-    pthread_mutex_lock(&g_rtsp_mutex);
+    if (!rtsp_running) return 0;
 
-    if (!g_rtsp_running || g_rtsp_tid == 0) {
-        pthread_mutex_unlock(&g_rtsp_mutex);
-        return 0;
-    }
+    // 停止循环
+    stop_watch = 1;
+    pthread_join(rtsp_thread, NULL);
 
-    // 1. 停止运行标志
-    g_rtsp_running = false;
+    // 释放资源
+    pthread_mutex_lock(&g_jpeg_mutex);
+    if (g_jpeg_buf) free(g_jpeg_buf);
+    g_jpeg_buf = NULL;
+    g_jpeg_size = 0;
+    pthread_mutex_unlock(&g_jpeg_mutex);
 
-    // 2. 停止播放
-    if (g_videoSink) {
-        g_videoSink->stopPlaying();
-    }
+    if (rtspServer) Medium::close(rtspServer);
+    if (env) env->reclaim();
+    if (scheduler) delete scheduler;
 
-    // 触发 live555 事件循环退出
-    g_stop_watch_var = 1;
-
-    // 3. 等待线程安全退出
-    pthread_mutex_unlock(&g_rtsp_mutex);
-    pthread_join(g_rtsp_tid, nullptr);
-    pthread_mutex_lock(&g_rtsp_mutex);
-
-    // 4. 释放所有 live555 资源
-    if (g_jpegSource)        { Medium::close(g_jpegSource); g_jpegSource = nullptr; }
-    if (g_rtcp)              { Medium::close(g_rtcp); g_rtcp = nullptr; }
-    if (g_videoSink)         { Medium::close(g_videoSink); g_videoSink = nullptr; }
-    if (sms)                 { Medium::close(sms); sms = nullptr; }
-    if (rtspServer)          { Medium::close(rtspServer); rtspServer = nullptr; }
-    delete rtpGroupsock;      rtpGroupsock = nullptr;
-    delete rtcpGroupsock;     rtcpGroupsock = nullptr;
-    if (env)                 { env->reclaim(); env = nullptr; }
-    if (scheduler)           { delete scheduler; scheduler = nullptr; }
-
-    // 5. 重置变量
-    g_rtsp_tid = 0;
-    g_stop_watch_var = 0;
-
-    pthread_mutex_unlock(&g_rtsp_mutex);
+    rtspServer = NULL;
+    env = NULL;
+    scheduler = NULL;
     return 0;
 }
