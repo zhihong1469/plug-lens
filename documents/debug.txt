@@ -1,68 +1,118 @@
-
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318c8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:270][face_work_thread] [FACE_DETECT]未检测到人脸
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27409 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318c8, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad58c | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0xad794 | 摄像头数据地址=0x75ed3000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5ec, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0xad58c
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=3 -> 2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:261][capture_work_thread] [CAPTURE] 采集总FPS: 20 | AI有效FPS: 5
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27269 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad5bc | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x11df94 | 摄像头数据地址=0x75df1000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0xad5bc
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5bc, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27269 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad5ec | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x18e794 | 摄像头数据地址=0x75ed3000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5bc, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0xad5ec
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5ec, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27269 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad5bc | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x11df94 | 摄像头数据地址=0x75df1000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5ec, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0xad5bc
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5bc, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27269 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=UNKNOWN, size=691200, producer=FACE_DETECT
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/face_detect_srv/src/face_detect_srv.c:270][face_work_thread] [FACE_DETECT]未检测到人脸
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318c8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27269 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318f8, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad58c | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0xad794 | 摄像头数据地址=0x75ed3000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad5bc, ref=1 -> 0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:244][capture_work_thread] [CAPTURE] ✅ 帧推入DataBus成功 | ret=0
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:250][capture_work_thread] [CAPTURE] 🔄 生产者释放帧 | 句柄=0xad58c
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=3 -> 2
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/net_push_srv/src/net_push_srv.c:225][net_push_work_thread] [NET_PUSH]推流成功 | 大小:27025 Bytes
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0x4318c8, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:219][capture_work_thread] [CAPTURE] ✅ 成功获取空闲帧 | 句柄地址=0xad5bc | 总线=video
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/plugins/service_plugins/capture_srv/src/capture_srv.c:230][capture_work_thread] [CAPTURE] ✅ 帧可写指针=0x11df94 | 摄像头数据地址=0x75df1000 | 数据长度=460800
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:206][_data_bus_release_item_safe] [BUS REF] item=0xad58c, ref=2 -> 1
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/bus/data_bus/src/data_bus.c:595][data_bus_push] [BUS PUSH] 数据发布成功: type=VIDEO_FRAME, size=460800, producer=CAPTURE
-[D][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_term[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:69][app_publish_sys_event] Main: Published sys event: SYS_SHUTDOWN
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:69][app_publish_sys_event] Main: Published sys event: SYS_SHUTDOWN
-[I][/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/src/app/src/main.c:254][main] Main: Application exited normally
+C:\Users\27969>ffplay rtsp://192.168.5.9:8554/stream
+ffplay version N-124557-g9e71ea2d60-20260520 Copyright (c) 2003-2026 the FFmpeg developers
+  built with gcc 15.2.0 (crosstool-NG 1.28.0.23_185f348)
+  configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libxml2 --enable-libvmaf --enable-fontconfig --enable-libharfbuzz --enable-libfreetype --enable-libfribidi --enable-vulkan --enable-libshaderc --enable-libvorbis --disable-libxcb --disable-xlib --disable-libpulse --enable-opencl --enable-gmp --enable-lzma --enable-liblcevc-dec --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-libplacebo --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-liboapv --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsnappy --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-libvvenc --enable-whisper --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20260520
+  libavutil      60. 31.100 / 60. 31.100
+  libavcodec     62. 34.100 / 62. 34.100
+  libavformat    62. 18.100 / 62. 18.100
+  libavdevice    62.  4.100 / 62.  4.100
+  libavfilter    11. 17.100 / 11. 17.100
+  libswscale      9.  7.100 /  9.  7.100
+  libswresample   6.  4.100 /  6.  4.100
+[rtsp @ 000001e477f32100] RTP timestamps don't match.    0B
+[rtsp @ 000001e477f32100] Received packet without a start chunk; dropping frame.
+    Last message repeated 1 times
+[rtsp @ 000001e477f32100] Received packet without a start chunk; dropping frame.
+    Last message repeated 19 times
+[rtsp @ 000001e477f32100] Stream #0: not enough frames to estimate rate; consider increasing probesize
+Input #0, rtsp, from 'rtsp://192.168.5.9:8554/stream':
+  Metadata:
+    title           : IMX6ULL JPEG RTSP Stream
+    comment         : stream
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc, bt470bg/unknown/unknown), 640x360 [SAR 1:1 DAR 16:9], 90k tbr, 90k tbn
+[mjpeg @ 000001e47399be00] overread 8
+[swscaler @ 000001e4789c49c0] deprecated pixel format used, make sure you did set range correctly
+[mjpeg @ 000001e47399be00] overread 8
+    Last message repeated 2 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 5765KB sq=    0B
+    Last message repeated 11 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 5562KB sq=    0B
+    Last message repeated 17 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 5190KB sq=    0B
+    Last message repeated 20 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 4650KB sq=    0B
+    Last message repeated 12 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 4379KB sq=    0B
+    Last message repeated 25 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 3704KB sq=    0B
+    Last message repeated 19 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 3063KB sq=    0B
+    Last message repeated 21 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 2489KB sq=    0B
+    Last message repeated 23 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 1984KB sq=    0B
+    Last message repeated 18 times
+[mjpeg @ 000001e47399be00] overread 8B vq= 1480KB sq=    0B
+    Last message repeated 18 times
+[mjpeg @ 000001e47399be00] overread 8B vq=  908KB sq=    0B
+    Last message repeated 18 times
+[mjpeg @ 000001e47399be00] overread 8B vq=  437KB sq=    0B
+    Last message repeated 15 times
+[mjpeg @ 000001e47399be00] overread 8B vq=   67KB sq=    0B
+    Last message repeated 12 times
+[mjpeg @ 000001e47399be00] overread 8B vq=  100KB sq=    0B
+    Last message repeated 2 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 1 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 1 times
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.B
+    Last message repeated 1 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 10 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 9 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 9 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 7 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 1 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 2 times
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.B
+    Last message repeated 6 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 11 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 4 times
+[mjpeg @ 000001e47399be00] overread 8
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 12 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 8 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 10 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 8 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 8 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 2 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 5 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 3 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 1 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+    Last message repeated 5 times
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.B
+    Last message repeated 10 times
+[mjpeg @ 000001e47399be00] overread 8
+    Last message repeated 10 times
+[mjpeg @ 000001e47399be00] overread 8B vq=  403KB sq=    0B
+    Last message repeated 11 times
+[rtsp @ 000001e477f32100] max delay reached. need to consume packet
+[rtsp @ 000001e477f32100] RTP: missed 177 packets
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.
+[rtsp @ 000001e477f32100] Missing packets; dropping frame.B
+    Last message repeated 13 times
+[mjpeg @ 000001e47399be00] overread 8
+    Last message repeated 8 times
+[mjpeg @ 000001e47399be00] overread 8B vq=  201KB sq=    0B
+    Last message repeated 14 times
+[mjpeg @ 000001e47399be00] overread 8B vq=    0KB sq=    0B
+    Last message repeated 5 times
