@@ -21,7 +21,7 @@ SRC_FILES := \
 LOCAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
-	-I$(TOPDIR)/plugins/base_plugins/sd_storage/inc/sd_storage.h \
+	-I$(TOPDIR)/plugins/base_plugins/sd_storage/inc \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/capture_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/face_detect_srv/inc \

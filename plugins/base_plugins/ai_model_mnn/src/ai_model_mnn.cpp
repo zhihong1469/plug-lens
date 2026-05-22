@@ -194,15 +194,15 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 }
 
 // ==========================
-// 【新增核心函数】OpenCV原生：坐标映射 + 拷贝帧 + 画框（通用化）
+// 【修复版】OpenCV原生：坐标映射 + 拷贝帧 + 画框（通用化）
 // ==========================
 void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
                                     const uint8_t *src_frame, uint8_t *dst_frame)
 {
     // 1. 入参校验
-    if (!face || !g_priv || !src_frame || !dst_frame) return;
+    if (!face || !src_frame || !dst_frame) return;
 
-    // 2. 坐标等比例映射（原有逻辑）
+    // 2. 坐标等比例映射（原有逻辑保留）
     float sw = (float)cam_w / g_priv->ai_w;
     float sh = (float)cam_h / g_priv->ai_h;
     face->x1 *= sw;
@@ -210,11 +210,11 @@ void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
     face->x2 *= sw;
     face->y2 *= sh;
 
-    // 3. 拷贝原始图像数据到目标帧
-    memcpy(dst_frame, src_frame, cam_w * cam_h * 2);
+    // 3. 拷贝完整RGB数据（关键修复：长度改为*3）
+    memcpy(dst_frame, src_frame, cam_w * cam_h * 3);
 
-    // 4. OpenCV包装图像数据（零拷贝，高效）
-    Mat frame_mat(cam_h, cam_w, CV_8UC2, dst_frame);
+    // 4. OpenCV包装RGB图像（关键修复：通道改为CV_8UC3）
+    Mat frame_mat(cam_h, cam_w, CV_8UC3, dst_frame);
 
     // 5. OpenCV原生绘制红色人脸框
     Rect face_rect(
@@ -225,7 +225,6 @@ void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
     );
     rectangle(frame_mat, face_rect, Scalar(FACE_BOX_COLOR_RED), FACE_BOX_THICKNESS);
 }
-
 // ==========================
 // 工具接口
 // ==========================
