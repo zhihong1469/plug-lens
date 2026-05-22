@@ -8,29 +8,12 @@
  *                 3. 系统事件控制启停，对齐全应用层架构
  *                 4. 【优化】摄像头原生MJPEG直推，零编码损耗，CPU占用极低
  *                 5. 严格遵循DataBus引用计数规范
- *                 6. 【新增】支持JPEG动态数据大小获取
+ *                 6. 【新增】支持JPEG动态数据大小获取 + 宏定义帧率限流
  * @author         Luo
  * @date           2026
  ******************************************************************************
  */
 
-// ==========================================================================
-// 【文件私有化宏定义】
-// ==========================================================================
-#define MODULE_NAME               "NET_PUSH"
-#define MODULE_TAG                "[NET_PUSH]"
-
-/* 数据总线配置（优先级：人脸带框RGB帧 > 原始摄像头MJPEG帧） */
-#define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   // 高优先级：带人脸框的RGB帧
-#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧
-#define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
-
-/* 推流参数配置 */
-#define FRAME_WAIT_TIMEOUT_MS     30
-
-/* 视频参数（匹配摄像头原生MJPEG格式） */
-#define VIDEO_WIDTH               CONFIG_CAPTURE_WIDTH
-#define VIDEO_HEIGHT              CONFIG_CAPTURE_HEIGHT
 
 // ==========================================================================
 // 头文件包含
@@ -50,6 +33,28 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
+
+
+// ==========================================================================
+// 【文件内部私有化宏】可直接在此调整推流参数，无需修改函数逻辑
+// ==========================================================================
+#define MODULE_NAME               "NET_PUSH"
+#define MODULE_TAG                "[NET_PUSH]"
+
+#define NET_PUSH_TARGET_FPS        GLOBAL_VIDEO_FPS          // 推流帧率
+#define FRAME_INTERVAL_MS          GLOBAL_FRAME_INTERVAL_MS  // 自动计算帧间隔
+
+/* 数据总线配置（优先级：人脸带框RGB帧 > 原始摄像头MJPEG帧） */
+#define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   // 高优先级：带人脸框的RGB帧
+#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧
+#define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
+
+/* 推流参数配置 */
+#define FRAME_WAIT_TIMEOUT_MS     30
+
+/* 视频参数（匹配摄像头原生MJPEG格式） */
+#define VIDEO_WIDTH               GLOBAL_VIDEO_WIDTH
+#define VIDEO_HEIGHT              GLOBAL_VIDEO_HEIGHT
 
 /* =============================================================================
  * @brief 网络推流服务控制块（已删除TurboJPEG相关成员）
@@ -160,72 +165,51 @@ static void net_push_event_cb(const event_t *event, void *user_data)
  *          2. 降级兜底：拉取 VIDEO_DATA_BUS 摄像头原生MJPEG帧
  *          3. MJPEG零拷贝直推，无编码损耗，CPU占用极低
  *          4. 适配JPEG动态数据大小，通过data_bus_get_item_size获取
+ *          5. 宏定义帧率限流，避免客户端缓存溢出
  * ============================================================================*/
 static void *net_push_work_thread(void *arg)
 {
-    (void)arg;
     net_push_srv_t *srv = &s_net_push_srv;
     data_bus_item_handle_t frame_item = NULL;
     const uint8_t *frame_data = NULL;
     size_t frame_size = 0;
-    int ret;
+    struct timespec last_ts;
 
-    // ====================== 新增：帧率限流配置 ======================
-    const int TARGET_FPS = 15;                // 目标帧率
-    const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // 66ms/帧
-    struct timespec last_push_ts;             // 上一帧时间
-    clock_gettime(CLOCK_MONOTONIC, &last_push_ts);
-
-    LOG_I(MODULE_TAG "推流线程启动【MJPEG直推+%dfps限流】", TARGET_FPS);
+    clock_gettime(CLOCK_MONOTONIC, &last_ts);
 
     while (srv->thread_running)
     {
         if (srv->is_paused) {
-            usleep(FRAME_WAIT_TIMEOUT_MS * 1000);
+            usleep(FRAME_INTERVAL_MS * 1000);
             continue;
         }
 
-        // 等待AI事件唤醒
+        // 等待事件
         pthread_mutex_lock(&srv->mutex);
-        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_WAIT_TIMEOUT_MS);
+        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_INTERVAL_MS);
         pthread_mutex_unlock(&srv->mutex);
 
-        // ====================== 核心：帧率限流 ======================
-        struct timespec now_ts;
-        clock_gettime(CLOCK_MONOTONIC, &now_ts);
-        uint32_t elapsed_ms = (now_ts.tv_sec - last_push_ts.tv_sec) * 1000 +
-                             (now_ts.tv_nsec - last_push_ts.tv_nsec) / 1000000;
+        // 帧率限流
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        uint32_t elapsed = (now.tv_sec - last_ts.tv_sec)*1000 + (now.tv_nsec - last_ts.tv_nsec)/1000000;
+        if (elapsed < FRAME_INTERVAL_MS) continue;
+        last_ts = now;
 
-        // 未到推流间隔，直接跳过
-        if (elapsed_ms < FRAME_INTERVAL_MS) {
-            continue;
-        }
-
-        // 更新上一帧时间
-        last_push_ts = now_ts;
-
-        // 拉取 MJPEG 数据
+        // 拉取MJPEG + 推流
         frame_item = NULL;
-        ret = data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item);
-        if (ret == DATA_BUS_OK && frame_item) {
+        if (data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item) == DATA_BUS_OK) {
             frame_data = data_bus_get_readonly_ptr(frame_item);
             frame_size = data_bus_get_item_size(frame_item);
+            if (frame_data && frame_size) {
+                rtsp_server_push_jpeg(frame_data, frame_size);
+            }
+            data_bus_release(frame_item);
         }
-
-        if (!frame_data || frame_size == 0) {
-            if (frame_item) data_bus_release(frame_item);
-            continue;
-        }
-
-        // 调用底层 RTSP 推流（底层已处理时间戳+分包）
-        rtsp_server_push_jpeg((uint8_t *)frame_data, frame_size);
-
-        data_bus_release(frame_item);
     }
-
-    LOG_I(MODULE_TAG "推流线程退出");
     return NULL;
 }
+
 /* =============================================================================
  * @brief   服务启动函数
  * ============================================================================*/

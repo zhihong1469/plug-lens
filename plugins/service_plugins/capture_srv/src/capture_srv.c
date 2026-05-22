@@ -36,8 +36,8 @@
 
 // 采集核心配置（来源：vision_ai_config.h）
 #define CAPTURE_DEV_PATH          CONFIG_CAPTURE_DEV_PATH    // USB摄像头设备节点
-#define CAPTURE_WIDTH             CONFIG_CAPTURE_WIDTH       // 固定640
-#define CAPTURE_HEIGHT            CONFIG_CAPTURE_HEIGHT      // 固定360
+#define CAPTURE_WIDTH             GLOBAL_VIDEO_WIDTH       // 固定640
+#define CAPTURE_HEIGHT            GLOBAL_VIDEO_HEIGHT      // 固定360
 #define CAPTURE_FPS               CONFIG_CAPTURE_FPS         // 固定30
 #define CAPTURE_FORMAT_CFG        CONFIG_CAPTURE_FORMAT      // 0=YUYV 1=NV12 2=MJPEG
 #define CAPTURE_BUF_CNT           CONFIG_CAPTURE_BUF_COUNT   // 摄像头缓冲区数量
@@ -50,7 +50,7 @@
 
 // ====================== AI模块软件降频配置 ======================
 // 硬件30fps，AI目标帧率=5fps（可修改：3/5/10），自动计算降频步长
-#define AI_TARGET_FPS             5
+#define AI_TARGET_FPS             GLOBAL_VIDEO_FPS                
 #define FPS_DOWNSAMPLE_STEP       (CAPTURE_FPS / AI_TARGET_FPS)  // 30/5=6，每6帧保留1帧给AI
 
 // ==========================================================================
@@ -366,9 +366,9 @@ static int capture_srv_init(void)
 
     // 3. 初始化视频数据总线（V4.0 标准配置）
     data_bus_config_t bus_cfg = {0};
-    bus_cfg.max_items = 8;                // 帧缓存数量
+    bus_cfg.max_items = CAPTURE_BUF_CNT;                // 帧缓存数量
     bus_cfg.max_item_size = MAX_FRAME_SIZE; // 单帧最大大小
-    bus_cfg.max_subscribers = 8;          // 最大订阅者数量
+    bus_cfg.max_subscribers = CAPTURE_BUF_CNT;          // 最大订阅者数量
     bus_cfg.name = CAPTURE_DATA_BUS_NAME;
     
     if (data_bus_init(&bus_cfg) != DATA_BUS_OK) {
