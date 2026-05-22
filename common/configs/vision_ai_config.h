@@ -133,12 +133,10 @@ typedef enum {
 #define CONFIG_DATA_BUS_ENABLE_STATS true
 
 // 全局FSM配置
-#define CONFIG_GLOBAL_FSM_MAX_MODULES 16
+// #define CONFIG_GLOBAL_FSM_MAX_MODULES 16 // 未使用
 
 // 采集服务配置
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
-#define CONFIG_CAPTURE_WIDTH 640
-#define CONFIG_CAPTURE_HEIGHT 360
 #define CONFIG_CAPTURE_FORMAT 2  // 0=YUYV 1=NV12 2=MJPEG
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
@@ -156,6 +154,21 @@ typedef enum {
 
 // 人脸检测最大数量
 #define MAX_FACES             100
+
+
+// ==========================================================================
+// 【全局统一视频基准宏】唯一入口，所有模块共用，禁止单独修改！
+// ==========================================================================
+#define GLOBAL_VIDEO_FPS                15           // 全局统一帧率（采集=推流=RTSP）
+#define GLOBAL_VIDEO_WIDTH              640         // 统一分辨率宽
+#define GLOBAL_VIDEO_HEIGHT             360         // 统一分辨率高
+#define GLOBAL_JPEG_QUALITY             75          // 统一JPEG质量
+
+// 自动计算帧间隔（推流用：毫秒）
+#define GLOBAL_FRAME_INTERVAL_MS        (1000 / GLOBAL_VIDEO_FPS)
+// 自动计算帧间隔（RTSP底层用：微秒）
+#define GLOBAL_FRAME_INTERVAL_US        (1000000 / GLOBAL_VIDEO_FPS)
+
 
 #ifdef __cplusplus
 }

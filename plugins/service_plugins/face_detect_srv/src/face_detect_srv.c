@@ -42,8 +42,8 @@
 #define AI_IOU_THRESH                 CONFIG_AI_IOU_THRESH
 
 /* 摄像头参数 */
-#define CAPTURE_WIDTH                 CONFIG_CAPTURE_WIDTH
-#define CAPTURE_HEIGHT                CONFIG_CAPTURE_HEIGHT
+#define CAPTURE_WIDTH                 GLOBAL_VIDEO_WIDTH
+#define CAPTURE_HEIGHT                GLOBAL_VIDEO_HEIGHT
 
 /* 线程配置 */
 #define FRAME_WAIT_TIMEOUT_MS         200

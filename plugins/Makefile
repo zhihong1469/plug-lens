@@ -7,6 +7,7 @@ SRC_FILES := \
 	base_plugins/camera_usb/src/camera_usb.c \
 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 	base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp \
+	base_plugins/sd_storage/src/sd_storage.c \
 	service_plugins/net_push_srv/src/rtsp_server.cpp \
 	service_plugins/net_push_srv/src/net_push_srv.c \
 	service_plugins/capture_srv/src/capture_srv.c  \
@@ -20,6 +21,7 @@ SRC_FILES := \
 LOCAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	-I$(TOPDIR)/plugins/base_plugins/sd_storage/inc/sd_storage.h \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/capture_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/face_detect_srv/inc \
