@@ -61,7 +61,7 @@
 #include "vision_ai_config.h"
 #include "ai_model_mnn.hpp"
 #include "initcall.h"
-
+#include "sd_storage.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -90,6 +90,9 @@ typedef struct {
     /* AI检测结果 */
     FaceInfo_C                    faces[AI_MAX_FACES];    /* 人脸信息数组 */
     int                           face_num;              /* 检测到人脸数量 */
+
+    /* SD卡存储 */
+    SdStorage_t                  *sd_storage;            /* SD卡存储句柄 */
 } face_detect_srv_t;
 
 /* 全局单例 */
@@ -262,10 +265,12 @@ static void *face_work_thread(void *arg)
             goto release_res;
         }
 
-        /* ============== 检测到人脸：执行核心逻辑 ============== */
+        /* ============== 检测到人脸：【核心修复】立即保存原始RGB帧 ============== */
         LOG_I(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
 
-        /* 申请【带人脸框的结果RGB帧】（独立总线，物理隔离） */
+
+
+        /* ============== 绘制人脸框（可选，不影响保存） ============== */
         ret = data_bus_alloc(FACE_RESULT_RGB_DATA_BUS,
                              DATA_TYPE_VIDEO_RGB,
                              FACE_RESULT_RGB_FRAME_SIZE,
@@ -278,24 +283,51 @@ static void *face_work_thread(void *arg)
             /* OpenCV三合一：坐标映射 + 拷贝原始RGB + 绘制人脸框 */
             for (int i = 0; i < srv->face_num; i++)
             {
-                ai_model_mnn_map_and_draw_face(&srv->faces[i],
-                                               CAPTURE_WIDTH,
-                                               CAPTURE_HEIGHT,
-                                               raw_rgb_data,
-                                               result_rgb_data);
+                if( (srv->face_num-1) == i)
+                {
+                    ai_model_mnn_map_and_draw_face(&srv->faces[i],
+                                                CAPTURE_WIDTH,
+                                                CAPTURE_HEIGHT,
+                                                raw_rgb_data,
+                                                result_rgb_data);
+                }
+                else
+                {
+                    ai_model_mnn_map_and_draw_face(&srv->faces[i],
+                                                CAPTURE_WIDTH,
+                                                CAPTURE_HEIGHT,
+                                                raw_rgb_data,
+                                                raw_rgb_data);
+                }
             }
-            LOG_D(MODULE_TAG "人脸框绘制完成，结果RGB帧已发布");
+            LOG_D(MODULE_TAG "人脸框绘制完成");
+            if (srv->sd_storage) 
+            {
+                if(SdStorage_SaveJpeg(srv->sd_storage, data_bus_get_readonly_ptr(result_rgb_item)) == SD_STORAGE_OK)
+                {
+                    LOG_I(MODULE_TAG "SD卡保存人脸图像成功");
+                }
+                else
+                {
+                    LOG_E(MODULE_TAG "SD卡保存失败");
+                }
+            }
+            else
+            {
+                LOG_W(MODULE_TAG "SD存储未初始化，跳过保存");
+            }
         }
         else
         {
-            LOG_W(MODULE_TAG "人脸结果RGB总线无空闲帧");
+            LOG_W(MODULE_TAG "人脸结果RGB总线无空闲帧，跳过画框");
         }
 
 release_res:
-        /* ============== 严格释放所有DataBus资源 ============== */
-        data_bus_release(raw_rgb_item);       // 释放原始RGB帧
-        data_bus_release(camera_item);        // 释放摄像头帧
-        data_bus_release(result_rgb_item);    // 释放=自动发布结果RGB帧
+        /* ============== 【修复2】严格按顺序释放，杜绝引用计数溢出 ============== */
+        if (result_rgb_item)  { data_bus_release(result_rgb_item); }
+        if (raw_rgb_item)     { data_bus_release(raw_rgb_item); }
+        if (camera_item)      { data_bus_release(camera_item); }
+        
         raw_rgb_item = camera_item = result_rgb_item = NULL;
 
         /* 发布AI处理完成事件 */
@@ -385,6 +417,12 @@ static void face_srv_cleanup(void)
     }
     data_bus_deinit(AI_RAW_RGB_DATA_BUS);       // 释放原始RGB总线
     data_bus_deinit(FACE_RESULT_RGB_DATA_BUS);  // 释放结果RGB总线
+
+    /* 安全释放SD卡存储 */
+    if (srv->sd_storage) {
+        SdStorage_Deinit(srv->sd_storage);
+        srv->sd_storage = NULL;
+    }
 
     event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_STOPPED, MODULE_NAME);
     LOG_I(MODULE_TAG "所有资源释放完成");
@@ -484,6 +522,14 @@ static int face_srv_init(void)
         LOG_E(MODULE_TAG "事件总线订阅失败");
         face_srv_cleanup();
         return -1;
+    }
+
+    /* 【修复】初始化SD卡存储（确保指针有效） */
+    srv->sd_storage = SdStorage_Init();
+    if (srv->sd_storage) {
+        LOG_I(MODULE_TAG "SD卡存储初始化成功");
+    } else {
+        LOG_W(MODULE_TAG "SD卡存储初始化失败，将无法保存人脸图片");
     }
 
     LOG_I(MODULE_TAG "人脸检测服务初始化完成（双RGB总线物理隔离+OpenCV画框）");
