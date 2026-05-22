@@ -41,7 +41,8 @@
 #define CAPTURE_FPS               CONFIG_CAPTURE_FPS         // 固定30
 #define CAPTURE_FORMAT_CFG        CONFIG_CAPTURE_FORMAT      // 0=YUYV 1=NV12 2=MJPEG
 #define CAPTURE_BUF_CNT           CONFIG_CAPTURE_BUF_COUNT   // 摄像头缓冲区数量
-#define MAX_FRAME_SIZE            CAPTURE_WIDTH * CAPTURE_HEIGHT * 2  // 最大帧大小
+// MJPEG压缩流，给128KB安全上限（640*360的JPEG永远超不过）
+#define MAX_FRAME_SIZE            (128 * 1024)               // 最大帧大小
 
 // 服务私有固定配置
 #define CAP_FRAME_WAIT_US         20000   // 20ms 取帧等待
@@ -166,7 +167,6 @@ static void *capture_work_thread(void *arg)
     struct timeval tv;
     void *cam_buf = NULL;
     size_t cam_len = 0;
-    const uint32_t frame_data_size = srv->width * srv->height * 2;
     void *writable_buf = NULL;
     int ret = 0;
 
@@ -205,7 +205,7 @@ static void *capture_work_thread(void *arg)
         srv->downsample_cnt = 0;
         ret = data_bus_alloc(CAPTURE_DATA_BUS_NAME,
                                  DATA_TYPE_VIDEO,
-                                 frame_data_size,
+                                 MAX_FRAME_SIZE,
                                  MODULE_NAME,
                                  &item);
         if (ret != DATA_BUS_OK) {
@@ -230,7 +230,7 @@ static void *capture_work_thread(void *arg)
               writable_buf, cam_buf, cam_len);
         
         // 安全拷贝，防止越界
-        size_t copy_len = utils_min(cam_len, frame_data_size);
+        size_t copy_len = utils_min(cam_len, MAX_FRAME_SIZE);
         memcpy(writable_buf, cam_buf, copy_len);
 
         // ============== 第五步：V4.0正式API发布数据到总线 ==============

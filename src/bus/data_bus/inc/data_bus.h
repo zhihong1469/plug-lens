@@ -123,6 +123,13 @@ int data_bus_alloc(const char *name,
 void* data_bus_get_writable_ptr(data_bus_item_handle_t item);
 
 /**
+ * @brief  获取数据项的实际有效数据大小（适配JPEG动态长度）
+ * @param  item: 数据总线句柄
+ * @return 成功返回实际大小，失败返回0
+ */
+size_t data_bus_get_item_size(data_bus_item_handle_t item);
+
+/**
  * @brief  发布数据（推模式+拉模式通用）
  * @param  name: 总线名称
  * @param  item: 数据项句柄

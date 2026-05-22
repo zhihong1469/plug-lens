@@ -5,19 +5,22 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+// 新增：OpenCV头文件（已在UltraFaceMNN.hpp包含，这里显式声明）
+#include <opencv2/opencv.hpp>
 
 using namespace std;
+using namespace cv;
 
 // ==========================
-// MNN 子类私有数据
+// MNN 子类私有数据（通用化命名）
 // ==========================
 typedef struct {
-    UltraFaceMNN*            ultra_face;
-    int                      ai_w;
-    int                      ai_h;
-    const uint8_t*           yuyv_frame;
-    uint8_t*                 external_bgr_buf;
-    vector<FaceInfo_MNN>     curr_faces;
+    UltraFaceMNN*            ultra_face;     /**< MNN模型实例 */
+    int                      ai_w;           /**< 模型输入宽度 */
+    int                      ai_h;           /**< 模型输入高度 */
+    const uint8_t*           frame_data;     /**< 通用图像帧数据（兼容YUYV/MJPEG） */
+    uint8_t*                 external_bgr_buf;/**< 外部BGR推理缓存 */
+    vector<FaceInfo_MNN>     curr_faces;     /**< 当前人脸检测结果 */
 } mnn_priv_t;
 
 static ai_model_handle_t* g_mnn_handle = nullptr;
@@ -65,7 +68,7 @@ static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
 }
 
 // ==========================
-// 输入数据
+// 输入数据（通用化）
 // ==========================
 static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle, uint8_t* data, uint32_t len)
 {
@@ -74,29 +77,32 @@ static ai_model_err_t mnn_ai_input(ai_model_handle_t* handle, uint8_t* data, uin
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_ERR_INIT;
 
-    priv->yuyv_frame = data;
+    // 存储通用图像数据
+    priv->frame_data = data;
     return AI_MODEL_OK;
 }
 
 // ==========================
-// 推理
+// 推理（适配默认格式）
 // ==========================
 static ai_model_err_t mnn_ai_infer(ai_model_handle_t* handle)
 {
     if (!handle) return AI_MODEL_ERR_PARAM;
 
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
-    if (!priv || !priv->yuyv_frame || !priv->external_bgr_buf) {
+    if (!priv || !priv->frame_data || !priv->external_bgr_buf) {
         return AI_MODEL_ERR_INIT;
     }
 
     priv->curr_faces.clear();
+    // 通用推理默认使用MJPEG格式（硬件最优）
     int ret = priv->ultra_face->detect(
-        priv->yuyv_frame,
+        priv->frame_data,
         priv->ai_w,
         priv->ai_h,
         priv->external_bgr_buf,
-        priv->curr_faces
+        priv->curr_faces,
+        IMAGE_FORMAT_MJPEG
     );
 
     return (ret == MNN_FACE_OK) ? AI_MODEL_OK : AI_MODEL_ERR_INFER;
@@ -173,7 +179,7 @@ ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
 }
 
 // ==========================
-// 工具接口
+// 工具接口：坐标映射（原有逻辑，不动）
 // ==========================
 void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 {
@@ -187,6 +193,42 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
     face->y2 *= sh;
 }
 
+// ==========================
+// 【新增核心函数】OpenCV原生：坐标映射 + 拷贝帧 + 画框（通用化）
+// ==========================
+void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
+                                    const uint8_t *src_frame, uint8_t *dst_frame)
+{
+    // 1. 入参校验
+    if (!face || !g_priv || !src_frame || !dst_frame) return;
+
+    // 2. 坐标等比例映射（原有逻辑）
+    float sw = (float)cam_w / g_priv->ai_w;
+    float sh = (float)cam_h / g_priv->ai_h;
+    face->x1 *= sw;
+    face->y1 *= sh;
+    face->x2 *= sw;
+    face->y2 *= sh;
+
+    // 3. 拷贝原始图像数据到目标帧
+    memcpy(dst_frame, src_frame, cam_w * cam_h * 2);
+
+    // 4. OpenCV包装图像数据（零拷贝，高效）
+    Mat frame_mat(cam_h, cam_w, CV_8UC2, dst_frame);
+
+    // 5. OpenCV原生绘制红色人脸框
+    Rect face_rect(
+        cvRound(face->x1),
+        cvRound(face->y1),
+        cvRound(face->x2 - face->x1),
+        cvRound(face->y2 - face->y1)
+    );
+    rectangle(frame_mat, face_rect, Scalar(FACE_BOX_COLOR_RED), FACE_BOX_THICKNESS);
+}
+
+// ==========================
+// 工具接口
+// ==========================
 void ai_model_mnn_get_ai_size(int* w, int* h)
 {
     if (w) *w = g_priv ? g_priv->ai_w : 0;
@@ -199,28 +241,33 @@ bool ai_model_mnn_is_ready(void)
 }
 
 // ==========================
-// 🔥 核心优化：内部自动设置 BGR 缓存，无需上层手动调用！
+// 核心推理接口（新增格式参数，无多余接口）
 // ==========================
-int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
+int ai_model_mnn_infer_image(const uint8_t* image_data, int cam_w, int cam_h,
                             uint8_t* external_bgr_buf,
-                            FaceInfo_C* out_faces, int max_faces, int* out_face_num)
+                            FaceInfo_C* out_faces, int max_faces, int* out_face_num,
+                            uint8_t format)
 {
-    // 1. 参数校验
     if (!g_priv || !out_faces || !out_face_num || !external_bgr_buf) {
         return MNN_FACE_ERR_INPUT;
     }
 
-    // 2. ✅ 自动设置外部BGR缓存（内部处理，永不遗漏）
     g_priv->external_bgr_buf = external_bgr_buf;
 
-    // 3. 执行推理
     vector<FaceInfo_MNN> faces;
-    int ret = g_priv->ultra_face->detect(yuyv_data, cam_w, cam_h, external_bgr_buf, faces);
+    // 直接使用传入的格式参数，无多余接口
+    int ret = g_priv->ultra_face->detect(
+        image_data, 
+        cam_w, 
+        cam_h, 
+        external_bgr_buf, 
+        faces, 
+        (ImageFormat)format
+    );
     if (ret != MNN_FACE_OK) {
         return ret;
     }
 
-    // 4. 输出结果
     *out_face_num = min((int)faces.size(), max_faces);
     for (int i = 0; i < *out_face_num; i++) {
         out_faces[i].x1 = faces[i].x1;
@@ -232,4 +279,3 @@ int ai_model_mnn_infer_yuyv(const uint8_t* yuyv_data, int cam_w, int cam_h,
 
     return MNN_FACE_OK;
 }
-

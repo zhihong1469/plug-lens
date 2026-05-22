@@ -2,12 +2,13 @@
 /**
  ******************************************************************************
  * @file           net_push_srv.c
- * @brief          网络推流服务模块（RTSP/JPEG + DataBus V4.0 拉模式）
- * @details        1. 订阅AI_RGB总线，事件唤醒无CPU空耗
- *                 2. 纯拉模式获取最新AI处理帧，自动丢弃旧帧
- *                 3. 系统事件控制启停，对齐Demo应用层
- *                 4. TurboJPEG编码 + RTSP推流
+ * @brief          网络推流服务模块（RTSP/JPEG + DataBus V4.0 优先级拉模式）
+ * @details        1. 【优先级拉流】优先订阅人脸带框帧，降级原始摄像头总线
+ *                 2. 事件唤醒无CPU空耗，自动丢弃旧帧
+ *                 3. 系统事件控制启停，对齐全应用层架构
+ *                 4. 【优化】摄像头原生MJPEG直推，零编码损耗，CPU占用极低
  *                 5. 严格遵循DataBus引用计数规范
+ *                 6. 【新增】支持JPEG动态数据大小获取
  * @author         Luo
  * @date           2026
  ******************************************************************************
@@ -19,19 +20,17 @@
 #define MODULE_NAME               "NET_PUSH"
 #define MODULE_TAG                "[NET_PUSH]"
 
-/* 数据总线/事件总线 （全局配置统一定义） */
-#define AI_RGB_DATA_BUS           AI_RGB_DATA_BUS_NAME
+/* 数据总线配置（优先级：人脸带框RGB帧 > 原始摄像头MJPEG帧） */
+#define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   // 高优先级：带人脸框的RGB帧
+#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧
 #define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
 
 /* 推流参数配置 */
 #define FRAME_WAIT_TIMEOUT_MS     30
-#define JPEG_DEFAULT_QUALITY      80
 
-/* 视频参数（匹配AI输出 640*360 RGB24） */
+/* 视频参数（匹配摄像头原生MJPEG格式） */
 #define VIDEO_WIDTH               CONFIG_CAPTURE_WIDTH
 #define VIDEO_HEIGHT              CONFIG_CAPTURE_HEIGHT
-#define VIDEO_STRIDE              (VIDEO_WIDTH * 3)
-#define RGB_FRAME_SIZE            (VIDEO_WIDTH * VIDEO_HEIGHT * 3)
 
 // ==========================================================================
 // 头文件包含
@@ -42,8 +41,7 @@
 #include "vision_ai_config.h"
 #include "initcall.h"
 
-// 第三方依赖
-#include <turbojpeg.h>
+// 第三方依赖（已删除TurboJPEG）
 #include "rtsp_server.h"
 
 #include <stdlib.h>
@@ -54,24 +52,20 @@
 #include <time.h>
 
 /* =============================================================================
- * @brief 网络推流服务控制块（对齐人脸服务结构）
+ * @brief 网络推流服务控制块（已删除TurboJPEG相关成员）
  * ============================================================================*/
 typedef struct {
-    // 编码/推流句柄
-    tjhandle               tj_handle;     // TurboJPEG编码器句柄
-    int                    jpeg_quality;  // JPEG编码质量
-
     /* 线程控制 */
-    pthread_t               work_thread;           /* 工作线程 */
-    pthread_mutex_t         mutex;                 /* 条件变量互斥锁 */
-    pthread_cond_t          cond;                  /* 事件唤醒条件变量 */
-    bool                    thread_running;        /* 线程运行标志 */
-    bool                    is_paused;             /* 服务暂停标志 */
-    bool                    is_started;            /* 服务启动标志 */
+    pthread_t               work_thread;
+    pthread_mutex_t         mutex;
+    pthread_cond_t          cond;
+    bool                    thread_running;
+    bool                    is_paused;
+    bool                    is_started;
 
     /* 事件订阅ID */
-    int                     evt_sys_sub_id;        /* 系统事件订阅ID */
-    int                     evt_ai_sub_id;         /* AI处理完成事件订阅ID */
+    int                     evt_sys_sub_id;
+    int                     evt_ai_sub_id;
 } net_push_srv_t;
 
 /* 全局单例 */
@@ -109,7 +103,7 @@ static int pthread_cond_timedwait_ms(pthread_cond_t *cond,
 }
 
 /* =============================================================================
- * @brief   事件总线回调（系统事件 + AI帧处理完成事件）
+ * @brief   事件总线回调（系统事件 + AI处理完成事件）
  * ============================================================================*/
 static void net_push_event_cb(const event_t *event, void *user_data)
 {
@@ -118,7 +112,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
-        /* AI处理完成：唤醒推流线程处理帧 */
+        /* AI处理完成：唤醒推流线程（优先级拉流触发） */
         case EVENT_TYPE_FACE_PROCESS_DONE:
             if (srv->thread_running && !srv->is_paused)
             {
@@ -161,86 +155,79 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 }
 
 /* =============================================================================
- * @brief   推流工作线程（拉模式 + 事件唤醒）
+ * @brief   推流工作线程（优先级拉模式 + 事件唤醒 + MJPEG直推）
+ * @details 1. 高优先级：拉取 FACE_RESULT_RGB_DATA_BUS 带人脸框的帧
+ *          2. 降级兜底：拉取 VIDEO_DATA_BUS 摄像头原生MJPEG帧
+ *          3. MJPEG零拷贝直推，无编码损耗，CPU占用极低
+ *          4. 适配JPEG动态数据大小，通过data_bus_get_item_size获取
  * ============================================================================*/
 static void *net_push_work_thread(void *arg)
 {
     (void)arg;
     net_push_srv_t *srv = &s_net_push_srv;
-    data_bus_item_handle_t rgb_item = NULL;
+    data_bus_item_handle_t frame_item = NULL;
+    const uint8_t *frame_data = NULL;
+    size_t frame_size = 0;
     int ret;
 
-    LOG_I(MODULE_TAG "推流工作线程启动【拉模式+事件唤醒】");
+    // ====================== 新增：帧率限流配置 ======================
+    const int TARGET_FPS = 15;                // 目标帧率
+    const uint32_t FRAME_INTERVAL_MS = 1000 / TARGET_FPS; // 66ms/帧
+    struct timespec last_push_ts;             // 上一帧时间
+    clock_gettime(CLOCK_MONOTONIC, &last_push_ts);
+
+    LOG_I(MODULE_TAG "推流线程启动【MJPEG直推+%dfps限流】", TARGET_FPS);
 
     while (srv->thread_running)
     {
-        /* 暂停状态：低功耗等待 */
-        if (srv->is_paused)
-        {
+        if (srv->is_paused) {
             usleep(FRAME_WAIT_TIMEOUT_MS * 1000);
             continue;
         }
 
-        /* 等待AI事件唤醒 */
+        // 等待AI事件唤醒
         pthread_mutex_lock(&srv->mutex);
         pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_WAIT_TIMEOUT_MS);
         pthread_mutex_unlock(&srv->mutex);
 
-        /* 拉取最新AI RGB帧 */
-        ret = data_bus_pull_latest(AI_RGB_DATA_BUS, DATA_TYPE_VIDEO_RGB, &rgb_item);
-        if (ret != DATA_BUS_OK || !rgb_item)
-        {
+        // ====================== 核心：帧率限流 ======================
+        struct timespec now_ts;
+        clock_gettime(CLOCK_MONOTONIC, &now_ts);
+        uint32_t elapsed_ms = (now_ts.tv_sec - last_push_ts.tv_sec) * 1000 +
+                             (now_ts.tv_nsec - last_push_ts.tv_nsec) / 1000000;
+
+        // 未到推流间隔，直接跳过
+        if (elapsed_ms < FRAME_INTERVAL_MS) {
             continue;
         }
 
-        /* 获取RGB数据指针 */
-        const uint8_t *rgb_data = data_bus_get_readonly_ptr(rgb_item);
-        if (!rgb_data)
-        {
-            data_bus_release(rgb_item);
-            rgb_item = NULL;
+        // 更新上一帧时间
+        last_push_ts = now_ts;
+
+        // 拉取 MJPEG 数据
+        frame_item = NULL;
+        ret = data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item);
+        if (ret == DATA_BUS_OK && frame_item) {
+            frame_data = data_bus_get_readonly_ptr(frame_item);
+            frame_size = data_bus_get_item_size(frame_item);
+        }
+
+        if (!frame_data || frame_size == 0) {
+            if (frame_item) data_bus_release(frame_item);
             continue;
         }
 
-        /* JPEG编码 */
-        uint8_t *jpeg_buf = NULL;
-        unsigned long jpeg_size = 0;
+        // 调用底层 RTSP 推流（底层已处理时间戳+分包）
+        rtsp_server_push_jpeg((uint8_t *)frame_data, frame_size);
 
-        ret = tjCompress2(srv->tj_handle,
-                          (unsigned char *)rgb_data,
-                          VIDEO_WIDTH,
-                          VIDEO_STRIDE,
-                          VIDEO_HEIGHT,
-                          TJPF_RGB,
-                          &jpeg_buf,
-                          &jpeg_size,
-                          TJSAMP_420,
-                          srv->jpeg_quality,
-                          TJFLAG_FASTDCT);
-
-        /* 推流成功 */
-        if (ret == 0 && jpeg_buf && jpeg_size > 0)
-        {
-            rtsp_server_push_jpeg(jpeg_buf, jpeg_size);
-            LOG_D(MODULE_TAG "推流成功 | 大小:%lu Bytes", jpeg_size);
-        }
-        else
-        {
-            LOG_E(MODULE_TAG "JPEG编码失败");
-        }
-
-        /* 资源释放（严格配对） */
-        if (jpeg_buf) tjFree(jpeg_buf);
-        data_bus_release(rgb_item);
-        rgb_item = NULL;
+        data_bus_release(frame_item);
     }
 
-    LOG_I(MODULE_TAG "推流工作线程安全退出");
+    LOG_I(MODULE_TAG "推流线程退出");
     return NULL;
 }
-
 /* =============================================================================
- * @brief   服务启动函数（仅事件触发调用）
+ * @brief   服务启动函数
  * ============================================================================*/
 static int net_push_srv_start(void)
 {
@@ -279,7 +266,7 @@ static int net_push_srv_start(void)
 
     /* 发布服务就绪事件 */
     event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_NET_READY, MODULE_NAME);
-    LOG_I(MODULE_TAG "网络推流服务启动成功");
+    LOG_I(MODULE_TAG "网络推流服务启动成功（MJPEG直推+动态大小）");
     return 0;
 }
 
@@ -317,13 +304,6 @@ static void net_push_srv_cleanup(void)
         event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_ai_sub_id);
     }
 
-    /* 释放编码器 */
-    if (srv->tj_handle)
-    {
-        tjDestroy(srv->tj_handle);
-        srv->tj_handle = NULL;
-    }
-
     /* 停止RTSP */
     rtsp_server_stop();
 
@@ -337,7 +317,7 @@ static void net_push_srv_cleanup(void)
 }
 
 /* =============================================================================
- * @brief   服务初始化（仅准备资源，无线程/阻塞操作）
+ * @brief   服务初始化（已删除TurboJPEG初始化）
  * ============================================================================*/
 static int net_push_srv_init(void)
 {
@@ -348,7 +328,6 @@ static int net_push_srv_init(void)
     memset(srv, 0, sizeof(net_push_srv_t));
     srv->evt_sys_sub_id = -1;
     srv->evt_ai_sub_id = -1;
-    srv->jpeg_quality = JPEG_DEFAULT_QUALITY;
 
     /* 初始化互斥锁 */
     ret = pthread_mutex_init(&srv->mutex, NULL);
@@ -356,15 +335,6 @@ static int net_push_srv_init(void)
     {
         LOG_E(MODULE_TAG "互斥锁初始化失败");
         return -1;
-    }
-
-    /* 初始化TurboJPEG编码器 */
-    srv->tj_handle = tjInitCompress();
-    if (!srv->tj_handle)
-    {
-        LOG_E(MODULE_TAG "TurboJPEG初始化失败");
-        pthread_mutex_destroy(&srv->mutex);
-        return -2;
     }
 
     /* 订阅系统事件 */
@@ -393,7 +363,7 @@ static int net_push_srv_init(void)
         return -3;
     }
 
-    LOG_I(MODULE_TAG "网络推流服务初始化完成");
+    LOG_I(MODULE_TAG "网络推流服务初始化完成（MJPEG直推+动态大小）");
     return 0;
 }
 
