@@ -16,7 +16,7 @@ extern "C" {
 #define SYS_DATA_BUS_NAME         "sys_data"       // 系统数据总线
 #define VIDEO_DATA_BUS_NAME       "video"          // 摄像头YUYV视频总线（采集服务生产）
 #define AI_RGB_DATA_BUS_NAME       "ai_rgb"         // AI专属RGB数据总线（人脸服务生产）
-
+#define FACE_YUV_DATA_BUS_NAME  "face_result"    // 人脸检测结果数据总线
 // ==========================================================================
 // 【全局通用事件类型】（0x0000-0x0FFF）
 // 所有服务都需要订阅的系统级控制事件，仅此一处定义
@@ -104,7 +104,7 @@ typedef enum {
     DATA_TYPE_INVALID = 0,         // 无效类型
 
     // 视频数据
-    DATA_TYPE_VIDEO = 0x01,  // 摄像头原始YUYV帧（采集服务发布）
+    DATA_TYPE_VIDEO = 0x01,  // 摄像头原始帧（采集服务发布）
     DATA_TYPE_VIDEO_YUV420,  // YUV格式帧
     DATA_TYPE_VIDEO_RGB,     // AI处理后RGB帧（人脸服务发布）
 
@@ -139,7 +139,7 @@ typedef enum {
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
 #define CONFIG_CAPTURE_WIDTH 640
 #define CONFIG_CAPTURE_HEIGHT 360
-#define CONFIG_CAPTURE_FORMAT 0  // 0=YUYV 1=NV12 2=MJPEG
+#define CONFIG_CAPTURE_FORMAT 2  // 0=YUYV 1=NV12 2=MJPEG
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 4
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
@@ -155,7 +155,7 @@ typedef enum {
 #define CONFIG_AI_IOU_THRESH   0.3f
 
 // 人脸检测最大数量
-#define MAX_FACES             10
+#define MAX_FACES             100
 
 #ifdef __cplusplus
 }

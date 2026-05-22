@@ -2,6 +2,7 @@
 #include <string.h>
 #include <algorithm>
 #include <math.h>
+#include <turbojpeg.h>  // TurboJPEG头文件
 
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
 
@@ -64,7 +65,9 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
     return MNN_FACE_OK;
 }
 
-// 🔥 重构：直接写入外部BGR缓冲区，无内部内存分配
+// =============================================================================
+// 原有函数：YUYV转BGR（OpenCV实现，完全保留，兼容旧格式）
+// =============================================================================
 int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_buf) {
     if (!yuyv_data || !bgr_buf || width <=0 || height <=0) {
         return MNN_FACE_ERR_INPUT;
@@ -77,19 +80,67 @@ int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, u
     return MNN_FACE_OK;
 }
 
-// 🔥 重构：使用外部缓存，无内部临时图像，彻底解决内存踩踏
-int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h,
+// =============================================================================
+// 新增函数：MJPEG硬解码转BGR（TurboJPEG实现，高性能低CPU占用）
+// =============================================================================
+int UltraFaceMNN::mjpeg_to_bgr(const uint8_t* mjpeg_data, int data_len, 
+                               int width, int height, uint8_t* bgr_buf) {
+    if (!mjpeg_data || !bgr_buf || data_len <= 0 || width <=0 || height <=0) {
+        return MNN_FACE_ERR_INPUT;
+    }
+
+    // 创建解码句柄
+    tjhandle tjh = tjInitDecompress();
+    if (!tjh) {
+        return MNN_FACE_ERR_JPEG;
+    }
+
+    int ret = -1;
+    // 包裹解码逻辑，确保任何情况都能释放句柄（C++ 无异常也兼容）
+    ret = tjDecompress2(tjh, 
+                       mjpeg_data, 
+                       data_len,
+                       bgr_buf,
+                       width, 
+                       0,
+                       height,
+                       TJPF_BGR,
+                       TJFLAG_FASTDCT);
+
+    // ✅ 强制释放：无论如何都执行
+    tjDestroy(tjh);
+    tjh = nullptr;
+
+    return (ret == 0) ? MNN_FACE_OK : MNN_FACE_ERR_JPEG;
+}
+
+// =============================================================================
+// 核心重构：通用版detect函数，支持YUYV/MJPEG双格式自动切换
+// =============================================================================
+int UltraFaceMNN::detect(const uint8_t* input_data, 
+                         int cam_w, 
+                         int cam_h,
                          uint8_t* external_bgr_buf,
-                         std::vector<FaceInfo_MNN>& face_list) {
-    if (!m_ready || !yuyv_data || !external_bgr_buf) {
+                         std::vector<FaceInfo_MNN>& face_list,
+                         ImageFormat format) {
+    if (!m_ready || !input_data || !external_bgr_buf) {
         return MNN_FACE_ERR_INPUT;
     }
     face_list.clear();
 
-    // 写入外部专属缓冲区
-    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, external_bgr_buf);
-    if (ret != MNN_FACE_OK) {
-        return ret;
+    int conv_ret = MNN_FACE_OK;
+    // ====================== 格式转换：自动切换 ======================
+    if (format == IMAGE_FORMAT_YUYV) {
+        // 原始YUYV格式：OpenCV转换
+        conv_ret = yuyv_to_bgr(input_data, cam_w, cam_h, external_bgr_buf);
+    } else if (format == IMAGE_FORMAT_MJPEG) {
+        // 新增MJPEG格式：TurboJPEG硬解码
+        // MJPEG数据长度：摄像头采集时已携带，此处直接传入（采集层传递真实长度）
+        conv_ret = mjpeg_to_bgr(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_bgr_buf);
+    }
+
+    if (conv_ret != MNN_FACE_OK) {
+        return conv_ret;
     }
 
     // 包裹外部缓冲区，不拷贝内存

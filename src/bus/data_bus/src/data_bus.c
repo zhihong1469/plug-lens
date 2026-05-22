@@ -719,6 +719,16 @@ const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item) {
     return ditem->data_ptr;
 }
 
+size_t data_bus_get_item_size(data_bus_item_handle_t item) {
+    data_item_t *ditem = (data_item_t *)item;
+    // 合法性校验
+    if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC) {
+        return 0;
+    }
+    // 返回实际存储的有效数据大小
+    return ditem->info.data_size;
+}
+
 int data_bus_release(data_bus_item_handle_t item) {
     if (!item) {
         return DATA_BUS_ERR_PARAM;

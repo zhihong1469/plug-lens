@@ -154,6 +154,8 @@ extern "C" void rtsp_server_push_jpeg(const uint8_t* jpeg_buf, uint32_t jpeg_siz
         memcpy(g_jpeg_buf, jpeg_buf, jpeg_size);
         g_jpeg_size = jpeg_size;
     }
+    printf("JPEG start: 0x%02X%02X, end: 0x%02X%02X, size: %u\n",
+       jpeg_buf[0], jpeg_buf[1], jpeg_buf[jpeg_size-2], jpeg_buf[jpeg_size-1], jpeg_size);
     pthread_mutex_unlock(&g_jpeg_mutex);
 }
 
