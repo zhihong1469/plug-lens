@@ -21,13 +21,13 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-
+#include "codec_api.h"
 // ==========================================================================
 // 【全局统一视频基准宏】外部引入，全模块共用，禁止单独修改
 // ==========================================================================
 #define RTSP_VIDEO_FPS                GLOBAL_VIDEO_FPS           // 全局统一帧率（采集=推流=RTSP,仅采集端限流）
-#define RTSP_VIDEO_WIDTH              GLOBAL_VIDEO_WIDTH         // 统一分辨率宽
-#define RTSP_VIDEO_HEIGHT             GLOBAL_VIDEO_HEIGHT         // 统一分辨率高
+#define RTSP_VIDEO_WIDTH              GLOBAL_VIDEO_WIDTH         // 统一分辨率宽640
+#define RTSP_VIDEO_HEIGHT             GLOBAL_VIDEO_HEIGHT         // 统一分辨率高360
 #define RTSP_JPEG_QUALITY             GLOBAL_JPEG_QUALITY          // 统一JPEG质量
 
 // ==========================================================================

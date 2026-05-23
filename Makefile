@@ -67,7 +67,8 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/third_lib/live555/include/groupsock \
 	-I$(TOPDIR)/third_lib/live555/include/BasicUsageEnvironment \
 	-I$(TOPDIR)/third_lib/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/libjpeg_turbo/include
+	-I$(TOPDIR)/third_lib/libjpeg_turbo/include \
+	-I$(TOPDIR)/third_lib/openh264/include/wels
 	
 # 导出全局路径（所有子模块自动可用）
 export GLOBAL_INC

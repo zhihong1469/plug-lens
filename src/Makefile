@@ -46,4 +46,6 @@ LDFLAGS := \
 	-lstdc++ \
 	-pthread \
 	-L$(TOP_DIR)/third_lib/libjpeg_turbo/lib \
-	-lturbojpeg
+	-lturbojpeg \
+	-L$(TOPDIR)/third_lib/openh264/lib \
+	-lopenh264
