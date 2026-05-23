@@ -19,10 +19,11 @@
 #include "camera_usb.h"
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include <unistd.h>
 #include <sys/time.h>
-
+#include <pthread.h>
+#include <sched.h>
+#include <errno.h>
 // ==========================================================================
 // 全局宏定义（文件私有化，标注来源，方便代码巡查）
 // 来源：common\configs\vision_ai_config.h
@@ -273,6 +274,9 @@ fps_stats:
 static int capture_srv_start(void)
 {
     capture_srv_t *srv = &s_capture;
+    int ret = -1;
+    pthread_attr_t thread_attr;
+    struct sched_param sched_param;
 
     // 启动摄像头采集
     if (camera_start_capture(srv->cam) != 0) {
@@ -280,24 +284,35 @@ static int capture_srv_start(void)
         return -1;
     }
 
+    // 初始化线程属性 + 设置实时优先级（核心：采集优先级80）
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    sched_param.sched_priority = 80;
+    pthread_attr_setschedparam(&thread_attr, &sched_param);
+    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
+
     // 启动工作线程
     srv->thread_running = true;
     srv->is_paused = false;
-    if (pthread_create(&srv->work_thread, NULL, capture_work_thread, NULL) != 0) {
-        LOG_E(MODULE_TAG " 创建工作线程失败");
+    ret = pthread_create(&srv->work_thread, &thread_attr, capture_work_thread, NULL);
+    if (ret != 0) {
+        LOG_E(MODULE_TAG " 创建工作线程失败 err=%d", ret);
+        pthread_attr_destroy(&thread_attr);
         camera_stop_capture(srv->cam);
         srv->thread_running = false;
         return -1;
     }
 
+    // 销毁线程属性
+    pthread_attr_destroy(&thread_attr);
+
     // 发布状态事件
     event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
     event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
 
-    LOG_I(MODULE_TAG " 服务启动成功，硬件采集运行中");
+    LOG_I(MODULE_TAG " 服务启动成功，硬件采集运行中 [优先级=80]");
     return 0;
 }
-
 // ==========================================================================
 // 事件总线回调：系统事件处理
 // ==========================================================================

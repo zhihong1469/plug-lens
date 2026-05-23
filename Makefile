@@ -52,6 +52,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/common/img_proc/inc \
 	-I$(TOPDIR)/common/initcall/inc \
 	-I$(TOPDIR)/common/mem_adapter/inc \
+	-I$(TOPDIR)/common/daemon/inc \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/src/base/camera/inc \
 	-I$(TOPDIR)/src/base/ai_model/inc \
