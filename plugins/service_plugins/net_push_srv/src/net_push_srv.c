@@ -30,6 +30,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
@@ -217,6 +219,8 @@ static int net_push_srv_start(void)
 {
     net_push_srv_t *srv = &s_net_push_srv;
     int ret = -1;
+    pthread_attr_t thread_attr;  // 线程属性
+    struct sched_param sched_param;
 
     /* 初始化条件变量 */
     ret = pthread_cond_init(&srv->cond, NULL);
@@ -235,25 +239,35 @@ static int net_push_srv_start(void)
         return -2;
     }
 
-    /* 创建工作线程 */
+    /* 初始化线程属性 + 设置实时优先级（核心：推流优先级90） */
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO); // 实时FIFO调度
+    sched_param.sched_priority = 90;                       // 最高优先级
+    pthread_attr_setschedparam(&thread_attr, &sched_param);
+    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED); // 独立优先级
+
+    /* 创建工作线程（带实时优先级） */
     srv->thread_running = true;
     srv->is_paused = false;
-    ret = pthread_create(&srv->work_thread, NULL, net_push_work_thread, NULL);
+    ret = pthread_create(&srv->work_thread, &thread_attr, net_push_work_thread, NULL);
     if (ret != 0)
     {
-        LOG_E(MODULE_TAG "线程创建失败");
+        LOG_E(MODULE_TAG "线程创建失败 err=%d", ret);
+        pthread_attr_destroy(&thread_attr);
         rtsp_server_stop();
         pthread_cond_destroy(&srv->cond);
         srv->thread_running = false;
         return -3;
     }
 
+    /* 销毁线程属性 */
+    pthread_attr_destroy(&thread_attr);
+
     /* 发布服务就绪事件 */
     event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_NET_READY, MODULE_NAME);
-    LOG_I(MODULE_TAG "网络推流服务启动成功（MJPEG直推+动态大小）");
+    LOG_I(MODULE_TAG "网络推流服务启动成功（MJPEG直推+动态大小）[优先级=90]");
     return 0;
 }
-
 /* =============================================================================
  * @brief   服务资源清理（安全退出）
  * ============================================================================*/

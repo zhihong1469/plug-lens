@@ -12,7 +12,8 @@ SRC_FILES := \
 	service_plugins/net_push_srv/src/net_push_srv.c \
 	service_plugins/capture_srv/src/capture_srv.c  \
 	service_plugins/face_detect_srv/src/face_detect_srv.c \
-	app_plugins/src/demo_app.c
+	app_plugins/src/demo_app.c \
+	app_plugins/src/app.c
 # 	app_plugins/src/net_demo.c \
 
 

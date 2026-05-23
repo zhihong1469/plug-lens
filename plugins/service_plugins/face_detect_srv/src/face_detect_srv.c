@@ -65,6 +65,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
@@ -268,8 +270,6 @@ static void *face_work_thread(void *arg)
         /* ============== 检测到人脸：【核心修复】立即保存原始RGB帧 ============== */
         LOG_I(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
 
-
-
         /* ============== 绘制人脸框（可选，不影响保存） ============== */
         ret = data_bus_alloc(FACE_RESULT_RGB_DATA_BUS,
                              DATA_TYPE_VIDEO_RGB,
@@ -346,7 +346,8 @@ static int face_srv_start(void)
 {
     face_detect_srv_t *srv = &s_face_srv;
     int ret = -1;
-
+    pthread_attr_t thread_attr;
+    struct sched_param sched_param;
     /* 初始化条件变量 */
     ret = pthread_cond_init(&srv->cond, NULL);
     if (ret != 0)
@@ -355,10 +356,17 @@ static int face_srv_start(void)
         return -1;
     }
 
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    sched_param.sched_priority = 70; // 人脸优先级
+    pthread_attr_setschedparam(&thread_attr, &sched_param);
+    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
     /* 创建工作线程 */
     srv->thread_running = true;
     srv->is_paused = false;
-    ret = pthread_create(&srv->work_thread, NULL, face_work_thread, NULL);
+// 人脸线程：优先级 70
+
+    ret = pthread_create(&srv->work_thread, &thread_attr, face_work_thread, NULL);
     if (ret != 0)
     {
         LOG_E(MODULE_TAG "工作线程创建失败");
@@ -366,6 +374,8 @@ static int face_srv_start(void)
         srv->thread_running = false;
         return -1;
     }
+    // 销毁线程属性
+    pthread_attr_destroy(&thread_attr);
 
     event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_READY, MODULE_NAME);
     LOG_I(MODULE_TAG "人脸检测服务启动成功");

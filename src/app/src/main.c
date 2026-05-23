@@ -23,7 +23,10 @@
 #include "event_bus.h"
 #include "data_bus.h"
 #include "mem_adapter.h"  // 新增：TLSF内存适配层头文件
+#include "daemon.h"  
 
+#define MODULE_NAME               "MAIN"
+#define MODULE_TAG                "[MAIN]"
 // ==================================================================================
 // 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
 // ==================================================================================
@@ -224,6 +227,23 @@ int main(int argc, char **argv)
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
+
+
+// ==============================================
+// 【模式切换】产品模式才开启守护进程
+// ==============================================
+#if RUN_PRODUCT_MODE
+    // ==========================================
+    // 【仅一行】守护进程（后台运行）
+    // ==========================================
+    LOG_E("Main: Creating daemon...");
+    if (create_daemon() < 0) {
+        LOG_E("Main: Failed to create daemon");
+        return -1;
+    }
+#else
+    LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
+#endif
 
     // 2. 【核心新增】初始化TLSF静态内存池（必须第一个执行，所有内存分配之前）
     LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);

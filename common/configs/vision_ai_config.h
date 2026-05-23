@@ -122,7 +122,12 @@ typedef enum {
 // 三、系统全局配置（完整保留，无修改）
 // ==========================================================================
 #define CONFIG_APP_NAME "Vision AI Demo"
-#define CONFIG_AUTO_START true
+// ==================================================================================
+// 运行模式配置
+// 0 = 调试模式（前台运行，支持键盘S控制）
+// 1 = 产品模式（守护进程，后台自动运行，无需键盘）
+// ==================================================================================
+#define RUN_PRODUCT_MODE  0
 
 // 双总线配置
 #define CONFIG_EVENT_BUS_MAX_SUBSCRIBERS 64
@@ -139,7 +144,7 @@ typedef enum {
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
 #define CONFIG_CAPTURE_FORMAT 2  // 0=YUYV 1=NV12 2=MJPEG
 #define CONFIG_CAPTURE_FPS 30
-#define CONFIG_CAPTURE_BUF_COUNT 4
+#define CONFIG_CAPTURE_BUF_COUNT 8
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
 #define CONFIG_CAPTURE_LOCK_WHITE_BALANCE true
 #define CONFIG_CAPTURE_LOCK_GAIN true
@@ -159,7 +164,7 @@ typedef enum {
 // ==========================================================================
 // 【全局统一视频基准宏】唯一入口，所有模块共用，禁止单独修改！
 // ==========================================================================
-#define GLOBAL_VIDEO_FPS                15           // 全局统一帧率（采集=推流=RTSP）
+#define GLOBAL_VIDEO_FPS                12           // 全局统一帧率（采集=推流=RTSP）
 #define GLOBAL_VIDEO_WIDTH              640         // 统一分辨率宽
 #define GLOBAL_VIDEO_HEIGHT             360         // 统一分辨率高
 #define GLOBAL_JPEG_QUALITY             75          // 统一JPEG质量
