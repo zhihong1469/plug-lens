@@ -4,7 +4,6 @@
 
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
-	link/frame_link/src/frame_link.c \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp \
 	base/service/src/service_base.c \
@@ -29,11 +28,22 @@ LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
-	-pthread \
 	-L$(TOPDIR)/third_lib/face_detector/mnn/lib/ \
 	-lMNN \
 	-L$(TOPDIR)/third_lib/opencv_lib/lib/ \
 	-lopencv_core \
 	-lopencv_imgproc \
-	-lopencv_imgcodecs 
-
+	-lopencv_imgcodecs \
+	-L$(TOPDIR)/third_lib/live555/lib \
+	-L$(TOPDIR)/third_lib/libjpeg_turbo/lib \
+	-lliveMedia \
+	-lgroupsock \
+	-lBasicUsageEnvironment \
+	-lUsageEnvironment \
+	-lturbojpeg \
+	-lssl \
+	-lcrypto \
+	-lstdc++ \
+	-pthread \
+	-L$(TOP_DIR)/third_lib/libjpeg_turbo/lib \
+	-lturbojpeg

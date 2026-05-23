@@ -23,11 +23,14 @@
 #include "event_bus.h"
 #include "data_bus.h"
 #include "mem_adapter.h"  // 新增：TLSF内存适配层头文件
+#include "daemon.h"  
 
+#define MODULE_NAME               "MAIN"
+#define MODULE_TAG                "[MAIN]"
 // ==================================================================================
 // 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
 // ==================================================================================
-#define SYS_EVENT_BUS_NAME    "sys_event"    // 系统事件总线名称
+#define MAIN_EVENT_BUS_NAME    SYS_EVENT_BUS_NAME    // 系统事件总线名称
 // ==================================================================================
 // 【核心新增】TLSF静态内存池配置（嵌入式Linux 生产级大小）
 // 大小规划：256MB = 32帧视频(128MB) + 事件总线/模块内存(64MB) + 冗余余量(64MB)
@@ -62,7 +65,7 @@ static app_context_t g_app_ctx = {0};
 static void app_publish_sys_event(event_type_t type)
 {
     // 直接通过总线名称调用，main不持有任何句柄
-    int ret = event_bus_publish_simple(SYS_EVENT_BUS_NAME, type, "MAIN");
+    int ret = event_bus_publish_simple(MAIN_EVENT_BUS_NAME, type, "MAIN");
     if (ret != 0) {
         LOG_E("Main: Failed to publish sys event: %s", event_type_to_str(type));
     } else {
@@ -181,16 +184,16 @@ static int _main_init_buses(void)
 {
     int ret = 0;
 
-    LOG_I("Main: Initializing Event Bus[%s]...", SYS_EVENT_BUS_NAME);
+    LOG_I("Main: Initializing Event Bus[%s]...", MAIN_EVENT_BUS_NAME);
     event_bus_config_t evt_bus_cfg = {0};
-    evt_bus_cfg.name = SYS_EVENT_BUS_NAME;
+    evt_bus_cfg.name = MAIN_EVENT_BUS_NAME;
     evt_bus_cfg.max_subscribers = CONFIG_EVENT_BUS_MAX_SUBSCRIBERS;
     ret = event_bus_init(&evt_bus_cfg);
     if (ret != 0) {
         LOG_E("Main: Failed to init Event Bus");
         return -1;
     }
-    LOG_I("Main: Event Bus[%s] init success", SYS_EVENT_BUS_NAME);
+    LOG_I("Main: Event Bus[%s] init success", MAIN_EVENT_BUS_NAME);
 
     return 0;
 }
@@ -205,8 +208,7 @@ static void _cleanup_resources(void)
     app_restore_terminal_safe();
     
     // 优化：清理顺序与初始化严格反向（事件总线 → 数据总线）
-    event_bus_deinit(SYS_EVENT_BUS_NAME);
-    data_bus_deinit(SYS_DATA_BUS_NAME);
+    event_bus_deinit(MAIN_EVENT_BUS_NAME);
     app_exit_pipe_deinit();
 
     LOG_I("Main: Resource cleanup complete");
@@ -225,6 +227,23 @@ int main(int argc, char **argv)
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
+
+
+// ==============================================
+// 【模式切换】产品模式才开启守护进程
+// ==============================================
+#if RUN_PRODUCT_MODE
+    // ==========================================
+    // 【仅一行】守护进程（后台运行）
+    // ==========================================
+    LOG_E("Main: Creating daemon...");
+    if (create_daemon() < 0) {
+        LOG_E("Main: Failed to create daemon");
+        return -1;
+    }
+#else
+    LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
+#endif
 
     // 2. 【核心新增】初始化TLSF静态内存池（必须第一个执行，所有内存分配之前）
     LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);
