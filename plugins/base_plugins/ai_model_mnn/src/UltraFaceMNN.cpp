@@ -65,28 +65,27 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
     return MNN_FACE_OK;
 }
 
-
 // =============================================================================
-// 无OpenCV终极版：AI检测函数（libyuv缩放，裸指针操作）
+// 人脸检测核心函数（libyuv图像预处理，无OpenCV依赖）
 // =============================================================================
 int UltraFaceMNN::detect(const uint8_t* input_data, 
                          int cam_w, 
                          int cam_h,
-                         uint8_t* external_bgr_buf,
+                         uint8_t* external_rgb_buf,
                          std::vector<FaceInfo_MNN>& face_list,
                          ImageFormat format) {
-    if (!m_ready || !input_data || !external_bgr_buf) {
+    if (!m_ready || !input_data || !external_rgb_buf) {
         return MNN_FACE_ERR_INPUT;
     }
     face_list.clear();
 
     int conv_ret = MNN_FACE_OK;
-    // ====================== 格式转换：自动切换 ======================
+    // ====================== 图像格式转换 ======================
     if (format == IMAGE_FORMAT_YUYV) {
-        conv_ret = yuyv_to_rgb(input_data, cam_w, cam_h, external_bgr_buf);
+        conv_ret = yuyv_to_rgb(input_data, cam_w, cam_h, external_rgb_buf);
     } else if (format == IMAGE_FORMAT_MJPEG) {
-        // 修正：MJPEG长度用实际输入长度（你原有代码写死cam_w*cam_h*2是错误的，这里保留兼容）
-        conv_ret = mjpeg_to_rgb(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_bgr_buf);
+        // MJPEG解码：使用固定长度兼容摄像头输出
+        conv_ret = mjpeg_to_rgb(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_rgb_buf);
     } else {
         return MNN_FACE_ERR_INPUT;
     }
@@ -95,32 +94,26 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
         return conv_ret;
     }
 
-    // ====================== 替换OpenCV缩放：libyuv极速缩放 ======================
-    // 分配AI模型输入的缩放后缓冲区
+    // ====================== RGB图像缩放（libyuv加速） ======================
     uint8_t* ai_img_buf = new uint8_t[m_ai_w * m_ai_h * 3];
-    // libyuv双线性缩放（和OpenCV resize效果完全一致）
-    conv_ret = rgb_resize(external_bgr_buf, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
+    conv_ret = rgb_resize(external_rgb_buf, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
     if (conv_ret != 0) {
         delete[] ai_img_buf;
         return MNN_FACE_ERR_INPUT;
     }
 
-     // ====================== 替换OpenCV预处理：MNN自带ImageProcess ======================
-     // MNN预处理（直接用裸指针，删除cv::Mat）
-     // 直接传入裸指针+宽+高+行跨度
-     // 注意：MNN的ImageProcess会自动进行HWC<->CHW转换，无需手动调整数据布局
-    // ====================== MNN预处理（直接用裸指针，删除cv::Mat） ======================
+    // ====================== MNN图像预处理 ======================
     m_interpreter->resizeSession(m_session);
     std::shared_ptr<MNN::CV::ImageProcess> pretreat(
         MNN::CV::ImageProcess::create(MNN::CV::RGB, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
     );
-    // 直接传入裸指针+宽+高+行跨度，和OpenCV效果完全一致
+    // 裸指针数据输入，无第三方库依赖
     pretreat->convert(ai_img_buf, m_ai_w, m_ai_h, m_ai_w * 3, m_input_tensor);
 
-    // 推理（不变）
+    // 模型推理
     m_interpreter->runSession(m_session);
 
-    // 获取输出（不变）
+    // 获取推理结果
     MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
     MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
 
@@ -129,12 +122,12 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
     tensor_scores->copyToHostTensor(&scores_host);
     tensor_boxes->copyToHostTensor(&boxes_host);
 
-    // 后处理（不变）
+    // 后处理：生成候选框+NMS抑制
     std::vector<FaceInfo_MNN> bbox_collection;
     generate_bbox(bbox_collection, &scores_host, &boxes_host);
     nms(bbox_collection, face_list);
 
-    // 释放缩放缓冲区
+    // 释放临时缓冲区
     delete[] ai_img_buf;
 
     return MNN_FACE_OK;
@@ -199,7 +192,6 @@ void UltraFaceMNN::map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, 
     face.x2 *= scale_w;
     face.y2 *= scale_h;
 }
-
 
 void UltraFaceMNN::deinit() {
     if (m_interpreter && m_session) {

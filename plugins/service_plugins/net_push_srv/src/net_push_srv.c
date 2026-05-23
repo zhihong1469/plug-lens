@@ -227,7 +227,7 @@ static void *net_push_work_thread(void *arg)
                     // 新增：编码成功+推流成功日志
                     LOG_D(MODULE_TAG "H264编码成功 | 输出大小：%d", h264_len);
                     // 推送H.264码流
-                    rtsp_server_push_h264(srv->h264_buf, h264_len);
+                    rtsp_server_push(srv->h264_buf, h264_len);
                     LOG_D(MODULE_TAG "RTSP推送H264帧完成");
                 } else {
                     // 新增：编码失败日志
@@ -281,7 +281,8 @@ static int net_push_srv_start(void)
     LOG_I(MODULE_TAG "创建H264编码器 | 分辨率：%dx%d | FPS：%d | 码率：%dkbps",
           VIDEO_WIDTH, VIDEO_HEIGHT, NET_PUSH_TARGET_FPS, H264_BITRATE);
     srv->h264_enc = h264_encoder_create(&enc_param);
-    if (!srv->h264_enc) {
+    if (!srv->h264_enc) 
+    {
         LOG_E(MODULE_TAG "H.264编码器创建失败");
         pthread_cond_destroy(&srv->cond);
         return -2;

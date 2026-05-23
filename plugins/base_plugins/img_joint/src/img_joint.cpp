@@ -1,6 +1,8 @@
 /**
  * @file img_joint.cpp
  * @brief 图像联合处理工具模块实现
+ * @details 基于libyuv/TurboJPEG/OpenH264实现图像格式转换、编解码
+ *          无OpenCV依赖，适配IMX6ULL嵌入式平台
  * @author 嵌入式视觉项目
  * @date 2026
  */
@@ -9,15 +11,16 @@
 #include "libyuv.h"
 #include <string.h>
 #include <stdlib.h>
-// OpenH264编码头文件（严格对齐你提供的版本）
+
+// OpenH264编码头文件（严格对齐平台版本）
 #include "codec_api.h"
 #include "codec_def.h"
 
 // =============================================================================
-// 修复版：YUYV → BGR24（通道顺序正确）
+// YUYV(YUV422) 转 RGB888（libyuv 标准转换流程）
 // =============================================================================
-int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_buf) {
-    if (!yuyv_data || !bgr_buf || width <= 0 || height <= 0 || (width % 2 != 0)) {
+int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_buf) {
+    if (!yuyv_data || !rgb_buf || width <= 0 || height <= 0 || (width % 2 != 0)) {
         return IMG_JOINT_ERR_INPUT;
     }
 
@@ -25,22 +28,25 @@ int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_bu
     uint8_t* temp_argb = (uint8_t*)malloc(argb_size);
     if (!temp_argb) return IMG_JOINT_ERR_INPUT;
 
-    // 1. YUYV -> ARGB（不变）
+    // YUYV -> ARGB 中间转换
     libyuv::YUY2ToARGB(yuyv_data, width * 2,
                        temp_argb, width * 4,
                        width, height);
 
-    // ✅ 修复：ARGB -> BGR24（正确的通道顺序）
+    // ARGB -> RGB888 标准输出
     libyuv::ARGBToRGB24(temp_argb, width * 4,
-                        bgr_buf, width * 3,
+                        rgb_buf, width * 3,
                         width, height);
 
     free(temp_argb);
     return IMG_JOINT_OK;
 }
 
-int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height, uint8_t* bgr_buf) {
-    if (!mjpeg_data || !bgr_buf || data_len <= 0 || width <= 0 || height <= 0) {
+// =============================================================================
+// MJPEG硬解码 转 RGB888（TurboJPEG 高性能实现）
+// =============================================================================
+int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height, uint8_t* rgb_buf) {
+    if (!mjpeg_data || !rgb_buf || data_len <= 0 || width <= 0 || height <= 0) {
         return IMG_JOINT_ERR_INPUT;
     }
 
@@ -52,7 +58,7 @@ int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height,
     int ret = tjDecompress2(tjh,
                            mjpeg_data,
                            data_len,
-                           bgr_buf,
+                           rgb_buf,
                            width,
                            0,
                            height,
@@ -65,6 +71,9 @@ int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height,
     return (ret == 0) ? IMG_JOINT_OK : IMG_JOINT_ERR_JPEG;
 }
 
+// =============================================================================
+// YUYV(YUV422) 转 I420(YUV420P)（H.264编码专用格式）
+// =============================================================================
 int yuyv_to_i420(const uint8_t* yuyv_data, int width, int height, uint8_t* i420_buf) {
     if (!yuyv_data || !i420_buf || width <= 0 || height <= 0 ||
         (width % 2 != 0) || (height % 2 != 0)) {
@@ -84,6 +93,9 @@ int yuyv_to_i420(const uint8_t* yuyv_data, int width, int height, uint8_t* i420_
                       width, height) == 0 ? IMG_JOINT_OK : IMG_JOINT_ERR_INPUT;
 }
 
+// =============================================================================
+// I420(YUV420P) 转 RGB888
+// =============================================================================
 int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_buf) {
     if (!i420_data || !rgb_buf || width <= 0 || height <= 0) {
         return IMG_JOINT_ERR_INPUT;
@@ -103,15 +115,14 @@ int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_bu
 }
 
 // =============================================================================
-// 修复版：BGR图像缩放（支持三通道交错格式）
+// RGB图像缩放（libyuv ARGB中转缩放，三通道标准实现）
 // =============================================================================
-int rgb_resize(const uint8_t* src_bgr, int src_w, int src_h,
-               uint8_t* dst_bgr, int dst_w, int dst_h) {
-    if (!src_bgr || !dst_bgr || src_w<=0 || src_h<=0 || dst_w<=0 || dst_h<=0) {
+int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
+               uint8_t* dst_rgb, int dst_w, int dst_h) {
+    if (!src_rgb || !dst_rgb || src_w<=0 || src_h<=0 || dst_w<=0 || dst_h<=0) {
         return -1;
     }
 
-    // 方案：BGR24 → ARGB → 缩放ARGB → BGR24（libyuv官方推荐的三通道缩放方法）
     int src_argb_size = src_w * src_h * 4;
     int dst_argb_size = dst_w * dst_h * 4;
     uint8_t* src_argb = (uint8_t*)malloc(src_argb_size);
@@ -123,19 +134,19 @@ int rgb_resize(const uint8_t* src_bgr, int src_w, int src_h,
         return -1;
     }
 
-    // 1. BGR24 → ARGB
-    libyuv::RGB24ToARGB(src_bgr, src_w * 3,
+    // RGB24 -> ARGB 转换
+    libyuv::RGB24ToARGB(src_rgb, src_w * 3,
                         src_argb, src_w * 4,
                         src_w, src_h);
 
-    // 2. 缩放ARGB（libyuv原生支持ARGB缩放，质量和速度最优）
+    // ARGB 双线性缩放（libyuv原生最优算法）
     libyuv::ARGBScale(src_argb, src_w * 4, src_w, src_h,
                       dst_argb, dst_w * 4, dst_w, dst_h,
                       libyuv::kFilterBilinear);
 
-    // 3. ARGB → BGR24
+    // ARGB -> RGB24 输出
     libyuv::ARGBToRGB24(dst_argb, dst_w * 4,
-                        dst_bgr, dst_w * 3,
+                        dst_rgb, dst_w * 3,
                         dst_w, dst_h);
 
     free(src_argb);
@@ -143,55 +154,57 @@ int rgb_resize(const uint8_t* src_bgr, int src_w, int src_h,
     return 0;
 }
 
-// ========================== BGR画框 (替代cv::rectangle) ==========================
-void bgr_draw_rect(uint8_t* bgr_data, int w, int h,
+// =============================================================================
+// RGB图像绘制矩形框（裸指针操作，无第三方库依赖）
+// =============================================================================
+void bgr_draw_rect(uint8_t* rgb_data, int w, int h,
                    int x, int y, int rect_w, int rect_h,
                    uint32_t color, int thickness) {
-    if (!bgr_data || x<0 || y<0 || x+rect_w>w || y+rect_h>h) return;
+    if (!rgb_data || x<0 || y<0 || x+rect_w>w || y+rect_h>h) return;
 
-    uint8_t b = (color >> 16) & 0xFF;
+    // RGB通道解析
+    uint8_t r = (color >> 16) & 0xFF;
     uint8_t g = (color >> 8) & 0xFF;
-    uint8_t r = color & 0xFF;
+    uint8_t b = color & 0xFF;
 
-    // 上下边框
+    // 绘制上下边框
     for (int l=0; l<thickness; l++) {
         int yy1 = y + l;
         int yy2 = y + rect_h - 1 - l;
         for (int xx=x; xx<x+rect_w; xx++) {
-            uint8_t* p1 = bgr_data + (yy1 * w + xx) * 3;
-            uint8_t* p2 = bgr_data + (yy2 * w + xx) * 3;
-            p1[0]=b; p1[1]=g; p1[2]=r;
-            p2[0]=b; p2[1]=g; p2[2]=r;
+            uint8_t* p1 = rgb_data + (yy1 * w + xx) * 3;
+            uint8_t* p2 = rgb_data + (yy2 * w + xx) * 3;
+            p1[0]=r; p1[1]=g; p1[2]=b;
+            p2[0]=r; p2[1]=g; p2[2]=b;
         }
     }
 
-    // 左右边框
+    // 绘制左右边框
     for (int l=0; l<thickness; l++) {
         int xx1 = x + l;
         int xx2 = x + rect_w - 1 - l;
         for (int yy=y; yy<y+rect_h; yy++) {
-            uint8_t* p1 = bgr_data + (yy * w + xx1) * 3;
-            uint8_t* p2 = bgr_data + (yy * w + xx2) * 3;
-            p1[0]=b; p1[1]=g; p1[2]=r;
-            p2[0]=b; p2[1]=g; p2[2]=r;
+            uint8_t* p1 = rgb_data + (yy * w + xx1) * 3;
+            uint8_t* p2 = rgb_data + (yy * w + xx2) * 3;
+            p1[0]=r; p1[1]=g; p1[2]=b;
+            p2[0]=r; p2[1]=g; p2[2]=b;
         }
     }
 }
-
 
 // =============================================================================
 // H264编码器内部结构体（严格对齐OpenH264 API）
 // =============================================================================
 typedef struct {
-    ISVCEncoder*          p_encoder;      // OpenH264编码器
-    SEncParamExt         param;          // 编码参数
-    uint8_t*             i420_buf;       // 临时I420缓冲区
-    int                  width;
-    int                  height;
+    ISVCEncoder*          p_encoder;      // OpenH264编码器实例
+    SEncParamExt         param;          // 编码器参数
+    uint8_t*             i420_buf;       // I420格式临时缓冲区
+    int                  width;          // 图像宽度
+    int                  height;         // 图像高度
 } h264_encoder_impl_t;
 
 // =============================================================================
-// H264编码器实现（100%适配你提供的头文件）
+// H264编码器创建（IMX6ULL 软编码最优参数）
 // =============================================================================
 h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     if (!param || param->width <= 0 || param->height <= 0 || 
@@ -212,7 +225,7 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 创建OpenH264编码器
+    // 创建OpenH264编码器实例
     int ret = WelsCreateSVCEncoder(&impl->p_encoder);
     if (ret != 0 || !impl->p_encoder) {
         free(impl->i420_buf);
@@ -220,22 +233,23 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 初始化OpenH264参数（IMX6ULL 软编码最优配置）
+    // 获取默认参数并初始化
     memset(&impl->param, 0, sizeof(SEncParamExt));
     impl->p_encoder->GetDefaultParams(&impl->param);
 
-    impl->param.iUsageType = CAMERA_VIDEO_REAL_TIME;    // 实时摄像头场景
-    impl->param.fMaxFrameRate = param->fps;             // 帧率
-    impl->param.iPicWidth = param->width;              // 宽度
-    impl->param.iPicHeight = param->height;            // 高度
-    impl->param.iTargetBitrate = param->bitrate * 1000; // 码率（转bps）
+    // 实时视频场景配置
+    impl->param.iUsageType = CAMERA_VIDEO_REAL_TIME;
+    impl->param.fMaxFrameRate = param->fps;
+    impl->param.iPicWidth = param->width;
+    impl->param.iPicHeight = param->height;
+    impl->param.iTargetBitrate = param->bitrate * 1000;  // kbps转bps
     impl->param.iTemporalLayerNum = 1;
     impl->param.iSpatialLayerNum = 1;
     impl->param.bEnableDenoise = false;
     impl->param.bEnableBackgroundDetection = false;
-    impl->param.bEnableFrameSkip = false;              // 不丢帧（实时流）
-    impl->param.uiIntraPeriod = param->gop;            // I帧间隔
-    impl->param.iMultipleThreadIdc = 1;                // 单核编码（IMX6ULL必须）
+    impl->param.bEnableFrameSkip = false;
+    impl->param.uiIntraPeriod = param->gop;
+    impl->param.iMultipleThreadIdc = 1;  // IMX6ULL单核编码
     impl->param.iNumRefFrame = 1;
 
     // 初始化编码器
@@ -247,7 +261,7 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 设置输入格式为I420
+    // 设置输入数据格式为I420
     int video_format = videoFormatI420;
     impl->p_encoder->SetOption(ENCODER_OPTION_DATAFORMAT, &video_format);
 
@@ -256,6 +270,9 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     return (h264_encoder_t)impl;
 }
 
+// =============================================================================
+// YUYV数据编码为H264码流
+// =============================================================================
 int yuyv_to_h264(h264_encoder_t encoder,
                  const uint8_t* yuyv_data,
                  int yuyv_len,
@@ -269,13 +286,13 @@ int yuyv_to_h264(h264_encoder_t encoder,
     int width = impl->width;
     int height = impl->height;
 
-    // 1. YUYV -> I420（libyuv NEON加速）
+    // YUYV -> I420 格式转换（编码必需）
     int ret = yuyv_to_i420(yuyv_data, width, height, impl->i420_buf);
     if (ret != IMG_JOINT_OK) {
         return IMG_JOINT_ERR_H264;
     }
 
-    // 2. 填充I420图像数据
+    // 填充编码输入数据结构
     SFrameBSInfo     bs_info;
     SSourcePicture   pic;
     memset(&pic, 0, sizeof(SSourcePicture));
@@ -291,14 +308,13 @@ int yuyv_to_h264(h264_encoder_t encoder,
     pic.iStride[1] = width / 2;
     pic.iStride[2] = width / 2;
 
-    // 3. 编码一帧
+    // 执行一帧编码
     ret = impl->p_encoder->EncodeFrame(&pic, &bs_info);
     if (ret != 0 || bs_info.eFrameType == videoFrameTypeSkip) {
         return IMG_JOINT_ERR_H264;
     }
 
-    // ✅ 最终修正：严格按照你提供的SFrameBSInfo/SLayerBSInfo结构解析
-    // 我们只用1层，所以取sLayerInfo[0]
+    // 解析编码数据（单层编码，直接取第一层数据）
     if (bs_info.iLayerNum <= 0) {
         return IMG_JOINT_ERR_H264;
     }
@@ -308,16 +324,16 @@ int yuyv_to_h264(h264_encoder_t encoder,
         return IMG_JOINT_ERR_H264;
     }
 
+    // 复制NALU数据到输出缓冲区
     int total_len = 0;
     int max_len = *out_h264_len;
     uint8_t* dst_ptr = out_h264;
     const uint8_t* src_ptr = layer->pBsBuf;
 
-    // 遍历所有NALU，逐个复制
     for (int i = 0; i < layer->iNalCount; i++) {
         int nal_len = layer->pNalLengthInByte[i];
         if (total_len + nal_len > max_len) {
-            return IMG_JOINT_ERR_H264; // 缓冲区不足
+            return IMG_JOINT_ERR_H264;
         }
         memcpy(dst_ptr, src_ptr, nal_len);
         dst_ptr += nal_len;
@@ -329,17 +345,20 @@ int yuyv_to_h264(h264_encoder_t encoder,
     return IMG_JOINT_OK;
 }
 
+// =============================================================================
+// 销毁H264编码器，释放所有资源
+// =============================================================================
 void h264_encoder_destroy(h264_encoder_t encoder) {
     if (!encoder) return;
     h264_encoder_impl_t* impl = (h264_encoder_impl_t*)encoder;
 
-    // 释放编码器资源
+    // 释放编码器内核资源
     if (impl->p_encoder) {
         impl->p_encoder->Uninitialize();
         WelsDestroySVCEncoder(impl->p_encoder);
     }
 
-    // 释放内存
+    // 释放内存缓冲区
     if (impl->i420_buf) {
         free(impl->i420_buf);
     }
