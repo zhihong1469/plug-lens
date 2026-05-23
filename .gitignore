@@ -14,7 +14,8 @@ Thumbs.db
 *.swo
 *~
 .cache/
-# 调试材料
+# 调试过程材料
+third_lib/compile_reference_configuration/
 third_lib/face_detector/imgs
 third_lib/face_detector/model/quant/*.json
 # ==============================================
