@@ -42,8 +42,8 @@
 #define CAPTURE_FPS               CONFIG_CAPTURE_FPS         // 固定30
 #define CAPTURE_FORMAT_CFG        CONFIG_CAPTURE_FORMAT      // 0=YUYV 1=NV12 2=MJPEG
 #define CAPTURE_BUF_CNT           CONFIG_CAPTURE_BUF_COUNT   // 摄像头缓冲区数量
-// MJPEG压缩流，给128KB安全上限（640*360的JPEG永远超不过）
-#define MAX_FRAME_SIZE            (128 * 1024)               // 最大帧大小
+// MJPEG压缩流时，给128KB安全上限（640*360的JPEG永远超不过）;yuyv原生流时，给宽高*2的上限（YUYV每像素2字节）
+#define MAX_FRAME_SIZE            CAPTURE_HEIGHT * CAPTURE_WIDTH * 2               // 最大帧大小(128 * 1024)
 
 // 服务私有固定配置
 #define CAP_FRAME_WAIT_US         20000   // 20ms 取帧等待

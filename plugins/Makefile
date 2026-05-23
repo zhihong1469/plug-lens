@@ -8,6 +8,7 @@ SRC_FILES := \
 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 	base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp \
 	base_plugins/sd_storage/src/sd_storage.c \
+	base_plugins/img_joint/src/img_joint.cpp \
 	service_plugins/net_push_srv/src/rtsp_server.cpp \
 	service_plugins/net_push_srv/src/net_push_srv.c \
 	service_plugins/capture_srv/src/capture_srv.c  \
@@ -26,7 +27,8 @@ LOCAL_INC := \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/capture_srv/inc \
 	-I$(TOPDIR)/plugins/service_plugins/face_detect_srv/inc \
-	-I$(TOPDIR)/plugins/app_plugins/inc 
+	-I$(TOPDIR)/plugins/app_plugins/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc
 # 最终路径 = 全局 + 私有
 INC_FLAGS := $(GLOBAL_INC) $(LOCAL_INC)
 
