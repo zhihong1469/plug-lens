@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /**
  * @file demo_app.c
- * @brief 应用层核心Demo（纯事件总线控制）
- * @details 修复：键盘防抖、精准订阅、无重复触发
+ * @brief 应用层核心Demo（调试模式专用）
+ * @details 纯事件总线控制，键盘交互，仅调试模式编译
  * @author Luo
  * @date 2026-05-31
  */
@@ -24,9 +24,9 @@
 // ==========================================================================
 #define MODULE_NAME               "DEMO_APP"
 #define MODULE_TAG                "[DEMO_APP]"
-#define SYS_EVENT_BUS_NAME        "sys_event"
+#define APP_EVENT_BUS_NAME        SYS_EVENT_BUS_NAME
 #define APP_LOOP_WAIT_US          30000   // 30ms 主循环等待
-#define KEY_DEBOUNCE_US           50000   // 50ms 键盘防抖（关键修复）
+#define KEY_DEBOUNCE_US           50000   // 50ms 键盘防抖
 
 // ==========================================================================
 // 应用上下文
@@ -55,7 +55,7 @@ static void _demo_print_help(void);
 static void _demo_handle_key(char cmd);
 
 // ==========================================================================
-// 系统事件回调（精准订阅，无冗余）
+// 系统事件回调
 // ==========================================================================
 static void _demo_sys_event_cb(const event_t *event, void *user_data)
 {
@@ -93,7 +93,7 @@ static void _demo_sys_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 采集服务回调（仅订阅单个事件，修复订阅错误）
+// 采集服务回调
 // ==========================================================================
 static void _demo_cap_event_cb(const event_t *event, void *user_data)
 {
@@ -111,7 +111,7 @@ static void _demo_cap_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 人脸服务回调（仅订阅单个事件，修复订阅错误）
+// 人脸服务回调
 // ==========================================================================
 static void _demo_face_event_cb(const event_t *event, void *user_data)
 {
@@ -134,49 +134,49 @@ static void _demo_face_event_cb(const event_t *event, void *user_data)
 static void _demo_print_help(void)
 {
     LOG_I(MODULE_TAG " ========================================");
-    LOG_I(MODULE_TAG "  键盘控制：");
-    LOG_I(MODULE_TAG "    s - 恢复系统");
+    LOG_I(MODULE_TAG "  调试模式键盘控制：");
+    LOG_I(MODULE_TAG "    s - 启动/恢复系统");
     LOG_I(MODULE_TAG "    t - 暂停系统");
     LOG_I(MODULE_TAG "    q - 退出应用");
-    LOG_I(MODULE_TAG "    h - 帮助");
+    LOG_I(MODULE_TAG "    h - 显示帮助");
     LOG_I(MODULE_TAG " ========================================");
 }
 
 // ==========================================================================
-// 键盘命令处理（核心：防抖+无重复）
+// 键盘命令处理
 // ==========================================================================
 static void _demo_handle_key(char cmd)
 {
     demo_app_t *srv = &s_demo;
-    if (srv->key_processing) return;  // 防抖：正在处理则直接返回
+    if (srv->key_processing) return;
 
     srv->key_processing = true;
     LOG_I(MODULE_TAG " 执行命令: %c", cmd);
 
     switch (cmd) {
         case 's': case 'S':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_RESUME, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_RESUME, MODULE_NAME);
             break;
         case 't': case 'T':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_PAUSE, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_PAUSE, MODULE_NAME);
             break;
         case 'q': case 'Q':
-            event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_SYS_SHUTDOWN, MODULE_NAME);
+            event_bus_publish_simple(APP_EVENT_BUS_NAME, EVENT_TYPE_SYS_SHUTDOWN, MODULE_NAME);
             break;
         case 'h': case 'H':
             _demo_print_help();
             break;
         default:
-            LOG_W(MODULE_TAG " 未知命令");
+            LOG_W(MODULE_TAG " 未知命令，输入h查看帮助");
             break;
     }
 
-    usleep(KEY_DEBOUNCE_US);  // 强制防抖延迟
+    usleep(KEY_DEBOUNCE_US);
     srv->key_processing = false;
 }
 
 // ==========================================================================
-// 初始化（精准订阅 + 扩展订阅：跳过自己发布的事件）
+// 初始化
 // ==========================================================================
 static int demo_app_init(void)
 {
@@ -187,56 +187,55 @@ static int demo_app_init(void)
     srv->is_paused = false;
     srv->key_processing = false;
 
-    // ===================== 核心修复：使用扩展订阅，跳过自己发布的事件 =====================
-    // 1. 订阅系统事件
+    // 订阅系统事件
     event_subscriber_t sys_sub = {
         .event_type = EVENT_TYPE_INVALID,
         .callback = _demo_sys_event_cb,
-        .skip_self_published = true  // 关键：自己发的事件自己不收
+        .skip_self_published = true
     };
-    srv->sub_sys = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &sys_sub, MODULE_NAME);
+    srv->sub_sys = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &sys_sub, MODULE_NAME);
 
-    // 2. 精准订阅采集服务事件（修复区间订阅错误）
+    // 订阅采集服务事件
     event_subscriber_t cap_sub = {
-        .event_type = EVENT_TYPE_INVALID,  // 只监听需要的采集事件
+        .event_type = EVENT_TYPE_INVALID,
         .callback = _demo_cap_event_cb,
         .skip_self_published = true
     };
-    srv->sub_capture = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &cap_sub, MODULE_NAME);
+    srv->sub_capture = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &cap_sub, MODULE_NAME);
 
-    // 3. 精准订阅人脸服务事件
+    // 订阅人脸服务事件
     event_subscriber_t face_sub = {
         .event_type = EVENT_TYPE_INVALID,
         .callback = _demo_face_event_cb,
         .skip_self_published = true
     };
-    srv->sub_face = event_bus_subscribe_ex(SYS_EVENT_BUS_NAME, &face_sub, MODULE_NAME);
+    srv->sub_face = event_bus_subscribe_ex(APP_EVENT_BUS_NAME, &face_sub, MODULE_NAME);
 
     if (srv->sub_sys <0 || srv->sub_capture <0 || srv->sub_face <0) {
-        LOG_E(MODULE_TAG " 订阅失败");
+        LOG_E(MODULE_TAG " 事件订阅失败");
         return -1;
     }
 
     _demo_print_help();
-    LOG_I(MODULE_TAG " 初始化完成");
+    LOG_I(MODULE_TAG " 调试模式初始化完成，按s启动系统");
     return 0;
 }
 
 // ==========================================================================
-// 主循环（修复键盘重复触发）
+// 主循环
 // ==========================================================================
 static void demo_app_run(void)
 {
     demo_app_t *srv = &s_demo;
-    int bus_fd = event_bus_get_wait_fd(SYS_EVENT_BUS_NAME);
+    int bus_fd = event_bus_get_wait_fd(APP_EVENT_BUS_NAME);
 
     if (bus_fd < 0) {
-        LOG_E(MODULE_TAG " 获取总线FD失败");
+        LOG_E(MODULE_TAG " 获取事件总线FD失败");
         return;
     }
 
     int max_fd = (bus_fd > STDIN_FILENO) ? bus_fd : STDIN_FILENO;
-    LOG_I(MODULE_TAG " 运行中，按 q 退出");
+    LOG_I(MODULE_TAG " 调试模式运行中，按q退出");
 
     while (srv->app_running) {
         fd_set read_fds;
@@ -250,12 +249,12 @@ static void demo_app_run(void)
         if (ret < 0 && errno == EINTR) continue;
         if (ret < 0) break;
 
-        // 处理事件总线
+        // 处理事件总线（已修复，支持连续事件）
         if (FD_ISSET(bus_fd, &read_fds)) {
-            event_bus_dispatch(SYS_EVENT_BUS_NAME);
+            event_bus_dispatch(APP_EVENT_BUS_NAME);
         }
 
-        // 处理键盘（极简无残留）
+        // 处理键盘输入
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
             char cmd = 0;
             ssize_t n = read(STDIN_FILENO, &cmd, 1);
@@ -265,7 +264,7 @@ static void demo_app_run(void)
         }
     }
 
-    LOG_I(MODULE_TAG " 主循环退出");
+    LOG_I(MODULE_TAG " 主循环安全退出");
 }
 
 // ==========================================================================
@@ -274,9 +273,9 @@ static void demo_app_run(void)
 static void demo_app_deinit(void)
 {
     demo_app_t *srv = &s_demo;
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_face);
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_capture);
-    event_bus_unsubscribe(SYS_EVENT_BUS_NAME, srv->sub_sys);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_face);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_capture);
+    event_bus_unsubscribe(APP_EVENT_BUS_NAME, srv->sub_sys);
     LOG_I(MODULE_TAG " 资源清理完成");
 }
 
@@ -293,14 +292,18 @@ static void *_demo_thread(void *arg)
 }
 
 // ==========================================================================
-// 自动初始化
+// 自动初始化（仅调试模式编译）
 // ==========================================================================
 static int __demo_auto_init(void)
 {
     pthread_t tid;
     pthread_create(&tid, NULL, _demo_thread, NULL);
     pthread_detach(tid);
-    LOG_I(MODULE_TAG " 加载完成");
+    LOG_I(MODULE_TAG " 调试模式加载完成");
     return 0;
 }
-MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
+
+// 【关键】仅当RUN_PRODUCT_MODE=0时编译调试APP
+#if RUN_PRODUCT_MODE == 0
+    // MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
+#endif

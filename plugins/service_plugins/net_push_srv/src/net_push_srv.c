@@ -1,299 +1,384 @@
 /* SPDX-License-Identifier: MIT */
-#include "../inc/net_push_srv.h"
+/**
+ ******************************************************************************
+ * @file           net_push_srv.c
+ * @brief          网络推流服务模块（RTSP/JPEG + DataBus V4.0 优先级拉模式）
+ * @details        1. 【优先级拉流】优先订阅人脸带框帧，降级原始摄像头总线
+ *                 2. 事件唤醒无CPU空耗，自动丢弃旧帧
+ *                 3. 系统事件控制启停，对齐全应用层架构
+ *                 4. 【优化】摄像头原生MJPEG直推，零编码损耗，CPU占用极低
+ *                 5. 严格遵循DataBus引用计数规范
+ *                 6. 【新增】支持JPEG动态数据大小获取 + 宏定义帧率限流
+ * @author         Luo
+ * @date           2026
+ ******************************************************************************
+ */
+
+
+// ==========================================================================
+// 头文件包含
+// ==========================================================================
 #include "log.h"
-#include "queue.h"
-// 帧链接头文件，获取视频格式定义
-#include "frame_link.h"
+#include "data_bus.h"
+#include "event_bus.h"
+#include "vision_ai_config.h"
+#include "initcall.h"
+
+// 第三方依赖（已删除TurboJPEG）
+#include "rtsp_server.h"
+
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <pthread.h>
+#include <sched.h>
 #include <errno.h>
+#include <unistd.h>
+#include <stdbool.h>
+#include <time.h>
 
-// ==============================================
-// 宏定义配置
-// ==============================================
-// 自定义视频帧头魔数，客户端用于校验帧头合法性
-#define NET_FRAME_MAGIC     0x12345678
-// UDP最大传输单元，避免分包过大丢包
-#define UDP_MTU_SIZE       1400
-// 推流核心配置：仅缓存最新1帧，实时视频无需多帧缓存
-#define NET_PUSH_MAX_FRAME  1
 
-// ==============================================
-// 自定义UDP视频帧头结构体
-// 客户端通过该结构体解析视频宽高、格式、数据长度
-// ==============================================
+// ==========================================================================
+// 【文件内部私有化宏】可直接在此调整推流参数，无需修改函数逻辑
+// ==========================================================================
+#define MODULE_NAME               "NET_PUSH"
+#define MODULE_TAG                "[NET_PUSH]"
+
+#define NET_PUSH_TARGET_FPS        GLOBAL_VIDEO_FPS          // 推流帧率
+#define FRAME_INTERVAL_MS          GLOBAL_FRAME_INTERVAL_MS  // 自动计算帧间隔
+
+/* 数据总线配置（优先级：人脸带框RGB帧 > 原始摄像头MJPEG帧） */
+#define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   // 高优先级：带人脸框的RGB帧
+#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧
+#define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
+
+/* 推流参数配置 */
+#define FRAME_WAIT_TIMEOUT_MS     30
+
+/* 视频参数（匹配摄像头原生MJPEG格式） */
+#define VIDEO_WIDTH               GLOBAL_VIDEO_WIDTH
+#define VIDEO_HEIGHT              GLOBAL_VIDEO_HEIGHT
+
+/* =============================================================================
+ * @brief 网络推流服务控制块（已删除TurboJPEG相关成员）
+ * ============================================================================*/
 typedef struct {
-    uint32_t magic;        // 魔数：0x12345678
-    uint32_t frame_size;   // 视频帧总数据大小
-    uint32_t width;        // 视频宽度
-    uint32_t height;       // 视频高度
-    uint32_t format;       // 视频格式（YUYV）
-    uint64_t timestamp;    // 时间戳（暂未使用）
-} net_frame_header_t;
+    /* 线程控制 */
+    pthread_t               work_thread;
+    pthread_mutex_t         mutex;
+    pthread_cond_t          cond;
+    bool                    thread_running;
+    bool                    is_paused;
+    bool                    is_started;
 
-// ==============================================
-// 推流服务上下文结构体
-// 管理推流所有资源、状态、句柄
-// ==============================================
-typedef struct {
-    net_push_srv_config_t config;     // 外部传入的配置参数
-    bool is_running;                  // 服务运行标志
-    bool is_created;                  // 服务创建完成标志
-    int sock_fd;                      // UDP socket文件描述符
-    struct sockaddr_in client_addr;   // 客户端地址信息
-    bool client_connected;            // 客户端连接状态
-    Queue_t send_queue;               // 发送队列（仅存1帧）
-    void** queue_buffer;              // 队列缓冲区（指针数组）
-    data_bus_subscription_handle_t data_sub; // 数据总线订阅句柄
-    int event_sub_id;                 // 事件总线订阅ID
-    pthread_t send_thread;            // 数据发送线程ID
-} net_push_srv_ctx_t;
+    /* 事件订阅ID */
+    int                     evt_sys_sub_id;
+    int                     evt_ai_sub_id;
+} net_push_srv_t;
 
-// ==============================================
-// 内部函数声明
-// ==============================================
-static void* _send_thread(void* arg);                            // UDP发送线程
-static void _data_bus_cb(data_bus_item_handle_t item, void* user_data);  // 数据总线回调
-static void _event_cb(const event_t* event, void* user_data);    // 事件总线回调
-static int _udp_send_frame(net_push_srv_ctx_t* ctx, const uint8_t* data, uint32_t w, uint32_t h, uint32_t fmt); // 发送一帧视频
+/* 全局单例 */
+static net_push_srv_t s_net_push_srv;
 
-// ==============================================
-// 函数：net_push_srv_create
-// 功能：创建推流服务，初始化资源、队列
-// 参数：config-配置参数 out_handle-输出服务句柄
-// 返回：0成功，负数失败
-// ==============================================
-int net_push_srv_create(const net_push_srv_config_t* config, net_push_srv_handle_t* out_handle) {
-    // 【新总线适配】入参校验：校验总线名称（替代老旧句柄）
-    if (!config || !out_handle || !config->data_bus_name || !config->event_bus_name) return -1;
+/* =============================================================================
+ * 静态函数声明
+ * ============================================================================*/
+static void  net_push_event_cb(const event_t *event, void *user_data);
+static void *net_push_work_thread(void *arg);
+static int   net_push_srv_start(void);
+static void  net_push_srv_cleanup(void);
+static int   net_push_srv_init(void);
+static int   net_push_srv_auto_init(void);
 
-    // 分配服务上下文内存
-    net_push_srv_ctx_t* ctx = calloc(1, sizeof(net_push_srv_ctx_t));
-    if (!ctx) return -1;
+/* =============================================================================
+ * @brief 毫秒级条件等待（通用工具函数）
+ * ============================================================================*/
+static int pthread_cond_timedwait_ms(pthread_cond_t *cond,
+                                     pthread_mutex_t *mutex,
+                                     uint32_t timeout_ms)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
 
-    // 复制配置参数
-    memcpy(&ctx->config, config, sizeof(net_push_srv_config_t));
-    // 分配队列缓冲区（仅1帧指针大小）
-    ctx->queue_buffer = malloc(sizeof(void*) * NET_PUSH_MAX_FRAME);
-    // 初始化发送队列
-    Queue_Init(&ctx->send_queue, ctx->queue_buffer, NET_PUSH_MAX_FRAME);
-    // 标记服务创建完成
-    ctx->is_created = true;
-    // 输出服务句柄给外部
-    *out_handle = ctx;
+    ts.tv_sec  += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000UL;
 
-    LOG_I("NetPush: 创建成功(仅缓存最新1帧)，端口:%d", config->bind_port);
-    return 0;
-}
-
-// ==============================================
-// 函数：net_push_srv_start
-// 功能：启动推流服务，创建socket、订阅总线、启动发送线程
-// ==============================================
-int net_push_srv_start(net_push_srv_handle_t handle) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)handle;
-    // 校验服务状态
-    if (!ctx || !ctx->is_created || ctx->is_running) return -1;
-
-    // 1. 创建UDP套接字
-    ctx->sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in addr = {0};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(ctx->config.bind_port);  // 绑定端口
-    addr.sin_addr.s_addr = INADDR_ANY;             // 监听所有网卡
-    bind(ctx->sock_fd, (const struct sockaddr*)&addr, (socklen_t )sizeof(addr));
-
-    // 2. 【新总线适配】订阅数据总线：名称传参，接收VIDEO_FRAME类型数据
-    data_bus_subscribe(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, _data_bus_cb, ctx, &ctx->data_sub);
-    
-    // 3. 【新总线适配】订阅事件总线：名称传参，监听SYS_STOP系统停止事件
-    event_subscriber_t sub = {
-        .event_type = EVENT_TYPE_SYS_STOP,
-        .callback = _event_cb,
-        .user_data = ctx
-    };
-    ctx->event_sub_id = event_bus_subscribe(ctx->config.event_bus_name, &sub);
-
-    // 4. 启动UDP发送线程
-    ctx->is_running = true;
-    pthread_create(&ctx->send_thread, NULL, _send_thread, ctx);
-
-    LOG_I("NetPush: 服务启动，等待客户端连接");
-    return 0;
-}
-
-// ==============================================
-// 函数：net_push_srv_stop
-// 功能：停止推流服务
-// ==============================================
-int net_push_srv_stop(net_push_srv_handle_t handle) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)handle;
-    if (!ctx || !ctx->is_running) return -1;
-
-    ctx->is_running = false;
-    pthread_join(ctx->send_thread, NULL);
-    LOG_I("NetPush: 服务已停止");
-    return 0;
-}
-
-// ==============================================
-// 函数：net_push_srv_destroy
-// 功能：销毁推流服务，释放所有资源
-// ==============================================
-int net_push_srv_destroy(net_push_srv_handle_t handle) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)handle;
-    if (!ctx) return 0;
-
-    // 停止线程并等待退出
-    ctx->is_running = false;
-    pthread_join(ctx->send_thread, NULL);
-
-    // 【新总线适配】取消总线订阅：名称传参
-    event_bus_unsubscribe(ctx->config.event_bus_name, ctx->event_sub_id);
-    data_bus_unsubscribe(ctx->config.data_bus_name, &ctx->data_sub);
-    // 关闭socket
-    close(ctx->sock_fd);
-
-    // 释放队列中剩余的数据（引用计数-1）
-    void* item = NULL;
-    while (Queue_Get(&ctx->send_queue, &item) == 0) {
-        data_bus_release(item);
+    if (ts.tv_nsec >= 1000000000UL) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000UL;
     }
 
-    // 释放内存
-    free(ctx->queue_buffer);
-    free(ctx);
-    LOG_I("NetPush: 销毁完成");
-    return 0;
+    return pthread_cond_timedwait(cond, mutex, &ts);
 }
 
-// ==============================================
-// 函数：_data_bus_cb
-// 功能：数据总线回调（核心）
-// 逻辑：新帧到来 → 清空旧帧 → 仅保存最新1帧
-// 特点：零拷贝，仅传递指针，不复制数据
-// ==============================================
-static void _data_bus_cb(data_bus_item_handle_t item, void* user_data) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)user_data;
-    if (!ctx || !ctx->is_running) return;
+/* =============================================================================
+ * @brief   事件总线回调（系统事件 + AI处理完成事件）
+ * ============================================================================*/
+static void net_push_event_cb(const event_t *event, void *user_data)
+{
+    (void)user_data;
+    net_push_srv_t *srv = &s_net_push_srv;
 
-    // ==============================================
-    // 核心逻辑：实时视频只需要最新帧
-    // 新帧到来时，清空队列中所有旧帧（释放引用）
-    // ==============================================
-    void* old_item = NULL;
-    while (Queue_Get(&ctx->send_queue, &old_item) == 0) {
-        data_bus_release(old_item);
-    }
-
-    // ==============================================
-    // 【新总线适配+BUG修复】正确增加引用计数（名称传参）
-    // 防止总线自动释放，保证数据发送前有效
-    // ==============================================
-    data_bus_item_handle_t ref_item = NULL;
-    data_bus_acquire_latest(ctx->config.data_bus_name, DATA_TYPE_VIDEO_FRAME, &ref_item);
-    if (ref_item) {
-        // 将最新帧入队
-        Queue_Put(&ctx->send_queue, ref_item);
-    }
-}
-
-// ==============================================
-// 函数：_event_cb
-// 功能：事件总线回调，接收系统停止信号
-// ==============================================
-static void _event_cb(const event_t* event, void* user_data) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)user_data;
-    if (ctx) {
-        // 收到停止事件，关闭服务
-        ctx->is_running = false;
-    }
-}
-
-// ==============================================
-// 函数：_send_thread
-// 功能：UDP发送线程（独立线程，不阻塞总线）
-// 流程：等待客户端连接 → 取队列最新帧 → 发送数据
-// ==============================================
-static void* _send_thread(void* arg) {
-    net_push_srv_ctx_t* ctx = (net_push_srv_ctx_t*)arg;
-
-    while (ctx->is_running) {
-        // ==============================================
-        // 步骤1：等待客户端握手（客户端先发1个字节）
-        // ==============================================
-        if (!ctx->client_connected) {
-            char buf[8];
-            struct sockaddr_in client;
-            socklen_t len = sizeof(client);
-            // 非阻塞接收客户端握手包
-            ssize_t ret = recvfrom(ctx->sock_fd, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr*)&client, &len);
-            // 收到握手包，记录客户端地址
-            if (ret >= 0) {
-                memcpy(&ctx->client_addr, &client, sizeof(client));
-                ctx->client_connected = true;
-                LOG_I("NetPush: 客户端连接成功: %s:%d", inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+    switch (event->type)
+    {
+        /* AI处理完成：唤醒推流线程（优先级拉流触发） */
+        case EVENT_TYPE_FACE_PROCESS_DONE:
+            if (srv->thread_running && !srv->is_paused)
+            {
+                pthread_mutex_lock(&srv->mutex);
+                pthread_cond_signal(&srv->cond);
+                pthread_mutex_unlock(&srv->mutex);
             }
-            usleep(10000);
+            break;
+
+        /* 系统恢复：启动推流服务 */
+        case EVENT_TYPE_SYS_RESUME:
+            if (!srv->is_started)
+            {
+                net_push_srv_start();
+                srv->is_started = true;
+            }
+            else
+            {
+                srv->is_paused = false;
+                LOG_I(MODULE_TAG "服务恢复运行");
+            }
+            break;
+
+        /* 系统暂停 */
+        case EVENT_TYPE_SYS_PAUSE:
+            LOG_I(MODULE_TAG "服务进入暂停状态");
+            srv->is_paused = true;
+            break;
+
+        /* 系统停止/关机 */
+        case EVENT_TYPE_SYS_STOP:
+        case EVENT_TYPE_SYS_SHUTDOWN:
+        case EVENT_TYPE_SYS_ERROR:
+            net_push_srv_cleanup();
+            break;
+
+        default:
+            break;
+    }
+}
+
+/* =============================================================================
+ * @brief   推流工作线程（优先级拉模式 + 事件唤醒 + MJPEG直推）
+ * @details 1. 高优先级：拉取 FACE_RESULT_RGB_DATA_BUS 带人脸框的帧
+ *          2. 降级兜底：拉取 VIDEO_DATA_BUS 摄像头原生MJPEG帧
+ *          3. MJPEG零拷贝直推，无编码损耗，CPU占用极低
+ *          4. 适配JPEG动态数据大小，通过data_bus_get_item_size获取
+ *          5. 宏定义帧率限流，避免客户端缓存溢出
+ * ============================================================================*/
+static void *net_push_work_thread(void *arg)
+{
+    net_push_srv_t *srv = &s_net_push_srv;
+    data_bus_item_handle_t frame_item = NULL;
+    const uint8_t *frame_data = NULL;
+    size_t frame_size = 0;
+    struct timespec last_ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &last_ts);
+
+    while (srv->thread_running)
+    {
+        if (srv->is_paused) {
+            usleep(FRAME_INTERVAL_MS * 1000);
             continue;
         }
 
-        // ==============================================
-        // 步骤2：从队列取出最新1帧
-        // ==============================================
-        data_bus_item_handle_t item = NULL;
-        if (Queue_Get(&ctx->send_queue, (void**)&item) != 0) {
-            usleep(1000);
-            continue;
-        }
+        // 等待事件
+        pthread_mutex_lock(&srv->mutex);
+        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_INTERVAL_MS);
+        pthread_mutex_unlock(&srv->mutex);
 
-        // ==============================================
-        // 步骤3：获取数据指针（只读，零拷贝）
-        // ==============================================
-        const void* data = data_bus_get_readonly_ptr(item);
-        // ==============================================
-        // 步骤4：发送视频帧（YUYV格式 640x360）
-        // ==============================================
-        _udp_send_frame(ctx, data, 640, 360, FRAME_FMT_YUYV);
-        
-        // ==============================================
-        // 步骤5：发送完成，释放数据引用
-        // ==============================================
-        data_bus_release(item);
+        // 帧率限流
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        uint32_t elapsed = (now.tv_sec - last_ts.tv_sec)*1000 + (now.tv_nsec - last_ts.tv_nsec)/1000000;
+        if (elapsed < FRAME_INTERVAL_MS) continue;
+        last_ts = now;
+
+        // 拉取MJPEG + 推流
+        frame_item = NULL;
+        if (data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item) == DATA_BUS_OK) {
+            frame_data = data_bus_get_readonly_ptr(frame_item);
+            frame_size = data_bus_get_item_size(frame_item);
+            if (frame_data && frame_size) {
+                rtsp_server_push_jpeg(frame_data, frame_size);
+            }
+            data_bus_release(frame_item);
+        }
     }
     return NULL;
 }
 
-// ==============================================
-// 函数：_udp_send_frame
-// 功能：发送一帧视频数据（帧头+分包数据）
-// ==============================================
-static int _udp_send_frame(net_push_srv_ctx_t* ctx, const uint8_t* data, uint32_t w, uint32_t h, uint32_t fmt) {
-    // 构造视频帧头
-    net_frame_header_t hdr = {
-        .magic = NET_FRAME_MAGIC,
-        .frame_size = w * h * 2,  // YUYV格式：1像素占2字节
-        .width = w,
-        .height = h,
-        .format = fmt,
-        .timestamp = 0
-    };
+/* =============================================================================
+ * @brief   服务启动函数
+ * ============================================================================*/
+static int net_push_srv_start(void)
+{
+    net_push_srv_t *srv = &s_net_push_srv;
+    int ret = -1;
+    pthread_attr_t thread_attr;  // 线程属性
+    struct sched_param sched_param;
 
-    // 1. 先发送帧头（客户端先解析帧头）
-    sendto(ctx->sock_fd, &hdr, sizeof(hdr), 0, (struct sockaddr*)&ctx->client_addr, sizeof(ctx->client_addr));
-    
-    // 2. 分包发送视频数据（MTU=1400，避免丢包）
-    size_t total = hdr.frame_size;
-    size_t offset = 0;
-    while (offset < total) {
-        size_t send_len = (total - offset) > UDP_MTU_SIZE ? UDP_MTU_SIZE : (total - offset);
-        sendto(ctx->sock_fd, data + offset, send_len, 0, (struct sockaddr*)&ctx->client_addr, sizeof(ctx->client_addr));
-        offset += send_len;
+    /* 初始化条件变量 */
+    ret = pthread_cond_init(&srv->cond, NULL);
+    if (ret != 0)
+    {
+        LOG_E(MODULE_TAG "条件变量初始化失败");
+        return -1;
     }
+
+    /* 启动RTSP服务 */
+    ret = rtsp_server_start();
+    if (ret != 0)
+    {
+        LOG_E(MODULE_TAG "RTSP服务启动失败");
+        pthread_cond_destroy(&srv->cond);
+        return -2;
+    }
+
+    /* 初始化线程属性 + 设置实时优先级（核心：推流优先级90） */
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO); // 实时FIFO调度
+    sched_param.sched_priority = 90;                       // 最高优先级
+    pthread_attr_setschedparam(&thread_attr, &sched_param);
+    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED); // 独立优先级
+
+    /* 创建工作线程（带实时优先级） */
+    srv->thread_running = true;
+    srv->is_paused = false;
+    ret = pthread_create(&srv->work_thread, &thread_attr, net_push_work_thread, NULL);
+    if (ret != 0)
+    {
+        LOG_E(MODULE_TAG "线程创建失败 err=%d", ret);
+        pthread_attr_destroy(&thread_attr);
+        rtsp_server_stop();
+        pthread_cond_destroy(&srv->cond);
+        srv->thread_running = false;
+        return -3;
+    }
+
+    /* 销毁线程属性 */
+    pthread_attr_destroy(&thread_attr);
+
+    /* 发布服务就绪事件 */
+    event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_NET_READY, MODULE_NAME);
+    LOG_I(MODULE_TAG "网络推流服务启动成功（MJPEG直推+动态大小）[优先级=90]");
     return 0;
 }
+/* =============================================================================
+ * @brief   服务资源清理（安全退出）
+ * ============================================================================*/
+static void net_push_srv_cleanup(void)
+{
+    net_push_srv_t *srv = &s_net_push_srv;
+
+    LOG_W(MODULE_TAG "开始释放所有资源");
+
+    /* 停止线程 */
+    srv->thread_running = false;
+    srv->is_paused = true;
+
+    /* 唤醒线程退出 */
+    pthread_mutex_lock(&srv->mutex);
+    pthread_cond_signal(&srv->cond);
+    pthread_mutex_unlock(&srv->mutex);
+
+    /* 等待线程退出 */
+    if (srv->work_thread > 0)
+    {
+        pthread_join(srv->work_thread, NULL);
+    }
+
+    /* 取消事件订阅 */
+    if (srv->evt_sys_sub_id >= 0)
+    {
+        event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_sys_sub_id);
+    }
+    if (srv->evt_ai_sub_id >= 0)
+    {
+        event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_ai_sub_id);
+    }
+
+    /* 停止RTSP */
+    rtsp_server_stop();
+
+    /* 销毁同步对象 */
+    pthread_cond_destroy(&srv->cond);
+    pthread_mutex_destroy(&srv->mutex);
+
+    /* 发布停止事件 */
+    event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_NET_STOPPED, MODULE_NAME);
+    LOG_I(MODULE_TAG "所有资源释放完成");
+}
+
+/* =============================================================================
+ * @brief   服务初始化（已删除TurboJPEG初始化）
+ * ============================================================================*/
+static int net_push_srv_init(void)
+{
+    net_push_srv_t *srv = &s_net_push_srv;
+    int ret = -1;
+
+    /* 清空控制块 */
+    memset(srv, 0, sizeof(net_push_srv_t));
+    srv->evt_sys_sub_id = -1;
+    srv->evt_ai_sub_id = -1;
+
+    /* 初始化互斥锁 */
+    ret = pthread_mutex_init(&srv->mutex, NULL);
+    if (ret != 0)
+    {
+        LOG_E(MODULE_TAG "互斥锁初始化失败");
+        return -1;
+    }
+
+    /* 订阅系统事件 */
+    event_subscriber_t sys_sub = {
+        .event_type = EVENT_TYPE_INVALID,
+        .callback = net_push_event_cb,
+        .user_data = srv,
+        .skip_self_published = true
+    };
+    srv->evt_sys_sub_id = event_bus_subscribe(SYS_EVENT_BUS, &sys_sub);
+
+    /* 订阅AI处理完成事件（核心唤醒源） */
+    event_subscriber_t ai_sub = {
+        .event_type = EVENT_TYPE_FACE_PROCESS_DONE,
+        .callback = net_push_event_cb,
+        .user_data = srv,
+        .skip_self_published = true
+    };
+    srv->evt_ai_sub_id = event_bus_subscribe(SYS_EVENT_BUS, &ai_sub);
+
+    /* 订阅检查 */
+    if (srv->evt_sys_sub_id < 0 || srv->evt_ai_sub_id < 0)
+    {
+        LOG_E(MODULE_TAG "事件订阅失败");
+        net_push_srv_cleanup();
+        return -3;
+    }
+
+    LOG_I(MODULE_TAG "网络推流服务初始化完成（MJPEG直推+动态大小）");
+    return 0;
+}
+
+/* =============================================================================
+ * @brief   模块自动初始化（系统启动自动加载）
+ * ============================================================================*/
+static int net_push_srv_auto_init(void)
+{
+    if (net_push_srv_init() != 0)
+    {
+        return -1;
+    }
+    LOG_I(MODULE_TAG "模块自动加载完成，等待系统启动指令");
+    return 0;
+}
+
+// 注册服务初始化级别
+MODULE_INIT_LEVEL(INIT_SERVICE, net_push_srv_auto_init);
+
+/******************************* End of file **********************************/

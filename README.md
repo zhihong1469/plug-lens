@@ -5,10 +5,24 @@ use_toolchain arm32-linux-hf6ull
  make clean && make
 传输到开发板(示例):
 cp output/vision_ai_app ~/nfs/run_on_board/
+cp third_lib/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
+cp -rf  third_lib/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board
+cp -rf  third_lib/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
+cp third_lib/opencv_lib/lib/*.so.*  /home/luo/nfs/run_on_board/opencv
 [root@100ask:/mnt/run_on_board]#
+mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
+date -s "2026-05-22 12:00:00"
+cd /mnt/run_on_board/
 export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/mnt/run_on_board/install_arm/lib/:$Ld_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/opencv:$Ld_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/libjpeg:$LD_LIBRARY_PATH
+mkdir -p /mnt/sdcard/face_capture
+mount /dev/mmcblk0p1 /mnt/sdcard # 具体看plugins/base_plugins/sd_storage/inc/sd_storage.h:SD_STORAGE_ROOT_PATH 结束拔卡前记得umount /mnt/sdcard
+./vision_ai_app
+sudo rm -f ~/nfs/face_capture/*.jpg
 
+ffplay rtsp://192.168.5.9:8554/stream
+ffplay -rtsp_transport udp -sync video -flags low_delay rtsp://192.168.5.9:8554/stream
 GDB调试:
 arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
 [root@100ask:/mnt/run_on_board]# 
@@ -16,7 +30,9 @@ arm-buildroot-linux-gnueabihf-gdb ./output/vision_ai_app
 WSL2:
   target remote 192.168.5.9:12345
   thread apply all bt
-
+Windows:
+CMD（管理员）一键关闭所有网络防火墙:
+  netsh advfirewall set allprofiles state off
 # 结构速通(详细见documents/architecture.md)
 一般应用层只需要专注plugins目录下的代码修改，src实现接口函数或者架构相关
 ex:
@@ -54,3 +70,13 @@ source ~/你的项目路径/scripts/.gdbinit
 ex:.tool/gdb-12.1.tar.xz 用于开发板资源较小无预装GDB，可考虑静态链接gdbserver
 
 ##
+
+
+# thanks 
+- https://github.com/alibaba/MNN  【3.5.0】
+- https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
+- https://github.com/opencv/opencv 【4.5.5】
+- http://www.live555.com/liveMedia/
+- https://github.com/libjpeg-turbo/libjpeg-turbo
+- https://github.com/BtbN/FFmpeg-Builds
+- https://github.com/cisco/openh264

@@ -112,7 +112,7 @@ static const char* g_event_type_str[] = {
 
     [EVENT_TYPE_CAPTURE_READY]      = "CAPTURE_READY",
     [EVENT_TYPE_CAPTURE_RUNNING]    = "CAPTURE_RUNNING",
-    [EVENT_TYPE_CAPTURE_FRAME_READY] = "CAPTURE_FRAME_READY",
+    [EVENT_TYPE_CAPTURE_PROTO_READY] ="CAPTURE_PROTO_READY",
     [EVENT_TYPE_CAPTURE_STOPPED]    = "CAPTURE_STOPPED",
     [EVENT_TYPE_CAPTURE_ERROR]      = "CAPTURE_ERROR",
 
@@ -285,7 +285,7 @@ int event_bus_subscribe_ex(const char *name, const event_subscriber_t *subscribe
 
 int event_bus_subscribe(const char *name, const event_subscriber_t *subscriber) {
     event_subscriber_t sub = *subscriber;
-    sub.skip_self_published = true;
+    // sub.skip_self_published = true;
     return event_bus_subscribe_ex(name, &sub, "DEFAULT");
 }
 
@@ -360,41 +360,47 @@ int event_bus_dispatch(const char *name) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
     if (!ctx) return -1;
 
-    // 清空管道信号
-    char buf[16];
-    read(ctx->pipefd[0], buf, sizeof(buf));
+    // ✅ 修复：只读取1个字节信号，对应1个事件
+    char wake;
+    read(ctx->pipefd[0], &wake, 1);
 
-    // ✅ 队列细粒度加锁
-    pthread_mutex_lock(&ctx->queue_lock);
-    event_t *event = NULL;
-    int ret = Queue_Get(&ctx->event_queue, (void**)&event);
-    pthread_mutex_unlock(&ctx->queue_lock);
+    // ✅ 修复：循环处理队列中所有事件
+    while (1) {
+        pthread_mutex_lock(&ctx->queue_lock);
+        event_t *event = NULL;
+        int ret = Queue_Get(&ctx->event_queue, (void**)&event);
+        pthread_mutex_unlock(&ctx->queue_lock);
 
-    if (ret != QUEUE_OK || !event) return -1;
+        if (ret != QUEUE_OK || !event) break;
 
-    // 回调缓存（锁外执行，无死锁）
-    struct {
-        event_callback_t cb;
-        void *user_data;
-    } temp_cb[MAX_TEMP_CALLBACKS];
-    int cb_count = 0;
+        // 回调缓存（锁外执行）
+        struct {
+            event_callback_t cb;
+            void *user_data;
+        } temp_cb[MAX_TEMP_CALLBACKS];
+        int cb_count = 0;
 
-    pthread_rwlock_rdlock(&ctx->sub_rwlock);
-    for (uint32_t i = 0; i < ctx->max_subscribers && cb_count < MAX_TEMP_CALLBACKS; i++) {
-        if (!_event_bus_should_skip_subscriber(&ctx->subscribers[i], event)) {
-            temp_cb[cb_count].cb = ctx->subscribers[i].callback;
-            temp_cb[cb_count].user_data = ctx->subscribers[i].user_data;
-            cb_count++;
+        pthread_rwlock_rdlock(&ctx->sub_rwlock);
+        for (uint32_t i = 0; i < ctx->max_subscribers && cb_count < MAX_TEMP_CALLBACKS; i++) {
+            if (!_event_bus_should_skip_subscriber(&ctx->subscribers[i], event)) {
+                temp_cb[cb_count].cb = ctx->subscribers[i].callback;
+                temp_cb[cb_count].user_data = ctx->subscribers[i].user_data;
+                cb_count++;
+            }
         }
-    }
-    pthread_rwlock_unlock(&ctx->sub_rwlock);
+        pthread_rwlock_unlock(&ctx->sub_rwlock);
+// 执行回调前添加日志
+LOG_D("Bus[%s] 分发事件: %s | 发布者: %s | 匹配订阅者: %d",
+      name, event_type_to_str(event->type), event->source, cb_count);
 
-    // 执行回调
-    for (int i = 0; i < cb_count; i++) {
-        if (temp_cb[i].cb) temp_cb[i].cb(event, temp_cb[i].user_data);
+        // 执行回调
+        for (int i = 0; i < cb_count; i++) {
+            if (temp_cb[i].cb) temp_cb[i].cb(event, temp_cb[i].user_data);
+        }
+
+        _event_bus_free_event(event);
     }
 
-    _event_bus_free_event(event);
     return 0;
 }
 

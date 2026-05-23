@@ -24,6 +24,15 @@
 #define MNN_FACE_ERR_MODEL      -2
 #define MNN_FACE_ERR_INPUT      -3
 #define MNN_FACE_ERR_INFER      -4
+#define MNN_FACE_ERR_JPEG       -5  // 新增：JPEG解码错误
+
+// ==========================
+// 输入图像格式枚举（通用扩展）
+// ==========================
+typedef enum {
+    IMAGE_FORMAT_YUYV   = 0,    // YUYV格式（原始默认）
+    IMAGE_FORMAT_MJPEG  = 1     // MJPEG格式（新增硬件格式）
+} ImageFormat;
 
 // ==========================
 // 内部配置（IMX6ULL 性能最优）
@@ -60,14 +69,21 @@ public:
             float iou_threshold = DEFAULT_IOU_THRESH);
 
     /**
-     * @brief 人脸检测推理入口（修改版：支持外部缓存）
+     * @brief 人脸检测推理入口（通用版：支持双格式输入）
+     * @param input_data    外部输入图像数据（YUYV/MJPEG）
+     * @param cam_w         摄像头图像宽度
+     * @param cam_h         摄像头图像高度
      * @param external_bgr_buf 外部传入的BGR缓冲区（AI专属链路内存）
+     * @param face_list     输出人脸检测结果
+     * @param format        输入图像格式（0=YUYV/1=MJPEG，默认YUYV兼容旧代码）
+     * @return 错误码
      */
-    int detect(const uint8_t* yuyv_data, 
+    int detect(const uint8_t* input_data, 
                int cam_w, 
                int cam_h,
-               uint8_t* external_bgr_buf,  // 🔥 核心新增：外部专属缓存入口
-               std::vector<FaceInfo_MNN>& face_list);
+               uint8_t* external_bgr_buf,
+               std::vector<FaceInfo_MNN>& face_list,
+               ImageFormat format = IMAGE_FORMAT_YUYV);  // 通用扩展，默认兼容旧版
 
     static void map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h);
     static void draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list);
@@ -77,12 +93,21 @@ public:
 
 private:
     /**
-     * @brief YUYV转BGR（修改版：直接写入外部缓冲区）
+     * @brief YUYV转BGR（使用OpenCV，兼容原有逻辑）
      */
     int yuyv_to_bgr(const uint8_t* yuyv_data, 
                     int width, 
                     int height,
-                    uint8_t* bgr_buf);  // 🔥 外部缓存
+                    uint8_t* bgr_buf);
+
+    /**
+     * @brief MJPEG硬解码转BGR（使用TurboJPEG，高性能低CPU）
+     */
+    int mjpeg_to_bgr(const uint8_t* mjpeg_data, 
+                     int data_len,
+                     int width, 
+                     int height,
+                     uint8_t* bgr_buf);
 
     void generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes);
     void nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output);
