@@ -25,21 +25,15 @@ extern "C" {
  */
 int rtsp_server_start(void);
 
-/**
- * @brief 向 RTSP 服务器推送 JPEG 格式图像帧
- * @param jpeg_buf: JPEG 图像数据缓冲区指针
- * @param jpeg_size: JPEG 数据长度（字节）
- * @note 必须传入完整的 JPEG 帧（包含 0xFFD8 开头 + 0xFFD9 结尾）
- */
-void rtsp_server_push_jpeg(const uint8_t* jpeg_buf, uint32_t jpeg_size);
 
 /**
- * @brief 向 RTSP 服务器推送 H.264 格式裸流帧
- * @param h264_buf: H.264 裸流数据缓冲区指针（Annex B格式，带00 00 00 01起始码）
- * @param h264_size: H.264 数据长度（字节）
+ * @brief 向 RTSP 服务器推送 JPEG/H.264 格式裸流帧
+ * @param buf: H.264 裸流数据缓冲区指针
+ * @param size: H.264 数据长度（字节）
+ * @note 必须传入完整的 JPEG 帧（包含 0xFFD8 开头 + 0xFFD9 结尾）
  * @note 支持OpenH264直接输出的Annex B格式，无需额外转换
  */
-void rtsp_server_push_h264(const uint8_t* h264_buf, uint32_t h264_size);
+void rtsp_server_push(const uint8_t* buf, uint32_t size);
 
 /**
  * @brief 安全停止 RTSP 推流服务器

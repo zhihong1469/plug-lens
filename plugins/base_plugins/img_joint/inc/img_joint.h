@@ -2,6 +2,7 @@
  * @file img_joint.h
  * @brief 图像联合处理工具模块（通用格式转换、编解码）
  * @details 抽离所有跨模块通用的图像工具函数，支持C/C++调用
+ *          基于libyuv/TurboJPEG/OpenH264实现，无OpenCV依赖
  * @author 嵌入式视觉项目
  * @date 2026
  */
@@ -37,25 +38,25 @@ extern "C" {
 #endif
 
 /**
- * @brief YUYV(YUV422) 转 BGR888（OpenCV实现，兼容旧逻辑）
+ * @brief YUYV(YUV422) 转 RGB888（libyuv NEON加速）
  * @param yuyv_data: 输入YUYV数据缓冲区
  * @param width: 图像宽度
  * @param height: 图像高度
- * @param bgr_buf: 输出BGR888缓冲区（大小 >= width*height*3）
+ * @param rgb_buf: 输出RGB888缓冲区（大小 >= width*height*3）
  * @return 0:成功 / 负数:失败
  */
-int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_buf);
+int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_buf);
 
 /**
- * @brief MJPEG 硬解码转 BGR888（TurboJPEG实现，高性能）
+ * @brief MJPEG 硬解码转 RGB888（TurboJPEG实现，高性能）
  * @param mjpeg_data: 输入MJPEG压缩数据
  * @param data_len: MJPEG数据长度（字节）
  * @param width: 图像宽度
  * @param height: 图像高度
- * @param bgr_buf: 输出BGR888缓冲区（大小 >= width*height*3）
+ * @param rgb_buf: 输出RGB888缓冲区（大小 >= width*height*3）
  * @return 0:成功 / 负数:失败
  */
-int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height, uint8_t* bgr_buf);
+int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height, uint8_t* rgb_buf);
 
 /**
  * @brief YUYV(YUV422) 转 I420(YUV420P)（libyuv NEON加速，H.264编码专用）
@@ -78,16 +79,24 @@ int yuyv_to_i420(const uint8_t* yuyv_data, int width, int height, uint8_t* i420_
 int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_buf);
 
 /**
- * @brief BGR图像缩放 (替代 cv::resize)
+ * @brief RGB图像缩放 (libyuv 双线性滤波，替代OpenCV resize)
+ * @param src_rgb: 源RGB888图像数据
+ * @param src_w: 源图像宽度
+ * @param src_h: 源图像高度
+ * @param dst_rgb: 目标RGB888图像数据
+ * @param dst_w: 目标图像宽度
+ * @param dst_h: 目标图像高度
+ * @return 0:成功 / -1:失败
  */
-int rgb_resize(const uint8_t* src_bgr, int src_w, int src_h,
-               uint8_t* dst_bgr, int dst_w, int dst_h);
+int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
+               uint8_t* dst_rgb, int dst_w, int dst_h);
 
 /**
- * @brief BGR图像绘制矩形框 (替代 cv::rectangle)
- * @param color BGR: 0x0000FF=红, 0x00FF00=绿, 0xFF0000=蓝
+ * @brief RGB图像绘制矩形框（裸指针实现，替代OpenCV rectangle）
+ * @param color RGB颜色值：0xFF0000=红, 0x00FF00=绿, 0x0000FF=蓝
+ * @param thickness: 边框粗细
  */
-void bgr_draw_rect(uint8_t* bgr_data, int width, int height,
+void bgr_draw_rect(uint8_t* rgb_data, int width, int height,
                    int x, int y, int w, int h, uint32_t color, int thickness);
 
 // ========================= 新增：YUYV -> H264 编码接口 =========================
@@ -162,7 +171,7 @@ int main(void) {
         int ret = yuyv_to_h264(encoder, yuyv_buf, sizeof(yuyv_buf), h264_buf, &h264_len);
         if (ret == IMG_JOINT_OK) {
             // 推流
-            rtsp_server_push_h264(h264_buf, h264_len);
+            rtsp_server_push(buf, len);
         }
     }
 
