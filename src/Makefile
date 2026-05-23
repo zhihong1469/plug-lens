@@ -49,5 +49,5 @@ LDFLAGS := \
 	-lturbojpeg \
 	-L$(TOPDIR)/third_lib/openh264/lib \
 	-lopenh264 \
-	-L$(TOPDIR)/third_lib/install_armv7/lib \
+	-L$(TOPDIR)/third_lib/libyuv/lib \
 	-lyuv

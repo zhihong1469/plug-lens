@@ -93,8 +93,17 @@ static void *app_thread(void *arg) {
 // 自动加载
 static int __app_auto_init(void) {
     pthread_t tid;
-    pthread_create(&tid, NULL, app_thread, NULL);
+    pthread_attr_t thread_attr;
+    struct sched_param sched_param;
+    /* 初始化线程属性 + 设置实时优先级 */
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
+    sched_param.sched_priority = 60;
+    pthread_attr_setschedparam(&thread_attr, &sched_param);
+    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
+    pthread_create(&tid, &thread_attr, app_thread, NULL);
     pthread_detach(tid);
+    pthread_attr_destroy(&thread_attr);
     return 0;
 }
     MODULE_INIT_LEVEL(INIT_APP, __app_auto_init);

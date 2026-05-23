@@ -69,8 +69,8 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/third_lib/live555/include/UsageEnvironment \
 	-I$(TOPDIR)/third_lib/libjpeg_turbo/include \
 	-I$(TOPDIR)/third_lib/openh264/include/wels \
-	-I$(TOPDIR)/third_lib/install_armv7/include \
-	-I$(TOPDIR)/third_lib/install_armv7/include/libyuv
+	-I$(TOPDIR)/third_lib/libyuv/include \
+	-I$(TOPDIR)/third_lib/libyuv/include/libyuv
 	
 # 导出全局路径（所有子模块自动可用）
 export GLOBAL_INC
