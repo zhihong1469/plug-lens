@@ -85,13 +85,13 @@ static capture_srv_t s_capture;
 // ==========================================================================
 // 内部工具函数：线程安全加锁/解锁 + 格式转换
 // ==========================================================================
-static inline void _capture_lock(void) {
-    pthread_mutex_lock(&s_capture.lock);
-}
+// static inline void _capture_lock(void) {
+//     pthread_mutex_lock(&s_capture.lock);
+// }
 
-static inline void _capture_unlock(void) {
-    pthread_mutex_unlock(&s_capture.lock);
-}
+// static inline void _capture_unlock(void) {
+//     pthread_mutex_unlock(&s_capture.lock);
+// }
 
 // 格式转换：配置 → V4L2标准格式枚举
 static uint32_t _capture_get_v4l2_format(int cfg)
@@ -217,7 +217,6 @@ static void *capture_work_thread(void *arg)
             }
             goto fps_stats;
         }
-        LOG_D(MODULE_TAG " ✅ 成功获取空闲帧 | 句柄地址=%p | 总线=%s", item, CAPTURE_DATA_BUS_NAME);
 
         // ============== 第四步：填充帧数据 ==============
         writable_buf = data_bus_get_writable_ptr(item);
@@ -227,8 +226,6 @@ static void *capture_work_thread(void *arg)
             item = NULL;
             goto fps_stats;
         }
-        LOG_D(MODULE_TAG " ✅ 帧可写指针=%p | 摄像头数据地址=%p | 数据长度=%zu", 
-              writable_buf, cam_buf, cam_len);
         
         // 安全拷贝，防止越界
         size_t copy_len = utils_min(cam_len, MAX_FRAME_SIZE);
@@ -248,7 +245,6 @@ static void *capture_work_thread(void *arg)
         event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_PROTO_READY, MODULE_NAME);
 
         // ============== 第六步：生产者释放自身引用（V4.0强制规范） ==============
-        LOG_D(MODULE_TAG " 🔄 生产者释放帧 | 句柄=%p", item);
         data_bus_release(item);
         item = NULL;
 

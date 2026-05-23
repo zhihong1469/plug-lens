@@ -6,10 +6,8 @@
 #include <vector>
 #include <algorithm>
 // 新增：OpenCV头文件（已在UltraFaceMNN.hpp包含，这里显式声明）
-#include <opencv2/opencv.hpp>
-
+#include "img_joint.h"
 using namespace std;
-using namespace cv;
 
 // ==========================
 // MNN 子类私有数据（通用化命名）
@@ -194,36 +192,38 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 }
 
 // ==========================
-// 【修复版】OpenCV原生：坐标映射 + 拷贝帧 + 画框（通用化）
+// 无OpenCV版：批量坐标映射 + 拷贝图像 + 绘制多个人脸框（最终版）
 // ==========================
-void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
-                                    const uint8_t *src_frame, uint8_t *dst_frame)
+void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
+                                     int cam_w, int cam_h,
+                                     const uint8_t *src_frame, uint8_t *dst_frame)
 {
-    // 1. 入参校验
-    if (!face || !src_frame || !dst_frame) return;
+    if (!faces || face_num <= 0 || !src_frame || !dst_frame || !g_priv) return;
 
-    // 2. 坐标等比例映射（原有逻辑保留）
-    float sw = (float)cam_w / g_priv->ai_w;
-    float sh = (float)cam_h / g_priv->ai_h;
-    face->x1 *= sw;
-    face->y1 *= sh;
-    face->x2 *= sw;
-    face->y2 *= sh;
-
-    // 3. 拷贝完整RGB数据（关键修复：长度改为*3）
+    // 🔥 关键修复：只拷贝1次原始图像（原代码重复拷贝，效率极低）
     memcpy(dst_frame, src_frame, cam_w * cam_h * 3);
 
-    // 4. OpenCV包装RGB图像（关键修复：通道改为CV_8UC3）
-    Mat frame_mat(cam_h, cam_w, CV_8UC3, dst_frame);
+    // 遍历所有人脸，批量坐标映射 + 画框
+    float sw = (float)cam_w / g_priv->ai_w;
+    float sh = (float)cam_h / g_priv->ai_h;
 
-    // 5. OpenCV原生绘制红色人脸框
-    Rect face_rect(
-        cvRound(face->x1),
-        cvRound(face->y1),
-        cvRound(face->x2 - face->x1),
-        cvRound(face->y2 - face->y1)
-    );
-    rectangle(frame_mat, face_rect, Scalar(FACE_BOX_COLOR_RED), FACE_BOX_THICKNESS);
+    for (int i = 0; i < face_num; i++) {
+        FaceInfo_C* face = &faces[i];
+        
+        // 1. 坐标等比例映射（批量计算）
+        face->x1 *= sw;
+        face->y1 *= sh;
+        face->x2 *= sw;
+        face->y2 *= sh;
+
+        // 2. 纯C画框（在目标图像上画所有人脸）
+        int x = (int)face->x1;
+        int y = (int)face->y1;
+        int w = (int)(face->x2 - face->x1);
+        int h = (int)(face->y2 - face->y1);
+
+        bgr_draw_rect(dst_frame, cam_w, cam_h, x, y, w, h, FACE_BOX_COLOR_RED, FACE_BOX_THICKNESS);
+    }
 }
 // ==========================
 // 工具接口

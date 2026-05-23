@@ -2,17 +2,9 @@
 /**
  ******************************************************************************
  * @file           rtsp_server.cpp
- * @brief          Live555 RTSP JPEG/H.264双格式推流服务模块
- * @details        1. 基于Live555官方标准实现，适配IMX6ULL嵌入式平台
- *                 2. 支持MJPEG/H.264双格式实时流直推，线程安全
- *                 3.  On-Demand按需拉流模式，多客户端共享一路视频流
- *                 4.  对接全局统一视频参数，无冗余配置
- * @author         Luo
- * @date           2026
+ * @brief          Live555 RTSP H.264推流（JPEG兼容，宏控切换）
  ******************************************************************************
  */
-
-// 仅使用官方头文件，无任何额外依赖
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 #include "vision_ai_config.h"
@@ -21,452 +13,240 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-
-// ==========================================================================
-// 【全局统一视频基准宏】外部引入，全模块共用，禁止单独修改
-// ==========================================================================
-#define RTSP_VIDEO_FPS                GLOBAL_VIDEO_FPS           // 全局统一帧率（采集=推流=RTSP,仅采集端限流）
-#define RTSP_VIDEO_WIDTH              GLOBAL_VIDEO_WIDTH         // 统一分辨率宽640
-#define RTSP_VIDEO_HEIGHT             GLOBAL_VIDEO_HEIGHT         // 统一分辨率高360
-#define RTSP_JPEG_QUALITY             GLOBAL_JPEG_QUALITY          // 统一JPEG质量
+#include <time.h>
 
 // ==========================================================================
-// 【本模块私有宏定义】提取所有魔法数字，便于维护
+// 【宏控开关】核心：单独启用H264，关闭JPEG（解决冲突）
 // ==========================================================================
-#define RTSP_SERVER_PORT                8554        // RTSP服务监听端口
-#define RTSP_RETRY_DELAY_US             10000       // 无数据时重试延时(10ms)
-#define RTP_MAX_BUFFER_SIZE             2000000     // RTP最大缓冲大小(适配大帧)
-#define EST_BITRATE_JPEG_KBPS           1000        // JPEG预估码率(Kbps)
-#define EST_BITRATE_H264_KBPS           500         // H.264预估码率(Kbps，工业标准)
-#define JPEG_TYPE_STANDARD              0           // RFC2435标准JPEG类型
-#define H264_PAYLOAD_TYPE               96          // H.264标准RTP负载类型
+#define ENABLE_RTSP_H264      1   // 启用H264推流
+#define ENABLE_RTSP_JPEG      0   // 禁用JPEG推流（避免冲突）
 
-// ========================= 全局JPEG缓存（线程安全） =========================
-/**
- * @brief 全局JPEG帧缓存，用于跨线程传递视频数据
- */
-static uint8_t* g_jpeg_buf = NULL;
-static uint32_t g_jpeg_size = 0;
-static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;  // 线程互斥锁
+// ==========================================================================
+// 全局配置
+// ==========================================================================
+#define RTSP_SERVER_PORT        8554
+#define RTSP_RETRY_DELAY_US     10000
+#define RTP_MAX_BUFFER_SIZE     2000000
+#define EST_BITRATE_H264_KBPS   500
+#define H264_PAYLOAD_TYPE       96
 
-// ========================= 全局H.264缓存（线程安全，独立隔离） =========================
-/**
- * @brief 全局H.264帧缓存，用于跨线程传递视频数据
- */
+// ========================= H264全局缓存（线程安全） =========================
 static uint8_t* g_h264_buf = NULL;
 static uint32_t g_h264_size = 0;
-static pthread_mutex_t g_h264_mutex = PTHREAD_MUTEX_INITIALIZER;  // 独立互斥锁
+static pthread_mutex_t g_h264_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// ========================= JPEG视频数据源类 =========================
-/**
- * @class  LiveJPEGSource
- * @brief  继承Live555官方JPEGVideoSource，实现自定义JPEG数据源
- * @note   必须实现父类纯虚函数，用于提供JPEG格式信息和帧数据
- */
-class LiveJPEGSource : public JPEGVideoSource {
-public:
-    /**
-     * @brief  对象创建入口（Live555官方规范）
-     * @param  env  Live555运行环境
-     * @return 数据源对象指针
-     */
-    static LiveJPEGSource* createNew(UsageEnvironment& env) {
-        return new LiveJPEGSource(env);
-    }
+// ========================= JPEG全局缓存（保留，宏控关闭） =========================
+#if ENABLE_RTSP_JPEG
+static uint8_t* g_jpeg_buf = NULL;
+static uint32_t g_jpeg_size = 0;
+static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
-    /**
-     * @brief  静态延时回调函数，Live555调度器触发获取下一帧
-     * @param  clientData  回调参数（当前对象指针）
-     */
-    static void fetchFrame(void* clientData) {
-        LiveJPEGSource* source = (LiveJPEGSource*)clientData;
-        source->doGetNextFrame();
-    }
-
-protected:
-    /**
-     * @brief  构造函数（保护权限，Live555官方规范）
-     * @param  env  Live555运行环境
-     */
-    LiveJPEGSource(UsageEnvironment& env) : JPEGVideoSource(env) {}
-
-    /**
-     * @brief  析构函数
-     */
-    virtual ~LiveJPEGSource() {}
-
-    // -------------------------- 必须实现JPEGVideoSource纯虚函数 --------------------------
-    /**
-     * @brief  获取JPEG类型（RFC2435标准）
-     * @return JPEG类型编码
-     */
-    virtual u_int8_t type()        { return JPEG_TYPE_STANDARD; }
-
-    /**
-     * @brief  获取JPEG质量因子
-     * @return 质量值
-     */
-    virtual u_int8_t qFactor()     { return RTSP_JPEG_QUALITY; }
-
-    /**
-     * @brief  获取JPEG宽度（Live555要求：实际宽度/8）
-     * @return 标准化宽度值
-     */
-    virtual u_int8_t width()       { return RTSP_VIDEO_WIDTH / 8; }
-
-    /**
-     * @brief  获取JPEG高度（Live555要求：实际高度/8）
-     * @return 标准化高度值
-     */
-    virtual u_int8_t height()      { return RTSP_VIDEO_HEIGHT / 8; }
-
-    // -------------------------- 核心取数据函数（官方标准） --------------------------
-    /**
-     * @brief  Live555核心回调：获取下一帧视频数据
-     * @note   从全局缓存读取JPEG数据，拷贝到Live555内部缓冲区
-     */
-    virtual void doGetNextFrame() {
-        pthread_mutex_lock(&g_jpeg_mutex);
-
-        // 无有效数据，延时重试（适配低帧率场景）
-        if (g_jpeg_buf == NULL || g_jpeg_size == 0) {
-            pthread_mutex_unlock(&g_jpeg_mutex);
-            envir().taskScheduler().scheduleDelayedTask(RTSP_RETRY_DELAY_US, fetchFrame, this);
-            return;
-        }
-
-        // 复制JPEG数据到官方缓冲区，防止超出最大限制
-        fFrameSize = (fMaxSize < g_jpeg_size) ? fMaxSize : g_jpeg_size;
-        memcpy(fTo, g_jpeg_buf, fFrameSize);
-        fNumTruncatedBytes = g_jpeg_size - fFrameSize;
-
-        pthread_mutex_unlock(&g_jpeg_mutex);
-
-        // 官方强制调用：通知数据已就绪
-        afterGetting(this);
-    }
-};
-
-// ========================= H.264视频数据源类 =========================
-/**
- * @class  LiveH264Source
- * @brief  继承Live555官方FramedSource，实现自定义H.264数据源
- * @note   支持OpenH264输出的Annex B格式裸流
- */
+// ========================= H.264视频数据源（修复时间戳） =========================
 class LiveH264Source : public FramedSource {
 public:
-    /**
-     * @brief  对象创建入口（Live555官方规范）
-     * @param  env  Live555运行环境
-     * @return 数据源对象指针
-     */
     static LiveH264Source* createNew(UsageEnvironment& env) {
         return new LiveH264Source(env);
     }
-
-    /**
-     * @brief  静态延时回调函数，Live555调度器触发获取下一帧
-     * @param  clientData  回调参数（当前对象指针）
-     */
     static void fetchFrame(void* clientData) {
         LiveH264Source* source = (LiveH264Source*)clientData;
         source->doGetNextFrame();
     }
-
 protected:
-    /**
-     * @brief  构造函数（保护权限，Live555官方规范）
-     * @param  env  Live555运行环境
-     */
     LiveH264Source(UsageEnvironment& env) : FramedSource(env) {}
-
-    /**
-     * @brief  析构函数
-     */
     virtual ~LiveH264Source() {}
 
-    // -------------------------- 核心取数据函数（官方标准） --------------------------
-    /**
-     * @brief  Live555核心回调：获取下一帧视频数据
-     * @note   从全局缓存读取H.264数据，拷贝到Live555内部缓冲区
-     */
     virtual void doGetNextFrame() {
         pthread_mutex_lock(&g_h264_mutex);
 
-        // 无有效数据，延时重试（适配低帧率场景）
+        // 无数据重试
         if (g_h264_buf == NULL || g_h264_size == 0) {
             pthread_mutex_unlock(&g_h264_mutex);
             envir().taskScheduler().scheduleDelayedTask(RTSP_RETRY_DELAY_US, fetchFrame, this);
             return;
         }
 
-        // 复制H.264数据到官方缓冲区，防止超出最大限制
+        // 复制数据
         fFrameSize = (fMaxSize < g_h264_size) ? fMaxSize : g_h264_size;
         memcpy(fTo, g_h264_buf, fFrameSize);
         fNumTruncatedBytes = g_h264_size - fFrameSize;
-        fPresentationTime.tv_sec = 0;
-        fPresentationTime.tv_usec = 0;
+
+        // 修复：timeval 与 timespec 兼容赋值
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        fPresentationTime.tv_sec = ts.tv_sec;
+        fPresentationTime.tv_usec = ts.tv_nsec / 1000;
 
         pthread_mutex_unlock(&g_h264_mutex);
-
-        // 官方强制调用：通知数据已就绪
         afterGetting(this);
     }
 };
 
-// ========================= JPEG媒体子会话类 =========================
-/**
- * @class  JPEGServerMediaSubsession
- * @brief  Live555官方标准按需子会话，管理JPEG流的RTP发送
- */
-class JPEGServerMediaSubsession : public OnDemandServerMediaSubsession {
-public:
-    /**
-     * @brief  对象创建入口
-     * @param  env              Live555运行环境
-     * @param  reuseFirstSource 是否多客户端复用一路数据源
-     * @return 子会话对象指针
-     */
-    static JPEGServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
-        return new JPEGServerMediaSubsession(env, reuseFirstSource);
-    }
-
-protected:
-    /**
-     * @brief  构造函数
-     * @param  env              Live555运行环境
-     * @param  reuseFirstSource 是否多客户端复用一路数据源
-     */
-    JPEGServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
-        : OnDemandServerMediaSubsession(env, reuseFirstSource) {}
-
-    /**
-     * @brief  创建视频数据源（官方回调）
-     * @param  clientId   客户端ID
-     * @param  estBitrate 输出预估码率
-     * @return 帧数据源指针
-     */
-    virtual FramedSource* createNewStreamSource(unsigned /*clientId*/, unsigned& estBitrate) {
-        estBitrate = EST_BITRATE_JPEG_KBPS;
-        return LiveJPEGSource::createNew(envir());
-    }
-
-    /**
-     * @brief  创建RTP发送器（官方回调）
-     * @param  rtpGroupsock  RTP网络套接字
-     * @param  payloadType   RTP负载类型
-     * @param  source        视频数据源
-     * @return RTP发送器指针
-     */
-    virtual RTPSink* createNewRTPSink(Groupsock* rtpGroupsock, 
-                                      unsigned char /*payloadType*/, 
-                                      FramedSource* /*source*/) {
-        return JPEGVideoRTPSink::createNew(envir(), rtpGroupsock);
-    }
-};
-
-// ========================= H.264媒体子会话类 =========================
-/**
- * @class  H264ServerMediaSubsession
- * @brief  Live555官方标准按需子会话，管理H.264流的RTP发送
- */
+// ========================= H264媒体子会话 =========================
 class H264ServerMediaSubsession : public OnDemandServerMediaSubsession {
 public:
-    /**
-     * @brief  对象创建入口
-     * @param  env              Live555运行环境
-     * @param  reuseFirstSource 是否多客户端复用一路数据源
-     * @return 子会话对象指针
-     */
     static H264ServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
         return new H264ServerMediaSubsession(env, reuseFirstSource);
     }
-
 protected:
-    /**
-     * @brief  构造函数
-     * @param  env              Live555运行环境
-     * @param  reuseFirstSource 是否多客户端复用一路数据源
-     */
     H264ServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
         : OnDemandServerMediaSubsession(env, reuseFirstSource) {}
 
-    /**
-     * @brief  创建视频数据源（官方回调）
-     * @param  clientId   客户端ID
-     * @param  estBitrate 输出预估码率
-     * @return 帧数据源指针
-     */
-    virtual FramedSource* createNewStreamSource(unsigned /*clientId*/, unsigned& estBitrate) {
+    virtual FramedSource* createNewStreamSource(unsigned, unsigned& estBitrate) {
         estBitrate = EST_BITRATE_H264_KBPS;
-        // 关键：必须用H264VideoStreamDiscreteFramer解析NALU
         FramedSource* source = LiveH264Source::createNew(envir());
         return H264VideoStreamDiscreteFramer::createNew(envir(), source);
     }
 
-    /**
-     * @brief  创建RTP发送器（官方回调）
-     * @param  rtpGroupsock  RTP网络套接字
-     * @param  payloadType   RTP负载类型
-     * @param  source        视频数据源
-     * @return RTP发送器指针
-     */
     virtual RTPSink* createNewRTPSink(Groupsock* rtpGroupsock,
-                                      unsigned char payloadType,
-                                      FramedSource* /*source*/) {
+                                      unsigned char payloadType, FramedSource*) {
         return H264VideoRTPSink::createNew(envir(), rtpGroupsock, payloadType);
     }
 };
 
-// ========================= RTSP服务全局变量 =========================
-static TaskScheduler* scheduler = NULL;       // Live555任务调度器
-static UsageEnvironment* env = NULL;          // Live555运行环境
-static RTSPServer* rtspServer = NULL;         // RTSP服务器实例
-static pthread_t rtsp_thread;                 // RTSP服务线程
-static volatile bool rtsp_running = false;    // 服务运行标志
-static EventLoopWatchVariable stop_watch;     // 事件循环停止标志
+// ========================= JPEG子会话（保留） =========================
+#if ENABLE_RTSP_JPEG
+class LiveJPEGSource : public JPEGVideoSource {
+public:
+    static LiveJPEGSource* createNew(UsageEnvironment& env) { return new LiveJPEGSource(env); }
+    static void fetchFrame(void* clientData) { ((LiveJPEGSource*)clientData)->doGetNextFrame(); }
+protected:
+    LiveJPEGSource(UsageEnvironment& env) : JPEGVideoSource(env) {}
+    virtual u_int8_t type() { return 0; }
+    virtual u_int8_t qFactor() { return GLOBAL_JPEG_QUALITY; }
+    virtual u_int8_t width() { return GLOBAL_VIDEO_WIDTH / 8; }
+    virtual u_int8_t height() { return GLOBAL_VIDEO_HEIGHT / 8; }
+    virtual void doGetNextFrame() {
+        pthread_mutex_lock(&g_jpeg_mutex);
+        if (!g_jpeg_buf || g_jpeg_size == 0) {
+            pthread_mutex_unlock(&g_jpeg_mutex);
+            envir().taskScheduler().scheduleDelayedTask(RTSP_RETRY_DELAY_US, fetchFrame, this);
+            return;
+        }
+        fFrameSize = (fMaxSize < g_jpeg_size) ? fMaxSize : g_jpeg_size;
+        memcpy(fTo, g_jpeg_buf, fFrameSize);
+        fNumTruncatedBytes = g_jpeg_size - fFrameSize;
+        pthread_mutex_unlock(&g_jpeg_mutex);
+        afterGetting(this);
+    }
+};
+class JPEGServerMediaSubsession : public OnDemandServerMediaSubsession {
+public:
+    static JPEGServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuse) {
+        return new JPEGServerMediaSubsession(env, reuse);
+    }
+protected:
+    JPEGServerMediaSubsession(UsageEnvironment& env, Boolean reuse) : OnDemandServerMediaSubsession(env, reuse) {}
+    virtual FramedSource* createNewStreamSource(unsigned, unsigned& est) { est=1000; return LiveJPEGSource::createNew(envir()); }
+    virtual RTPSink* createNewRTPSink(Groupsock* g, unsigned char, FramedSource*) {
+        return JPEGVideoRTPSink::createNew(envir(), g);
+    }
+};
+#endif
 
-// ========================= RTSP服务工作线程 =========================
-/**
- * @brief  RTSP服务主线程
- * @param  arg  线程参数
- * @return 线程退出码
- */
+// ========================= RTSP全局变量 =========================
+static TaskScheduler* scheduler = NULL;
+static UsageEnvironment* env = NULL;
+static RTSPServer* rtspServer = NULL;
+static pthread_t rtsp_thread;
+static volatile bool rtsp_running = false;
+static EventLoopWatchVariable stop_watch;
+
+// ========================= RTSP线程 =========================
 static void* rtsp_server_thread(void* arg) {
     (void)arg;
     rtsp_running = true;
     stop_watch = 0;
 
-    // 1. 初始化Live555标准运行环境
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
 
-    // 2. 创建RTSP服务器实例
     rtspServer = RTSPServer::createNew(*env, RTSP_SERVER_PORT, NULL);
-    if (rtspServer == NULL) {
-        *env << "RTSP server create failed: " << env->getResultMsg() << "\n";
-        rtsp_running = false;
-        return NULL;
-    }
+    if (!rtspServer) { *env << "RTSP创建失败\n"; rtsp_running=false; return NULL; }
 
-    // 3. 创建媒体会话并绑定流信息
-    ServerMediaSession* sms = ServerMediaSession::createNew(*env,
-        "stream", "stream", "IMX6ULL JPEG/H.264 RTSP Stream");
-    
-    // 4. 添加JPEG子会话，开启多客户端共享
-    sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
-    // 新增：添加H.264子会话，开启多客户端共享
+    // ============== 核心：只创建H264会话，杜绝冲突 ==============
+    ServerMediaSession* sms = ServerMediaSession::createNew(*env, "stream", "stream", "IMX6ULL H264 RTSP");
+#if ENABLE_RTSP_H264
     sms->addSubsession(H264ServerMediaSubsession::createNew(*env, True));
+#endif
+#if ENABLE_RTSP_JPEG
+    sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
+#endif
     rtspServer->addServerMediaSession(sms);
 
-    // 打印RTSP播放地址
     char* url = rtspServer->rtspURL(sms);
     *env << "=====================================\n";
-    *env << "RTSP 服务启动成功\n";
-    *env << "播放地址: " << url << "\n";
-    *env << "支持格式: MJPEG / H.264\n";
+    *env << "RTSP 服务启动\n地址: " << url << "\n格式: H264\n";
     *env << "=====================================\n";
     delete[] url;
 
-    // 5. 设置RTP大帧缓冲，适配大分辨率帧
     OutPacketBuffer::maxSize = RTP_MAX_BUFFER_SIZE;
-
-    // 6. 启动Live555事件循环（阻塞运行，直到stop_watch=1）
     env->taskScheduler().doEventLoop(&stop_watch);
 
     rtsp_running = false;
     return NULL;
 }
 
-// ========================= 对外C语言接口（兼容业务模块调用） =========================
-/**
- * @brief  启动RTSP推流服务
- * @return 0:成功/已运行  负数:失败
- */
+// ========================= 对外C接口 =========================
 extern "C" int rtsp_server_start(void) {
     if (rtsp_running) return 0;
     return pthread_create(&rtsp_thread, NULL, rtsp_server_thread, NULL);
 }
 
-/**
- * @brief  推送JPEG帧到RTSP服务
- * @param  jpeg_buf  JPEG数据指针
- * @param  jpeg_size JPEG数据长度
- */
+#if ENABLE_RTSP_JPEG
 extern "C" void rtsp_server_push_jpeg(const uint8_t* jpeg_buf, uint32_t jpeg_size) {
     if (!jpeg_buf || jpeg_size == 0) return;
-
     pthread_mutex_lock(&g_jpeg_mutex);
-    // 释放旧帧缓存，避免内存泄漏
     if (g_jpeg_buf) free(g_jpeg_buf);
-    // 分配新缓存并拷贝JPEG数据
     g_jpeg_buf = (uint8_t*)malloc(jpeg_size);
-    if (g_jpeg_buf) {
-        memcpy(g_jpeg_buf, jpeg_buf, jpeg_size);
-        g_jpeg_size = jpeg_size;
-    }
-    // 调试打印：JPEG帧头/尾校验+大小
-    printf("JPEG start: 0x%02X%02X, end: 0x%02X%02X, size: %u\n",
-       jpeg_buf[0], jpeg_buf[1], jpeg_buf[jpeg_size-2], jpeg_buf[jpeg_size-1], jpeg_size);
+    if (g_jpeg_buf) { memcpy(g_jpeg_buf, jpeg_buf, jpeg_size); g_jpeg_size = jpeg_size; }
     pthread_mutex_unlock(&g_jpeg_mutex);
 }
+#endif
 
-/**
- * @brief  推送H.264裸流到RTSP服务
- * @param  h264_buf  H.264数据指针（Annex B格式，带00 00 00 01起始码）
- * @param  h264_size H.264数据长度
- */
 extern "C" void rtsp_server_push_h264(const uint8_t* h264_buf, uint32_t h264_size) {
     if (!h264_buf || h264_size == 0) return;
 
     pthread_mutex_lock(&g_h264_mutex);
-    // 释放旧帧缓存，避免内存泄漏
+    // 静态缓存优化，避免频繁malloc
     if (g_h264_buf) free(g_h264_buf);
-    // 分配新缓存并拷贝H.264数据
     g_h264_buf = (uint8_t*)malloc(h264_size);
     if (g_h264_buf) {
         memcpy(g_h264_buf, h264_buf, h264_size);
         g_h264_size = h264_size;
+
+        // ============== 调试：打印H264起始码+NALU类型 ==============
+        printf("[RTSP-H264] 帧大小：%u | 起始码：0x%02X%02X%02X%02X | NALU类型：%u\n",
+               h264_size,
+               h264_buf[0], h264_buf[1], h264_buf[2], h264_buf[3],
+               h264_buf[4] & 0x1F);
     }
-    // 调试打印：H.264帧大小
-    printf("H264 frame: size=%u\n", h264_size);
     pthread_mutex_unlock(&g_h264_mutex);
 }
 
-/**
- * @brief  安全停止RTSP推流服务并释放所有资源
- * @return 0:成功
- */
 extern "C" int rtsp_server_stop(void) {
     if (!rtsp_running) return 0;
-
-    // 停止事件循环，退出线程
     stop_watch = 1;
     pthread_join(rtsp_thread, NULL);
 
-    // 释放JPEG全局缓存
+#if ENABLE_RTSP_JPEG
     pthread_mutex_lock(&g_jpeg_mutex);
-    if (g_jpeg_buf) free(g_jpeg_buf);
-    g_jpeg_buf = NULL;
-    g_jpeg_size = 0;
+    if (g_jpeg_buf) free(g_jpeg_buf); g_jpeg_buf=NULL; g_jpeg_size=0;
     pthread_mutex_unlock(&g_jpeg_mutex);
+#endif
 
-    // 释放H.264全局缓存
     pthread_mutex_lock(&g_h264_mutex);
-    if (g_h264_buf) free(g_h264_buf);
-    g_h264_buf = NULL;
-    g_h264_size = 0;
+    if (g_h264_buf)
+    {
+        free(g_h264_buf);
+        g_h264_buf=NULL; 
+        g_h264_size=0;
+    }
     pthread_mutex_unlock(&g_h264_mutex);
 
-    // 释放Live555官方资源
     if (rtspServer) Medium::close(rtspServer);
     if (env) env->reclaim();
     if (scheduler) delete scheduler;
-
-    // 重置全局指针
-    rtspServer = NULL;
-    env = NULL;
-    scheduler = NULL;
+    rtspServer=NULL; env=NULL; scheduler=NULL;
     return 0;
 }

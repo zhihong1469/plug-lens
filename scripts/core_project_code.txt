@@ -3109,7 +3109,7 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
     return MNN_FACE_OK;
 }
 
-int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
+int UltraFaceMNN::yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img) {
     if (!yuyv_data || width <=0 || height <=0) return MNN_FACE_ERR_INPUT;
     cv::Mat yuyv(height, width, CV_8UC2, (void*)yuyv_data);
     cv::cvtColor(yuyv, out_img, cv::COLOR_YUV2BGR_YUYV);
@@ -3122,7 +3122,7 @@ int UltraFaceMNN::detect(const uint8_t* yuyv_data, int cam_w, int cam_h, std::ve
     face_list.clear();
 
     cv::Mat bgr_img;
-    int ret = yuyv_to_bgr(yuyv_data, cam_w, cam_h, bgr_img);
+    int ret = yuyv_to_rgb(yuyv_data, cam_w, cam_h, bgr_img);
     if (ret != MNN_FACE_OK) return ret;
 
     cv::Mat ai_img;
@@ -7586,7 +7586,7 @@ public:
     bool is_ready() const { return m_ready; }
 
 private:
-    int yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img);
+    int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, cv::Mat& out_img);
     void generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes);
     void nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output);
 

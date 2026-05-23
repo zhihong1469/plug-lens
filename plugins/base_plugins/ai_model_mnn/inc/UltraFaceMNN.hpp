@@ -7,7 +7,6 @@
 #include "Interpreter.hpp"
 #include "Tensor.hpp"
 #include "ImageProcess.hpp"
-#include <opencv2/opencv.hpp>
 
 /**
  * @defgroup ultra_face_mnn MNN UltraFace 内部实现
@@ -86,7 +85,6 @@ public:
                ImageFormat format = IMAGE_FORMAT_YUYV);  // 通用扩展，默认兼容旧版
 
     static void map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h);
-    static void draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list);
 
     void deinit();
     bool is_ready() const { return m_ready; }

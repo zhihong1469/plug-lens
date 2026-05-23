@@ -8,14 +8,21 @@ cp output/vision_ai_app ~/nfs/run_on_board/
 cp third_lib/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
 cp -rf  third_lib/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board
 cp -rf  third_lib/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
-cp third_lib/opencv_lib/lib/*.so.*  /home/luo/nfs/run_on_board/opencv
+cp third_lib/opencv_lib/lib/*.so.*  ~/nfs/run_on_board/opencv
+cp -rf third_lib/openh264/lib/* ~/nfs/run_on_board/openh264
+cp -rf third_lib/libyuv/lib/*  ~/nfs/run_on_board/libyuv
 [root@100ask:/mnt/run_on_board]#
 mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
 date -s "2026-05-22 12:00:00"
 cd /mnt/run_on_board/
 export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/mnt/run_on_board/opencv:$Ld_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/opencv:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/mnt/run_on_board/libjpeg:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/run_on_board/libyuv:$LD_LIBRARY_PATH
+# 一次性添加所有库路径，大小写正确，永久生效当前终端
+export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:/mnt/run_on_board/libyuv:/mnt/run_on_board/opencv:$LD_LIBRARY_PATH
+
 mkdir -p /mnt/sdcard/face_capture
 mount /dev/mmcblk0p1 /mnt/sdcard # 具体看plugins/base_plugins/sd_storage/inc/sd_storage.h:SD_STORAGE_ROOT_PATH 结束拔卡前记得umount /mnt/sdcard
 ./vision_ai_app
