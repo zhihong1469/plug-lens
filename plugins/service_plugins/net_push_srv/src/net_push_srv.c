@@ -48,7 +48,7 @@
 
 /* 数据总线配置（优先级：人脸带框RGB帧 > 原始摄像头MJPEG帧） */
 #define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   // 高优先级：带人脸框的RGB帧
-#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧
+#define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME      // 低优先级：摄像头原生MJPEG帧或yuyv帧
 #define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
 
 /* 推流参数配置 */
@@ -163,7 +163,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
 /* =============================================================================
  * @brief   推流工作线程（优先级拉模式 + 事件唤醒 + MJPEG直推）
- * @details 1. 高优先级：拉取 FACE_RESULT_RGB_DATA_BUS 带人脸框的帧
+ * @details 1. 高优先级：拉取 FACE_RESULT_RGB_DATA_BUS 带人脸框的帧(暂不实现)
  *          2. 降级兜底：拉取 VIDEO_DATA_BUS 摄像头原生MJPEG帧
  *          3. MJPEG零拷贝直推，无编码损耗，CPU占用极低
  *          4. 适配JPEG动态数据大小，通过data_bus_get_item_size获取

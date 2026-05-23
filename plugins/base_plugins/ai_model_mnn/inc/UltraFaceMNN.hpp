@@ -92,22 +92,7 @@ public:
     bool is_ready() const { return m_ready; }
 
 private:
-    /**
-     * @brief YUYV转BGR（使用OpenCV，兼容原有逻辑）
-     */
-    int yuyv_to_bgr(const uint8_t* yuyv_data, 
-                    int width, 
-                    int height,
-                    uint8_t* bgr_buf);
 
-    /**
-     * @brief MJPEG硬解码转BGR（使用TurboJPEG，高性能低CPU）
-     */
-    int mjpeg_to_bgr(const uint8_t* mjpeg_data, 
-                     int data_len,
-                     int width, 
-                     int height,
-                     uint8_t* bgr_buf);
 
     void generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes);
     void nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output);
