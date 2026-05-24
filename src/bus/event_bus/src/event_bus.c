@@ -390,8 +390,8 @@ int event_bus_dispatch(const char *name) {
         }
         pthread_rwlock_unlock(&ctx->sub_rwlock);
 // 执行回调前添加日志
-LOG_D("Bus[%s] 分发事件: %s | 发布者: %s | 匹配订阅者: %d",
-      name, event_type_to_str(event->type), event->source, cb_count);
+// LOG_D("Bus[%s] 分发事件: %s | 发布者: %s | 匹配订阅者: %d",
+    //   name, event_type_to_str(event->type), event->source, cb_count);
 
         // 执行回调
         for (int i = 0; i < cb_count; i++) {

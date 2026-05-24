@@ -239,7 +239,7 @@ static void *capture_work_thread(void *arg)
             item = NULL;
             goto fps_stats;
         }
-        LOG_D(MODULE_TAG " ✅ 帧推入DataBus成功 | ret=%d", ret);
+        // LOG_D(MODULE_TAG " ✅ 帧推入DataBus成功 | ret=%d", ret);
 
         // 发布事件通知（轻量唤醒，不传递数据）
         event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_PROTO_READY, MODULE_NAME);

@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
+#include "mem_adapter.h"
 // 与项目全局错误码完全对齐
 #define IMG_JOINT_OK             0
 #define IMG_JOINT_ERR_INPUT     -1
@@ -121,7 +121,10 @@ int yuyv_to_h264(h264_encoder_t encoder,
                  int yuyv_len,
                  uint8_t* out_h264,
                  int* out_h264_len);
-
+// =============================================================================
+// 【官方标准】获取H264 SPS/PPS（EncodeParameterSets 官方接口）
+// =============================================================================
+int h264_encoder_get_sps_pps(h264_encoder_t encoder, uint8_t* sps_pps_buf, int* buf_len) ;
 /**
  * @brief 销毁H264编码器
  * @param encoder 编码器句柄

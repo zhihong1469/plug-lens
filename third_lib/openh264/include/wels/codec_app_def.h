@@ -589,12 +589,7 @@ typedef struct TagEncParamExt {
   bool    bEnableFrameCroppingFlag;    ///< enable frame cropping flag: TRUE always in application
   bool    bEnableSceneChangeDetect;
 
-  bool    bIsLosslessLink;             ///< LTR advanced setting
-  bool    bFixRCOverShoot;             ///< fix rate control overshooting
-  int     iIdrBitrateRatio;            ///< the target bits of IDR is (idr_bitrate_ratio/100) * average target bit per frame.
-  bool    bPsnrY;                      ///< get Y PSNR stats for the whole video sequence
-  bool    bPsnrU;                      ///< get U PSNR stats for the whole video sequence
-  bool    bPsnrV;                      ///< get V PSNR stats for the whole video sequence
+  bool    bIsLosslessLink;            ///<  LTR advanced setting
 } SEncParamExt;
 
 /**
@@ -638,7 +633,6 @@ typedef struct {
   int   iNalCount;              ///< count number of NAL coded already
   int*  pNalLengthInByte;       ///< length of NAL size in byte from 0 to iNalCount-1
   unsigned char*  pBsBuf;       ///< buffer of bitstream contained
-  float rPsnr[3];               ///< PSNR values for Y/U/V
 } SLayerBSInfo, *PLayerBSInfo;
 
 /**
@@ -663,11 +657,7 @@ typedef struct Source_Picture_s {
   int       iPicWidth;             ///< luma picture width in x coordinate
   int       iPicHeight;            ///< luma picture height in y coordinate
   long long uiTimeStamp;           ///< timestamp of the source picture, unit: millisecond
-  bool      bPsnrY;                ///< get Y PSNR for this frame
-  bool      bPsnrU;                ///< get U PSNR for this frame
-  bool      bPsnrV;                ///< get V PSNR for this frame
 } SSourcePicture;
-
 /**
 * @brief Structure for bit rate info
 */
