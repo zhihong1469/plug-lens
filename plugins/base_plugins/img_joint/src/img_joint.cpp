@@ -12,9 +12,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-// OpenH264编码头文件（严格对齐平台版本）
+// OpenH264编码头文件（严格对齐平台版本 + 官方接口）
 #include "codec_api.h"
-#include "codec_def.h"
+
 
 // =============================================================================
 // YUYV(YUV422) 转 RGB888（libyuv 标准转换流程）
@@ -25,7 +25,7 @@ int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_bu
     }
 
     const int argb_size = width * height * 4;
-    uint8_t* temp_argb = (uint8_t*)malloc(argb_size);
+    uint8_t* temp_argb = (uint8_t*)mem_alloc(argb_size);
     if (!temp_argb) return IMG_JOINT_ERR_INPUT;
 
     // YUYV -> ARGB 中间转换
@@ -125,8 +125,8 @@ int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
 
     int src_argb_size = src_w * src_h * 4;
     int dst_argb_size = dst_w * dst_h * 4;
-    uint8_t* src_argb = (uint8_t*)malloc(src_argb_size);
-    uint8_t* dst_argb = (uint8_t*)malloc(dst_argb_size);
+    uint8_t* src_argb = (uint8_t*)mem_alloc(src_argb_size);
+    uint8_t* dst_argb = (uint8_t*)mem_alloc(dst_argb_size);
 
     if (!src_argb || !dst_argb) {
         if (src_argb) free(src_argb);
@@ -193,18 +193,18 @@ void bgr_draw_rect(uint8_t* rgb_data, int w, int h,
 }
 
 // =============================================================================
-// H264编码器内部结构体（严格对齐OpenH264 API）
+// H264编码器内部结构体（标准OpenH264对齐）
 // =============================================================================
 typedef struct {
-    ISVCEncoder*          p_encoder;      // OpenH264编码器实例
-    SEncParamExt         param;          // 编码器参数
-    uint8_t*             i420_buf;       // I420格式临时缓冲区
-    int                  width;          // 图像宽度
-    int                  height;         // 图像高度
+    ISVCEncoder*          p_encoder;
+    SEncParamExt          param;
+    uint8_t*              i420_buf;
+    int                   width;
+    int                   height;
 } h264_encoder_impl_t;
 
 // =============================================================================
-// H264编码器创建（IMX6ULL 软编码最优参数）
+// 标准编码器初始化（全网通用模板）
 // =============================================================================
 h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     if (!param || param->width <= 0 || param->height <= 0 || 
@@ -212,20 +212,17 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 分配编码器内存
-    h264_encoder_impl_t* impl = (h264_encoder_impl_t*)malloc(sizeof(h264_encoder_impl_t));
+    h264_encoder_impl_t* impl = (h264_encoder_impl_t*)mem_alloc(sizeof(h264_encoder_impl_t));
     if (!impl) return NULL;
     memset(impl, 0, sizeof(h264_encoder_impl_t));
 
-    // 分配I420临时缓冲区
     int i420_size = param->width * param->height * 3 / 2;
-    impl->i420_buf = (uint8_t*)malloc(i420_size);
+    impl->i420_buf = (uint8_t*)mem_alloc(i420_size);
     if (!impl->i420_buf) {
         free(impl);
         return NULL;
     }
 
-    // 创建OpenH264编码器实例
     int ret = WelsCreateSVCEncoder(&impl->p_encoder);
     if (ret != 0 || !impl->p_encoder) {
         free(impl->i420_buf);
@@ -233,26 +230,24 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 获取默认参数并初始化
-    memset(&impl->param, 0, sizeof(SEncParamExt));
     impl->p_encoder->GetDefaultParams(&impl->param);
 
-    // 实时视频场景配置
-    impl->param.iUsageType = CAMERA_VIDEO_REAL_TIME;
-    impl->param.fMaxFrameRate = param->fps;
-    impl->param.iPicWidth = param->width;
-    impl->param.iPicHeight = param->height;
-    impl->param.iTargetBitrate = param->bitrate * 1000;  // kbps转bps
+    // ✅ 适配你的旧版OpenH264，无iIdrPeriod
+    impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;
+    impl->param.fMaxFrameRate   = param->fps;
+    impl->param.iPicWidth       = param->width;
+    impl->param.iPicHeight      = param->height;
+    impl->param.iTargetBitrate  = param->bitrate * 1000;
+    impl->param.uiIntraPeriod   = param->gop;    // 旧版：这就是IDR帧周期
     impl->param.iTemporalLayerNum = 1;
-    impl->param.iSpatialLayerNum = 1;
+    impl->param.iSpatialLayerNum  = 1;
+    impl->param.iMultipleThreadIdc = 1;
+    impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
+    impl->param.iEntropyCodingModeFlag = 0;
     impl->param.bEnableDenoise = false;
     impl->param.bEnableBackgroundDetection = false;
     impl->param.bEnableFrameSkip = false;
-    impl->param.uiIntraPeriod = param->gop;
-    impl->param.iMultipleThreadIdc = 1;  // IMX6ULL单核编码
-    impl->param.iNumRefFrame = 1;
 
-    // 初始化编码器
     ret = impl->p_encoder->InitializeExt(&impl->param);
     if (ret != 0) {
         WelsDestroySVCEncoder(impl->p_encoder);
@@ -261,84 +256,94 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
         return NULL;
     }
 
-    // 设置输入数据格式为I420
-    int video_format = videoFormatI420;
-    impl->p_encoder->SetOption(ENCODER_OPTION_DATAFORMAT, &video_format);
+    int fmt = videoFormatI420;
+    impl->p_encoder->SetOption(ENCODER_OPTION_DATAFORMAT, &fmt);
 
     impl->width = param->width;
     impl->height = param->height;
     return (h264_encoder_t)impl;
 }
 
+
 // =============================================================================
-// YUYV数据编码为H264码流
+// 标准获取SPS/PPS（官方接口，全网通用）
+// =============================================================================
+int h264_encoder_get_sps_pps(h264_encoder_t encoder, uint8_t* sps_pps_buf, int* buf_len) {
+    if (!encoder || !sps_pps_buf || !buf_len || *buf_len < 128)
+        return IMG_JOINT_ERR_INPUT;
+
+    h264_encoder_impl_t* impl = (h264_encoder_impl_t*)encoder;
+    SFrameBSInfo info = {0};
+    
+    if (impl->p_encoder->EncodeParameterSets(&info) != 0 || info.iLayerNum == 0)
+        return IMG_JOINT_ERR_H264;
+
+    SLayerBSInfo* layer = &info.sLayerInfo[0];
+    int total = 0;
+    const uint8_t* src = layer->pBsBuf;
+    for (int i=0; i<layer->iNalCount; i++) {
+        int len = layer->pNalLengthInByte[i];
+        memcpy(sps_pps_buf+total, src, len);
+        src += len;
+        total += len;
+    }
+    *buf_len = total;
+    return IMG_JOINT_OK;
+}
+
+// =============================================================================
+// 适配OpenH264 v2.1.1的YUV转H264函数（IMX6ULL专用）
 // =============================================================================
 int yuyv_to_h264(h264_encoder_t encoder,
                  const uint8_t* yuyv_data,
                  int yuyv_len,
                  uint8_t* out_h264,
                  int* out_h264_len) {
-    if (!encoder || !yuyv_data || !out_h264 || !out_h264_len || *out_h264_len <= 0) {
+    if (!encoder || !yuyv_data || !out_h264 || !out_h264_len)
         return IMG_JOINT_ERR_INPUT;
-    }
 
     h264_encoder_impl_t* impl = (h264_encoder_impl_t*)encoder;
-    int width = impl->width;
-    int height = impl->height;
+    int w = impl->width, h = impl->height;
 
-    // YUYV -> I420 格式转换（编码必需）
-    int ret = yuyv_to_i420(yuyv_data, width, height, impl->i420_buf);
-    if (ret != IMG_JOINT_OK) {
+    if (yuyv_to_i420(yuyv_data, w, h, impl->i420_buf) != IMG_JOINT_OK)
         return IMG_JOINT_ERR_H264;
-    }
 
-    // 填充编码输入数据结构
-    SFrameBSInfo     bs_info;
-    SSourcePicture   pic;
-    memset(&pic, 0, sizeof(SSourcePicture));
-    memset(&bs_info, 0, sizeof(SFrameBSInfo));
+    SSourcePicture pic = {0};
+    SFrameBSInfo  bs_info = {0};
 
-    pic.iPicWidth = width;
-    pic.iPicHeight = height;
+    pic.iPicWidth    = w;
+    pic.iPicHeight   = h;
     pic.iColorFormat = videoFormatI420;
-    pic.pData[0] = impl->i420_buf;
-    pic.pData[1] = impl->i420_buf + width * height;
-    pic.pData[2] = impl->i420_buf + width * height * 5 / 4;
-    pic.iStride[0] = width;
-    pic.iStride[1] = width / 2;
-    pic.iStride[2] = width / 2;
+    pic.pData[0]     = impl->i420_buf;
+    pic.pData[1]     = impl->i420_buf + w*h;
+    pic.pData[2]     = impl->i420_buf + w*h*5/4;
+    pic.iStride[0]   = w;
+    pic.iStride[1]   = w/2;
+    pic.iStride[2]   = w/2;
 
-    // 执行一帧编码
-    ret = impl->p_encoder->EncodeFrame(&pic, &bs_info);
-    if (ret != 0 || bs_info.eFrameType == videoFrameTypeSkip) {
-        return IMG_JOINT_ERR_H264;
+    // ===================== 修复 1：强制首帧 IDR =====================
+    static bool first_frame = true;
+    if (first_frame) {
+        // 强制输出 IDR 关键帧（自动携带 SPS+PPS）
+        impl->p_encoder->ForceIntraFrame(true);
+        first_frame = false;
     }
 
-    // 解析编码数据（单层编码，直接取第一层数据）
-    if (bs_info.iLayerNum <= 0) {
+    int ret = impl->p_encoder->EncodeFrame(&pic, &bs_info);
+    if (ret != 0 || bs_info.eFrameType == videoFrameTypeSkip)
         return IMG_JOINT_ERR_H264;
-    }
 
-    SLayerBSInfo* layer = &bs_info.sLayerInfo[0];
-    if (layer->iNalCount <= 0 || !layer->pBsBuf) {
-        return IMG_JOINT_ERR_H264;
-    }
-
-    // 复制NALU数据到输出缓冲区
+    // ===================== 修复 2：完整拷贝所有 NAL（包含PPS/IDR） =====================
     int total_len = 0;
-    int max_len = *out_h264_len;
-    uint8_t* dst_ptr = out_h264;
-    const uint8_t* src_ptr = layer->pBsBuf;
-
-    for (int i = 0; i < layer->iNalCount; i++) {
-        int nal_len = layer->pNalLengthInByte[i];
-        if (total_len + nal_len > max_len) {
-            return IMG_JOINT_ERR_H264;
+    for (int i = 0; i < bs_info.iLayerNum; i++) {
+        SLayerBSInfo* layer = &bs_info.sLayerInfo[i];
+        int offset = 0;
+        for (int j = 0; j < layer->iNalCount; j++) {
+            int nal_len = layer->pNalLengthInByte[j];
+            memcpy(out_h264 + total_len, (uint8_t*)layer->pBsBuf + offset, nal_len);
+            total_len += nal_len;
+            offset += nal_len;
         }
-        memcpy(dst_ptr, src_ptr, nal_len);
-        dst_ptr += nal_len;
-        src_ptr += nal_len;
-        total_len += nal_len;
     }
 
     *out_h264_len = total_len;
@@ -346,21 +351,15 @@ int yuyv_to_h264(h264_encoder_t encoder,
 }
 
 // =============================================================================
-// 销毁H264编码器，释放所有资源
+// 标准销毁编码器
 // =============================================================================
 void h264_encoder_destroy(h264_encoder_t encoder) {
     if (!encoder) return;
     h264_encoder_impl_t* impl = (h264_encoder_impl_t*)encoder;
-
-    // 释放编码器内核资源
     if (impl->p_encoder) {
         impl->p_encoder->Uninitialize();
         WelsDestroySVCEncoder(impl->p_encoder);
     }
-
-    // 释放内存缓冲区
-    if (impl->i420_buf) {
-        free(impl->i420_buf);
-    }
+    free(impl->i420_buf);
     free(impl);
 }

@@ -547,6 +547,6 @@ static int face_srv_auto_init(void)
     return 0;
 }
 
-MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
+// MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
 
 /******************************* End of file **********************************/
