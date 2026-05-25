@@ -2,7 +2,7 @@
 
 
 
-/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal
+~/linux/6ull/project/plug-lens
 ├── Makefile
 ├── Makefile.build
 ├── bsp

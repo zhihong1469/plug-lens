@@ -203,7 +203,7 @@ static int _data_bus_release_item_safe(data_item_t *item) {
 
     // 原子减1，获取减之前的值
     unsigned int old_ref = atomic_fetch_sub(&item->info.ref_count, 1);
-    LOG_D("[BUS REF] item=%p, ref=%d -> %d", item, old_ref, old_ref - 1);
+    // LOG_D("[BUS REF] item=%p, ref=%d -> %d", item, old_ref, old_ref - 1);
 
     // 如果减之前是1，说明减完就是0，需要重置
     if (old_ref == 1) {
@@ -591,8 +591,8 @@ int data_bus_push(const char *name, data_bus_item_handle_t item) {
 
     pthread_mutex_unlock(&ctx->publish_lock);
 
-    LOG_D("[BUS PUSH] 数据发布成功: type=%s, size=%u, producer=%s",
-          data_type_to_str(ditem->info.type), ditem->info.data_size, ditem->info.producer);
+    // LOG_D("[BUS PUSH] 数据发布成功: type=%s, size=%u, producer=%s",
+    //       data_type_to_str(ditem->info.type), ditem->info.data_size, ditem->info.producer);
 
     return DATA_BUS_OK;
 }

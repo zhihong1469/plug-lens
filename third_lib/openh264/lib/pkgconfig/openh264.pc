@@ -1,0 +1,10 @@
+prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/openh264-2.1.1/install
+libdir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/openh264-2.1.1/install/lib
+includedir=${prefix}/include
+
+Name: OpenH264
+Description: OpenH264 is a codec library which supports H.264 encoding and decoding. It is suitable for use in real time applications such as WebRTC.
+Version: 2.1.1
+Libs: -L${libdir} -lopenh264 
+Libs.private: -lstdc++ -lpthread -lm
+Cflags: -I${includedir}

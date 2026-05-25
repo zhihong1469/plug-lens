@@ -61,13 +61,15 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \
 	-I$(TOPDIR)/third_lib/face_detector/mnn/include \
-	-I$(TOPDIR)/third_lib/opencv_lib/include/opencv4 \
 	-I$(TOPDIR)/third_lib/tlsf-master \
 	-I$(TOPDIR)/third_lib/live555/include/liveMedia \
 	-I$(TOPDIR)/third_lib/live555/include/groupsock \
 	-I$(TOPDIR)/third_lib/live555/include/BasicUsageEnvironment \
 	-I$(TOPDIR)/third_lib/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/libjpeg_turbo/include
+	-I$(TOPDIR)/third_lib/libjpeg_turbo/include \
+	-I$(TOPDIR)/third_lib/openh264/include/wels \
+	-I$(TOPDIR)/third_lib/libyuv/include \
+	-I$(TOPDIR)/third_lib/libyuv/include/libyuv
 	
 # 导出全局路径（所有子模块自动可用）
 export GLOBAL_INC
