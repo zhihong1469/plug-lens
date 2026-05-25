@@ -1,11 +1,11 @@
-# Contributing to plug-eye
+# Contributing to plug-lens
 First off, thanks for taking the time to contribute! ❤️
 
 All types of contributions are encouraged and valued. See the table of contents for different ways to help and details about how this project handles them. Please make sure to read the relevant section before making your contribution. It will make it a lot easier for us maintainers and smooth out the experience for all involved.
 
 ## I Want To Contribute
 ### Reporting Bugs
-- Use the [Issues](https://github.com/zhihong1469/plug-eye/issues) tab to report bugs
+- Use the [Issues](https://github.com/zhihong1469/plug-lens/issues) tab to report bugs
 - Include steps to reproduce the issue, what you expected, and what happened
 - Add relevant logs or screenshots if possible
 
