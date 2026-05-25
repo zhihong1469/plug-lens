@@ -2,7 +2,7 @@
 
 
 
-~/linux/6ull/project/plug-eye
+~/linux/6ull/project/plug-lens
 ├── Makefile
 ├── Makefile.build
 ├── bsp
