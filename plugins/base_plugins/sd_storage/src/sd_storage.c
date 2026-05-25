@@ -121,11 +121,11 @@ SdStorage_t *SdStorage_Init(void) {
         return NULL;
     }
 
-    SdStorage_t *self = (SdStorage_t *)calloc(1, sizeof(SdStorage_t));
+    SdStorage_t *self = (SdStorage_t *)mem_calloc(1, sizeof(SdStorage_t));
     if (!self) return NULL;
 
     if (pthread_mutex_init(&self->mutex, NULL) != 0) {
-        free(self);
+        mem_free(self);
         return NULL;
     }
 
@@ -134,19 +134,19 @@ SdStorage_t *SdStorage_Init(void) {
     if (!self->tj_handle) {
         LOG_E("[SD_STORAGE] TurboJPEG编码器初始化失败");
         pthread_mutex_destroy(&self->mutex);
-        free(self);
+        mem_free(self);
         return NULL;
     }
 
     if (sd_storage_mkdir(SD_STORAGE_DIR) != 0) {
         tjDestroy(self->tj_handle);
         pthread_mutex_destroy(&self->mutex);
-        free(self);
+        mem_free(self);
         return NULL;
     }
 
     strncpy(self->work_dir, SD_STORAGE_DIR, sizeof(self->work_dir)-1);
-    self->jpeg_quality = 80;
+    self->jpeg_quality = 20;
     self->is_initialized = true;
 
     LOG_I("[SD_STORAGE] 初始化成功，存储目录: %s", SD_STORAGE_DIR);
@@ -165,7 +165,7 @@ void SdStorage_Deinit(SdStorage_t *self) {
     pthread_mutex_unlock(&self->mutex);
 
     pthread_mutex_destroy(&self->mutex);
-    free(self);
+    mem_free(self);
 
     LOG_I("[SD_STORAGE] 反初始化完成");
 }
@@ -268,7 +268,7 @@ int SdStorage_SaveJpeg(SdStorage_t *self, const uint8_t *rgb_buf) {
                           TJPF_BGR,
                           &jpeg_buf,
                           &jpeg_size,
-                          TJSAMP_422,
+                          TJSAMP_420,
                           self->jpeg_quality,
                           TJFLAG_FASTDCT);
 

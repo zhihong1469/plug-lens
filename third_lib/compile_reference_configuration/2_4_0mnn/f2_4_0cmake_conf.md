@@ -62,9 +62,10 @@ option(MNN_USE_CPP11 "Enable MNN use c++11" ON)
 ```
 
 
-cd /home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/MNN-2.4.0/build_arm
+cd /home/luo/linux/6ull/project/plug-lens/.tool/MNN-2.4.0/build_arm
+
 rm -rf *
-cmake .. \
+cmake ..\
 -DCMAKE_SYSTEM_NAME=Linux \
 -DCMAKE_SYSTEM_PROCESSOR=armv7-a \
 -DCMAKE_C_COMPILER=/usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/bin/arm-buildroot-linux-gnueabihf-gcc \
