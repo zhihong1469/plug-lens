@@ -2,7 +2,7 @@
 #include <string.h>
 #include <algorithm>
 #include <math.h>
-#include <turbojpeg.h>  // TurboJPEG头文件
+#include "img_joint.h"
 
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
 
@@ -66,99 +66,54 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
 }
 
 // =============================================================================
-// 原有函数：YUYV转BGR（OpenCV实现，完全保留，兼容旧格式）
-// =============================================================================
-int UltraFaceMNN::yuyv_to_bgr(const uint8_t* yuyv_data, int width, int height, uint8_t* bgr_buf) {
-    if (!yuyv_data || !bgr_buf || width <=0 || height <=0) {
-        return MNN_FACE_ERR_INPUT;
-    }
-
-    cv::Mat yuyv_mat(height, width, CV_8UC2, (void*)yuyv_data);
-    cv::Mat bgr_mat(height, width, CV_8UC3, bgr_buf);
-    cv::cvtColor(yuyv_mat, bgr_mat, cv::COLOR_YUV2BGR_YUYV);
-
-    return MNN_FACE_OK;
-}
-
-// =============================================================================
-// 新增函数：MJPEG硬解码转BGR（TurboJPEG实现，高性能低CPU占用）
-// =============================================================================
-int UltraFaceMNN::mjpeg_to_bgr(const uint8_t* mjpeg_data, int data_len, 
-                               int width, int height, uint8_t* bgr_buf) {
-    if (!mjpeg_data || !bgr_buf || data_len <= 0 || width <=0 || height <=0) {
-        return MNN_FACE_ERR_INPUT;
-    }
-
-    // 创建解码句柄
-    tjhandle tjh = tjInitDecompress();
-    if (!tjh) {
-        return MNN_FACE_ERR_JPEG;
-    }
-
-    int ret = -1;
-    // 包裹解码逻辑，确保任何情况都能释放句柄（C++ 无异常也兼容）
-    ret = tjDecompress2(tjh, 
-                       mjpeg_data, 
-                       data_len,
-                       bgr_buf,
-                       width, 
-                       0,
-                       height,
-                       TJPF_BGR,
-                       TJFLAG_FASTDCT);
-
-    // ✅ 强制释放：无论如何都执行
-    tjDestroy(tjh);
-    tjh = nullptr;
-
-    return (ret == 0) ? MNN_FACE_OK : MNN_FACE_ERR_JPEG;
-}
-
-// =============================================================================
-// 核心重构：通用版detect函数，支持YUYV/MJPEG双格式自动切换
+// 人脸检测核心函数（libyuv图像预处理，无OpenCV依赖）
 // =============================================================================
 int UltraFaceMNN::detect(const uint8_t* input_data, 
                          int cam_w, 
                          int cam_h,
-                         uint8_t* external_bgr_buf,
+                         uint8_t* external_rgb_buf,
                          std::vector<FaceInfo_MNN>& face_list,
                          ImageFormat format) {
-    if (!m_ready || !input_data || !external_bgr_buf) {
+    if (!m_ready || !input_data || !external_rgb_buf) {
         return MNN_FACE_ERR_INPUT;
     }
     face_list.clear();
 
     int conv_ret = MNN_FACE_OK;
-    // ====================== 格式转换：自动切换 ======================
+    // ====================== 图像格式转换 ======================
     if (format == IMAGE_FORMAT_YUYV) {
-        // 原始YUYV格式：OpenCV转换
-        conv_ret = yuyv_to_bgr(input_data, cam_w, cam_h, external_bgr_buf);
+        conv_ret = yuyv_to_rgb(input_data, cam_w, cam_h, external_rgb_buf);
     } else if (format == IMAGE_FORMAT_MJPEG) {
-        // 新增MJPEG格式：TurboJPEG硬解码
-        // MJPEG数据长度：摄像头采集时已携带，此处直接传入（采集层传递真实长度）
-        conv_ret = mjpeg_to_bgr(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_bgr_buf);
+        // MJPEG解码：使用固定长度兼容摄像头输出
+        conv_ret = mjpeg_to_rgb(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_rgb_buf);
+    } else {
+        return MNN_FACE_ERR_INPUT;
     }
 
     if (conv_ret != MNN_FACE_OK) {
         return conv_ret;
     }
 
-    // 包裹外部缓冲区，不拷贝内存
-    cv::Mat bgr_img(cam_h, cam_w, CV_8UC3, external_bgr_buf);
-    cv::Mat ai_img;
-    cv::resize(bgr_img, ai_img, cv::Size(m_ai_w, m_ai_h));
+    // ====================== RGB图像缩放（libyuv加速） ======================
+    uint8_t* ai_img_buf = new uint8_t[m_ai_w * m_ai_h * 3];
+    conv_ret = rgb_resize(external_rgb_buf, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
+    if (conv_ret != 0) {
+        delete[] ai_img_buf;
+        return MNN_FACE_ERR_INPUT;
+    }
 
-    // 模型预处理
+    // ====================== MNN图像预处理 ======================
     m_interpreter->resizeSession(m_session);
     std::shared_ptr<MNN::CV::ImageProcess> pretreat(
-        MNN::CV::ImageProcess::create(MNN::CV::BGR, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
+        MNN::CV::ImageProcess::create(MNN::CV::RGB, MNN::CV::RGB, m_mean_vals, 3, m_norm_vals, 3)
     );
-    pretreat->convert(ai_img.data, m_ai_w, m_ai_h, ai_img.step[0], m_input_tensor);
+    // 裸指针数据输入，无第三方库依赖
+    pretreat->convert(ai_img_buf, m_ai_w, m_ai_h, m_ai_w * 3, m_input_tensor);
 
-    // 推理
+    // 模型推理
     m_interpreter->runSession(m_session);
 
-    // 获取输出
+    // 获取推理结果
     MNN::Tensor* tensor_scores = m_interpreter->getSessionOutput(m_session, "scores");
     MNN::Tensor* tensor_boxes  = m_interpreter->getSessionOutput(m_session, "boxes");
 
@@ -167,10 +122,13 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
     tensor_scores->copyToHostTensor(&scores_host);
     tensor_boxes->copyToHostTensor(&boxes_host);
 
-    // 后处理
+    // 后处理：生成候选框+NMS抑制
     std::vector<FaceInfo_MNN> bbox_collection;
     generate_bbox(bbox_collection, &scores_host, &boxes_host);
     nms(bbox_collection, face_list);
+
+    // 释放临时缓冲区
+    delete[] ai_img_buf;
 
     return MNN_FACE_OK;
 }
@@ -233,13 +191,6 @@ void UltraFaceMNN::map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, 
     face.y1 *= scale_h;
     face.x2 *= scale_w;
     face.y2 *= scale_h;
-}
-
-void UltraFaceMNN::draw_faces(cv::Mat& img, const std::vector<FaceInfo_MNN>& face_list) {
-    for (const auto& face : face_list) {
-        cv::rectangle(img, cv::Point((int)face.x1, (int)face.y1), 
-                      cv::Point((int)face.x2, (int)face.y2), cv::Scalar(0,255,0), 2);
-    }
 }
 
 void UltraFaceMNN::deinit() {

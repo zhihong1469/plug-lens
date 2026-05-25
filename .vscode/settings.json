@@ -10,7 +10,7 @@
     // --------------------------
     // 2. clangd 13 核心配置
     // --------------------------
-    "clangd.path": "/home/luo/clangd_13.0.0/bin/clangd", // 实际路径
+    "clangd.path": "~/clangd_13.0.0/bin/clangd", // 实际路径
     "clangd.arguments": [
         // 【关键】指定 compile_commands.json 所在目录（我们生成在 output 下）
         "--compile-commands-dir=${workspaceFolder}/output",

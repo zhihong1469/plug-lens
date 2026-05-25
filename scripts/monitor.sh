@@ -19,7 +19,7 @@ SD_CARD_MOUNT_PATH="/mnt/sdcard"
 FACE_CAPTURE_PATH="${SD_CARD_MOUNT_PATH}/face_capture"
 # NFS调试配置（产品模式可注释）
 NFS_SERVER_IP="192.168.5.10"
-NFS_SERVER_PATH="/home/luo/nfs"
+NFS_SERVER_PATH="~/nfs"
 NFS_MOUNT_PATH="/mnt"
 # 时间同步默认值
 DEFAULT_DATETIME="2026-05-22 12:00:00"

@@ -56,8 +56,7 @@ extern "C" {
 // ==============================================================================
 // ========================== 输入格式枚举（通用） ==============================
 // ==============================================================================
-#define INPUT_FORMAT_YUYV       0    /**< 输入图像格式：YUYV */
-#define INPUT_FORMAT_MJPEG      1    /**< 输入图像格式：MJPEG（硬件默认，高性能） */
+#define INPUT_FORMAT            0    /**< 输入图像格式：0=YUYV 1=MJPEG（硬件默认，高性能） */
 
 // ==============================================================================
 // ========================== 模型默认配置（平台最优） =========================
@@ -99,14 +98,16 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h);
 /**
  * @brief  【新增】坐标映射 + OpenCV绘制人脸框（三合一）
  * @param  face: 人脸信息
+ * @param  face_num: 人脸数量
  * @param  cam_w: 摄像头宽度
  * @param  cam_h: 摄像头高度
  * @param  src_frame: 原始图像帧数据
  * @param  dst_frame: 输出带框图像帧数据
  * @return 无
  */
-void ai_model_mnn_map_and_draw_face(FaceInfo_C* face, int cam_w, int cam_h,
-                                    const uint8_t *src_frame, uint8_t *dst_frame);
+void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
+                                     int cam_w, int cam_h,
+                                     const uint8_t *src_frame, uint8_t *dst_frame);
 
 void ai_model_mnn_get_ai_size(int* w, int* h);
 bool ai_model_mnn_is_ready(void);
@@ -150,9 +151,10 @@ FaceInfo_C faces[10];
 int face_num = 0;
 
 // 🔥 仅需调用这一个函数，自动适配解码格式！
-// MJPEG格式（硬件默认，低CPU）：ai_model_mnn_infer_image(..., INPUT_FORMAT_MJPEG)
-// YUYV格式（兼容模式）：ai_model_mnn_infer_image(..., INPUT_FORMAT_YUYV)
-int ret = ai_model_mnn_infer_image(camera_frame, 640, 360, bgr_buf, faces, 10, &face_num, INPUT_FORMAT_MJPEG);
+// MJPEG格式（硬件默认，低CPU）：
+// YUYV格式（兼容模式）：
+ai_model_mnn_infer_image(..., INPUT_FORMAT)
+int ret = ai_model_mnn_infer_image(camera_frame, 640, 360, bgr_buf, faces, 10, &face_num, INPUT_FORMAT);
 
 3. 坐标映射 + 业务处理
 for (int i=0; i<face_num; i++) {

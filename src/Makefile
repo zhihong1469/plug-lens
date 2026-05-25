@@ -30,10 +30,6 @@ LDFLAGS := \
 	-lcom \
 	-L$(TOPDIR)/third_lib/face_detector/mnn/lib/ \
 	-lMNN \
-	-L$(TOPDIR)/third_lib/opencv_lib/lib/ \
-	-lopencv_core \
-	-lopencv_imgproc \
-	-lopencv_imgcodecs \
 	-L$(TOPDIR)/third_lib/live555/lib \
 	-L$(TOPDIR)/third_lib/libjpeg_turbo/lib \
 	-lliveMedia \
@@ -46,4 +42,8 @@ LDFLAGS := \
 	-lstdc++ \
 	-pthread \
 	-L$(TOP_DIR)/third_lib/libjpeg_turbo/lib \
-	-lturbojpeg
+	-lturbojpeg \
+	-L$(TOPDIR)/third_lib/openh264/lib \
+	-lopenh264 \
+	-L$(TOPDIR)/third_lib/libyuv/lib \
+	-lyuv

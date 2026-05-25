@@ -142,7 +142,7 @@ typedef enum {
 
 // 采集服务配置
 #define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
-#define CONFIG_CAPTURE_FORMAT 2  // 0=YUYV 1=NV12 2=MJPEG
+#define CONFIG_CAPTURE_FORMAT 0  // 0=YUYV 1=NV12 2=MJPEG
 #define CONFIG_CAPTURE_FPS 30
 #define CONFIG_CAPTURE_BUF_COUNT 8
 #define CONFIG_CAPTURE_LOCK_EXPOSURE true
@@ -164,7 +164,7 @@ typedef enum {
 // ==========================================================================
 // 【全局统一视频基准宏】唯一入口，所有模块共用，禁止单独修改！
 // ==========================================================================
-#define GLOBAL_VIDEO_FPS                12           // 全局统一帧率（采集=推流=RTSP）
+#define GLOBAL_VIDEO_FPS                15           // 全局统一帧率（采集=推流=RTSP）
 #define GLOBAL_VIDEO_WIDTH              640         // 统一分辨率宽
 #define GLOBAL_VIDEO_HEIGHT             360         // 统一分辨率高
 #define GLOBAL_JPEG_QUALITY             75          // 统一JPEG质量

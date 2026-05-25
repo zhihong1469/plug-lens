@@ -1,7 +1,7 @@
-prefix=/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
-exec_prefix=/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
-libdir=/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/lib
-includedir=/home/luo/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/include
+prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
+exec_prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
+libdir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/lib
+includedir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/include
 
 Name: libjpeg
 Description: A SIMD-accelerated JPEG codec that provides the libjpeg API

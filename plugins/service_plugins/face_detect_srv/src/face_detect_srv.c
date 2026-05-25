@@ -251,7 +251,7 @@ static void *face_work_thread(void *arg)
                                       srv->faces,
                                       AI_MAX_FACES,
                                       &srv->face_num,
-                                      INPUT_FORMAT_MJPEG);
+                                      INPUT_FORMAT);
 
         /* 推理失败：直接释放资源 */
         if (ret != MNN_FACE_OK)
@@ -280,26 +280,14 @@ static void *face_work_thread(void *arg)
         {
             uint8_t *result_rgb_data = data_bus_get_writable_ptr(result_rgb_item);
 
-            /* OpenCV三合一：坐标映射 + 拷贝原始RGB + 绘制人脸框 */
-            for (int i = 0; i < srv->face_num; i++)
-            {
-                if( (srv->face_num-1) == i)
-                {
-                    ai_model_mnn_map_and_draw_face(&srv->faces[i],
-                                                CAPTURE_WIDTH,
-                                                CAPTURE_HEIGHT,
-                                                raw_rgb_data,
-                                                result_rgb_data);
-                }
-                else
-                {
-                    ai_model_mnn_map_and_draw_face(&srv->faces[i],
-                                                CAPTURE_WIDTH,
-                                                CAPTURE_HEIGHT,
-                                                raw_rgb_data,
-                                                raw_rgb_data);
-                }
-            }
+            /* 三合一：坐标映射 + 拷贝原始RGB + 绘制人脸框 */
+            // 最终版，一次调用处理所有人脸）
+            ai_model_mnn_map_and_draw_faces(srv->faces,      // 人脸数组
+                                            srv->face_num,   // 人脸数量（新增参数）
+                                            CAPTURE_WIDTH,   
+                                            CAPTURE_HEIGHT,
+                                            raw_rgb_data,    // 原始图像
+                                            result_rgb_data); // 输出带框图像
             LOG_D(MODULE_TAG "人脸框绘制完成");
             if (srv->sd_storage) 
             {
@@ -559,6 +547,6 @@ static int face_srv_auto_init(void)
     return 0;
 }
 
-MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
+// MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
 
 /******************************* End of file **********************************/
