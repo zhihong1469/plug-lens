@@ -1,7 +1,7 @@
-# plug-eye 嵌入式Linux视觉AI采集终端 开源发布标准注释与优化规范
+# plug-lens 嵌入式Linux视觉AI采集终端 开源发布标准注释与优化规范
 **全局统一配置（每次发布前仅需修改此处）**
 ```
-PROJECT_NAME: plug-eye
+PROJECT_NAME: plug-lens
 GLOBAL_VERSION: v1.0.0
 GLOBAL_RELEASE_DATE: 2026-05-29
 AUTHOR_NAME: LuoZhihong
@@ -32,7 +32,7 @@ LICENSE: MIT License
  *          采集帧发布至数据总线，支持多消费者零拷贝访问
  *
  * @author  LuoZhihong
- * @github  https://github.com/zhihong1469/plug-eye
+ * @github  https://github.com/zhihong1469/plug-lens
  * @date    2026-05-29
  * @version v1.0.0
  *
@@ -161,13 +161,13 @@ typedef enum {
 
 # 第二部分 README.md 标准模板
 ```markdown
-# plug-eye 外设视觉AI采集终端
+# plug-lens 外设视觉AI采集终端
 **正式版 v1.0.0 | 发布日期：2026-05-29**
 
 基于NXP i.MX6ULL单核ARM平台开发的工业级边缘视觉AI系统，实现30fps实时RTSP视频推流、端侧离线人脸检测、触发式SD卡循环抓拍、守护进程无人值守运行。采用自研双总线解耦架构，针对低算力嵌入式设备深度优化，兼顾实时性与智能分析能力。
 
 **作者：LuoZhihong**
-**GitHub：https://github.com/zhihong1469/plug-eye**
+**GitHub：https://github.com/zhihong1469/plug-lens**
 **协议：MIT License**
 
 ## 技术栈
@@ -214,16 +214,16 @@ typedef enum {
 ### 快速开始
 ```bash
 # 克隆仓库
-git clone https://github.com/zhihong1469/plug-eye.git
-cd plug-eye
+git clone https://github.com/zhihong1469/plug-lens.git
+cd plug-lens
 
 # 交叉编译
 make CROSS_COMPILE=arm-linux-gnueabihf-
 
 # 拷贝到开发板运行
-scp plug-eye root@开发板IP:/root/
+scp plug-lens root@开发板IP:/root/
 ssh root@开发板IP
-./plug-eye
+./plug-lens
 ```
 
 ## 版权声明
