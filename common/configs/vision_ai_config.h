@@ -15,8 +15,8 @@ extern "C" {
 #define SYS_EVENT_BUS_NAME        "sys_event"      // 系统事件总线
 #define SYS_DATA_BUS_NAME         "sys_data"       // 系统数据总线
 #define VIDEO_DATA_BUS_NAME       "video"          // 摄像头YUYV视频总线（采集服务生产）
-#define AI_RGB_DATA_BUS_NAME       "ai_rgb"         // AI专属RGB数据总线（人脸服务生产）
-#define FACE_YUV_DATA_BUS_NAME  "face_result"    // 人脸检测结果数据总线
+#define AI_RGB_DATA_BUS_NAME      "ai_rgb"         // AI专属RGB数据总线（人脸服务生产）
+#define FACE_YUV_DATA_BUS_NAME    "face_result"    // 人脸检测结果数据总线
 // ==========================================================================
 // 【全局通用事件类型】（0x0000-0x0FFF）
 // 所有服务都需要订阅的系统级控制事件，仅此一处定义
@@ -150,10 +150,10 @@ typedef enum {
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 
-// AI模型配置
+// AI模型配置 原来320x240
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
-#define CONFIG_AI_INPUT_W    320
-#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_INPUT_W    160
+#define CONFIG_AI_INPUT_H    120
 #define CONFIG_AI_SCORE_THRESH 0.65f
 #define CONFIG_AI_IOU_THRESH   0.3f
 

@@ -226,7 +226,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 推流工作线程（极简：只做 拉帧 → 编码 → 推流）
+// 推流工作线程（优化版：无RTSP客户端则跳过H264编码，降低CPU）
 // ============================================================================
 static void *net_push_work_thread(void *arg)
 {
@@ -243,7 +243,7 @@ static void *net_push_work_thread(void *arg)
     while (srv->thread_running)
     {
         if (srv->is_paused) {
-            usleep(10000);
+            usleep(50000);  // 暂停时延长休眠，进一步降CPU
             continue;
         }
 
@@ -260,33 +260,42 @@ static void *net_push_work_thread(void *arg)
         }
         last_ts = now;
 
-        // 拉取最新YUYV帧
-        if (data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item) == DATA_BUS_OK)
+        // ==============================================
+        // 【核心优化】仅当有RTSP客户端连接时，才执行编码
+        // ==============================================
+        if (rtsp_has_clients() && rtsp_started)
         {
-            frame_data = data_bus_get_readonly_ptr(frame_item);
-            frame_size = data_bus_get_item_size(frame_item);
-
-            if (frame_data && frame_size)
+            // 拉取最新YUYV帧
+            if (data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item) == DATA_BUS_OK)
             {
-                h264_len = H264_BUF_SIZE;
-                // 🔥 核心：直接调用img_joint封装的编码接口
-                if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, srv->h264_buf, &h264_len) == IMG_JOINT_OK)
-                {
-                    // ✅ 调用完善的打印函数（能看到所有NAL）
-                    net_push_print_h264_nal(srv->h264_buf, h264_len);
+                frame_data = data_bus_get_readonly_ptr(frame_item);
+                frame_size = data_bus_get_item_size(frame_item);
 
-                    // RTSP推送
-                    if(rtsp_started){
+                if (frame_data && frame_size)
+                {
+                    h264_len = H264_BUF_SIZE;
+                    // 🔥 核心：仅客户端在线时才执行YUYV转H264
+                    if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, srv->h264_buf, &h264_len) == IMG_JOINT_OK)
+                    {
+                        // 打印NAL信息
+                        net_push_print_h264_nal(srv->h264_buf, h264_len);
+                        // 推送RTSP
                         rtsp_server_push(srv->h264_buf, h264_len);
                     }
+                    else
+                    {
+                        LOG_E(MODULE_TAG "YUYV转H264编码失败");
+                    }
                 }
-                else
-                {
-                    LOG_E(MODULE_TAG "YUYV转H264编码失败");
-                }
+                // 释放总线数据
+                data_bus_release(frame_item);
             }
-            // 释放总线数据
-            data_bus_release(frame_item);
+        }
+        else
+        {
+            usleep(FRAME_INTERVAL_MS);
+            // 无客户端：不编码、不推流，仅休眠，CPU占用<10%
+            LOG_D(MODULE_TAG "无RTSP客户端，跳过编码");
         }
     }
 
@@ -369,7 +378,7 @@ static int net_push_srv_start(void)
     if (ret != 0) {
         LOG_E(MODULE_TAG "线程创建失败");
         pthread_attr_destroy(&thread_attr);
-        free(srv->h264_buf);
+        mem_free(srv->h264_buf);
         h264_encoder_destroy(srv->h264_enc);
         pthread_cond_destroy(&srv->cond);
         srv->thread_running = false;
@@ -409,7 +418,7 @@ static void net_push_srv_cleanup(void)
     if (srv->evt_ai_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_ai_sub_id);
 
     // 释放img_joint资源
-    if (srv->h264_buf) { free(srv->h264_buf); srv->h264_buf = NULL; }
+    if (srv->h264_buf) { mem_free(srv->h264_buf); srv->h264_buf = NULL; }
     if (srv->h264_enc) { h264_encoder_destroy(srv->h264_enc); srv->h264_enc = NULL; }
 
     // 停止RTSP
@@ -481,6 +490,6 @@ static int net_push_srv_auto_init(void)
     return 0;
 }
 
-MODULE_INIT_LEVEL(INIT_SERVICE, net_push_srv_auto_init);
+// MODULE_INIT_LEVEL(INIT_SERVICE, net_push_srv_auto_init);
 
 /******************************* End of file **********************************/

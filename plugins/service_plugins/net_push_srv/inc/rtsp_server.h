@@ -43,6 +43,7 @@ bool rtsp_is_running(void);
  */
 void rtsp_server_push(const uint8_t* buf, uint32_t size);
 
+bool rtsp_has_clients(void);
 /**
  * @brief  停止RTSP服务
  * @return 0:成功

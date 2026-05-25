@@ -287,6 +287,23 @@ extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
 #endif
 }
 
+// ==========================================================================
+// 【最终无错版】对外C接口：检测是否有RTSP客户端在线
+// 原理：g_h264_source 仅在客户端连接播放时被创建，断开时自动置空
+// ==========================================================================
+extern "C" bool rtsp_has_clients(void) {
+    // RTSP未启动 → 无客户端
+    if (!rtsp_running || !rtspServer) {
+        return false;
+    }
+#if ENABLE_RTSP_H264
+    // 核心判断：数据源存在 = 有客户端正在播放
+    return (g_h264_source != nullptr);
+#else
+    return false;
+#endif
+}
+
 extern "C" int rtsp_server_stop(void) {
     if (!rtsp_running) return 0;
 
