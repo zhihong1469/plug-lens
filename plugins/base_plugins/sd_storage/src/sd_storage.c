@@ -146,7 +146,7 @@ SdStorage_t *SdStorage_Init(void) {
     }
 
     strncpy(self->work_dir, SD_STORAGE_DIR, sizeof(self->work_dir)-1);
-    self->jpeg_quality = 50;
+    self->jpeg_quality = 20;
     self->is_initialized = true;
 
     LOG_I("[SD_STORAGE] 初始化成功，存储目录: %s", SD_STORAGE_DIR);

@@ -53,7 +53,7 @@
 #define FRAME_WAIT_TIMEOUT_MS         200
 
 /* 帧率优化配置：采集15fps → 检测5fps = 每3帧处理1次 */
-#define FPS_DOWNSAMPLE_STEP           2
+#define FPS_DOWNSAMPLE_STEP           30
 #define TARGET_AI_FPS                 5
 
 /* 帧大小配置（双RGB帧大小一致，总线物理隔离） */
@@ -322,7 +322,8 @@ static void *face_work_thread(void *arg)
         }
         else
         {
-            LOG_W(MODULE_TAG "人脸结果RGB总线无空闲帧，跳过画框");
+            // LOG_W(MODULE_TAG "人脸结果RGB总线无空闲帧，跳过画框");
+
         }
 
 release_res:
@@ -375,7 +376,7 @@ static int face_srv_start(void)
     }
 
     srv->is_paused = false;
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_READY, MODULE_NAME);
+    // event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_READY, MODULE_NAME);
     LOG_I(MODULE_TAG "人脸检测服务启动成功 [实时优先级=70 | 5fps]");
     return 0;
 }
@@ -436,7 +437,7 @@ static void face_srv_cleanup(void)
     led_base_turn_off(srv->s_led);
     led_indicator_destroy(srv->s_led);
 
-    event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_STOPPED, MODULE_NAME);
+    // event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_STOPPED, MODULE_NAME);
     LOG_I(MODULE_TAG "所有资源释放完成");
 }
 
@@ -521,15 +522,7 @@ static int face_srv_init(void)
     };
     srv->evt_sys_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &sys_sub);
 
-    event_subscriber_t cap_sub = {
-        .event_type = EVENT_TYPE_CAPTURE_PROTO_READY,
-        .callback = event_bus_cb,
-        .user_data = srv,
-        .skip_self_published = true
-    };
-    srv->evt_capture_sub_id = event_bus_subscribe(CAPTURE_EVENT_BUS, &cap_sub);
-
-    if (srv->evt_sys_sub_id < 0 || srv->evt_capture_sub_id < 0)
+    if (srv->evt_sys_sub_id < 0 ) 
     {
         LOG_E(MODULE_TAG "事件总线订阅失败");
         face_srv_cleanup();
@@ -565,6 +558,6 @@ static int face_srv_auto_init(void)
     return 0;
 }
 
-// MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
+MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
 
 /******************************* End of file **********************************/

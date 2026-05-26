@@ -222,6 +222,7 @@ typedef struct {
 
 // =============================================================================
 // 标准编码器初始化（全网通用模板）
+// 🔥 优化版：优先流畅度/低CPU，适配IMX6ULL单核
 // =============================================================================
 h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     if (!param || param->width <= 0 || param->height <= 0 || 
@@ -249,22 +250,39 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
 
     impl->p_encoder->GetDefaultParams(&impl->param);
 
-    // ✅ 适配你的旧版OpenH264，无iIdrPeriod
-    impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;
+    // ===================== 核心优化：流畅度优先 + 低算力 =====================
+    impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;    // 实时通信模式
     impl->param.fMaxFrameRate   = param->fps;
     impl->param.iPicWidth       = param->width;
     impl->param.iPicHeight      = param->height;
     impl->param.iTargetBitrate  = param->bitrate * 1000;
-    impl->param.uiIntraPeriod   = param->gop;    // 旧版：这就是IDR帧周期
+    impl->param.uiIntraPeriod   = 30;                        // 增大IDR周期，减少算力开销
     impl->param.iTemporalLayerNum = 1;
     impl->param.iSpatialLayerNum  = 1;
+
+    // 🔥 最低复杂度模式：最快编码速度（流畅度拉满）
+    impl->param.iComplexityMode = LOW_COMPLEXITY;
+    // 🔥 单核CPU：关闭多线程，避免抢占
     impl->param.iMultipleThreadIdc = 1;
-    impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
+    // 🔥 最低参考帧：仅1帧，大幅降低算力
+    impl->param.iNumRefFrame = 1;
+    // 🔥 低算力熵编码：CAVLC（替代高算力CABAC）
     impl->param.iEntropyCodingModeFlag = 0;
+    // 🔥 关闭环路滤波：节省大量CPU
+    impl->param.iLoopFilterDisableIdc = 1;
+    // 🔥 SPS/PPS固定ID：减少开销
+    impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
+
+    // 🔥 关闭所有冗余高级功能（全关，省算力）
     impl->param.bEnableDenoise = false;
     impl->param.bEnableBackgroundDetection = false;
-    impl->param.bEnableFrameSkip = false;
+    impl->param.bEnableAdaptiveQuant = false;
+    impl->param.bEnableSceneChangeDetect = false;
+    impl->param.bPrefixNalAddingCtrl = false;
+    impl->param.bEnableFrameSkip = true;    // 允许跳帧，保证实时流畅
+    impl->param.bIsLosslessLink = false;
 
+    // 初始化编码器
     ret = impl->p_encoder->InitializeExt(&impl->param);
     if (ret != 0) {
         WelsDestroySVCEncoder(impl->p_encoder);
@@ -338,10 +356,9 @@ int yuyv_to_h264(h264_encoder_t encoder,
     pic.iStride[1]   = w/2;
     pic.iStride[2]   = w/2;
 
-    // ===================== 修复 1：强制首帧 IDR =====================
+    // ===================== 强制首帧 IDR =====================
     static bool first_frame = true;
     if (first_frame) {
-        // 强制输出 IDR 关键帧（自动携带 SPS+PPS）
         impl->p_encoder->ForceIntraFrame(true);
         first_frame = false;
     }
@@ -350,7 +367,7 @@ int yuyv_to_h264(h264_encoder_t encoder,
     if (ret != 0 || bs_info.eFrameType == videoFrameTypeSkip)
         return IMG_JOINT_ERR_H264;
 
-    // ===================== 修复 2：完整拷贝所有 NAL（包含PPS/IDR） =====================
+    // 拷贝所有NAL数据
     int total_len = 0;
     for (int i = 0; i < bs_info.iLayerNum; i++) {
         SLayerBSInfo* layer = &bs_info.sLayerInfo[i];
