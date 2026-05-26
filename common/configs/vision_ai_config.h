@@ -164,7 +164,7 @@ typedef enum {
 // ==========================================================================
 // 【全局统一视频基准宏】唯一入口，所有模块共用，禁止单独修改！
 // ==========================================================================
-#define GLOBAL_VIDEO_FPS                15           // 全局统一帧率（采集=推流=RTSP）
+#define GLOBAL_VIDEO_FPS                8           // 全局统一帧率（采集=推流=RTSP）
 #define GLOBAL_VIDEO_WIDTH              640         // 统一分辨率宽
 #define GLOBAL_VIDEO_HEIGHT             360         // 统一分辨率高
 #define GLOBAL_JPEG_QUALITY             75          // 统一JPEG质量

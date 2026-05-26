@@ -56,7 +56,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/src/base/camera/inc \
 	-I$(TOPDIR)/src/base/ai_model/inc \
-	-I$(TOPDIR)/src/base/service/inc \
+	-I$(TOPDIR)/src/base/led/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \

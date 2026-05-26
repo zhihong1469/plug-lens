@@ -190,13 +190,12 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
-        case EVENT_TYPE_FACE_PROCESS_DONE:
+        case EVENT_TYPE_CAPTURE_PROTO_READY:
             if (thread_is_running(&srv->work_thread) && !srv->is_paused)
             {
                 pthread_mutex_lock(&srv->mutex);
                 pthread_cond_signal(&srv->cond);
                 pthread_mutex_unlock(&srv->mutex);
-                LOG_D(MODULE_TAG "收到AI完成事件，唤醒推流线程");
             }
             break;
 
@@ -284,7 +283,7 @@ static void *net_push_work_thread(void *arg)
                     // 仅客户端在线时执行高开销的YUYV转H264
                     if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, srv->h264_buf, &h264_len) == IMG_JOINT_OK)
                     {
-                        net_push_print_h264_nal(srv->h264_buf, h264_len);
+                        // net_push_print_h264_nal(srv->h264_buf, h264_len);
                         rtsp_server_push(srv->h264_buf, h264_len);
                     }
                     else
