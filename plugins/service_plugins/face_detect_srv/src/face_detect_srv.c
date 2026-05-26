@@ -78,7 +78,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
-
+#include "led_base.h"
 /* =============================================================================
  * @brief 人脸检测服务控制块（线程安全 + 事件唤醒 + 帧率控制）
  * ============================================================================*/
@@ -105,6 +105,7 @@ typedef struct {
 
     /* 帧率控制：新增帧计数器 */
     uint32_t                      frame_sample_cnt;       /* 事件采样计数器 */
+    led_base_t                    *s_led;
 
 } face_detect_srv_t;
 
@@ -288,7 +289,7 @@ static void *face_work_thread(void *arg)
         }
 
         LOG_I(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
-
+        led_base_turn_on(srv->s_led);
         /* ============== 绘制人脸框 ============== */
         ret = data_bus_alloc(FACE_RESULT_RGB_DATA_BUS,
                              DATA_TYPE_VIDEO_RGB,
@@ -311,7 +312,7 @@ static void *face_work_thread(void *arg)
             {
                 if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
                 {
-                    LOG_I(MODULE_TAG "SD卡保存人脸图像成功");
+                    led_base_turn_off(srv->s_led);
                 }
                 else
                 {
@@ -432,6 +433,9 @@ static void face_srv_cleanup(void)
         srv->sd_storage = NULL;
     }
 
+    led_base_turn_off(srv->s_led);
+    led_indicator_destroy(srv->s_led);
+
     event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_STOPPED, MODULE_NAME);
     LOG_I(MODULE_TAG "所有资源释放完成");
 }
@@ -539,7 +543,11 @@ static int face_srv_init(void)
     } else {
         LOG_W(MODULE_TAG "SD卡存储初始化失败，将无法保存人脸图片");
     }
-
+    // 创建LED实例
+    srv->s_led = led_indicator_create("/dev/100ask_led0");
+    if (srv->s_led) {
+        led_base_init(srv->s_led);
+    }
     LOG_I(MODULE_TAG "人脸检测服务初始化完成（5fps+双RGB总线隔离）");
     return 0;
 }
@@ -557,6 +565,6 @@ static int face_srv_auto_init(void)
     return 0;
 }
 
-MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
+// MODULE_INIT_LEVEL(INIT_SERVICE, face_srv_auto_init);
 
 /******************************* End of file **********************************/

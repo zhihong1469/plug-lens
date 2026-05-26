@@ -6,7 +6,7 @@
 SRC_FILES := \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp \
-	base/service/src/service_base.c \
+	base/led/src/led_base.c \
 	bus/event_bus/src/event_bus.c \
 	bus/data_bus/src/data_bus.c \
 	app/src/main.c \

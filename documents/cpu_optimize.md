@@ -17,13 +17,14 @@ Load average: 0.66 0.55 0.49 1/111 19951
 thread: app main capture
 
 ## cap net but no have client
-Mem: 199532K used, 303856K free, 1968K shrd, 4652K buff, 68636K cached
-CPU:   8% usr  43% sys   0% nic  47% idle   0% io   0% irq   0% sirq
-Load average: 0.42 0.50 0.46 1/114 16643
+Mem: 219092K used, 284296K free, 2012K shrd, 4700K buff, 87264K cached
+CPU:   9% usr  36% sys   0% nic  54% idle   0% io   0% irq   0% sirq
+Load average: 0.45 1.53 1.63 2/114 16522
   PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND
-  276     1 root     S     190m  39%  25% /usr/bin/mxapp2 --plugin tslib:/dev/input/event1
-16181 14440 root     S    77548  15%   7% ./vision_ai_app
-thread: app main capture
+  276     1 root     R     190m  39%  18% /usr/bin/mxapp2 --plugin tslib:/dev/input/event1
+16521  5372 root     R     2580   1%  18% top -b -n 7676
+
+thread: app main capture net rtsp 
 
 ## cap face
 Mem: 220796K used, 282592K free, 2152K shrd, 4716K buff, 83924K cached
@@ -114,4 +115,15 @@ Load average: 3.00 1.75 1.24 2/120 17909
 > 这可能已经是这块板子的性能极限了！
 > 但是,幸好我还藏了一手---降转化质量TJSAMP_420+20%
 > 降分辨率160x120 /128x96,推理模型也许支持但是效果极差
+
+## cap face push(no client)
+Mem: 220048K used, 283340K free, 1988K shrd, 4700K buff, 80840K cached
+CPU:  84% usr  13% sys   0% nic   1% idle   0% io   0% irq   0% sirq
+Load average: 3.52 3.07 1.97 3/116 13498
+  PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND
+13402  1246 root     S    89072  18%  84% ./vision_ai_app
+  276     1 root     R     190m  39%   6% /usr/bin/mxapp2 --plugin tslib:/dev/input/event1
+13452  5372 root     R     2708   1%   1% top -b -n 7676
+> 已经爆炸了
+>  thread: app main capture=8=face net rtsp
 
