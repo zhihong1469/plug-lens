@@ -152,9 +152,9 @@ typedef enum {
 
 // AI模型配置 原来320x240
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
-#define CONFIG_AI_INPUT_W    160
-#define CONFIG_AI_INPUT_H    120
-#define CONFIG_AI_SCORE_THRESH 0.65f
+#define CONFIG_AI_INPUT_W    320
+#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_SCORE_THRESH 0.55f
 #define CONFIG_AI_IOU_THRESH   0.3f
 
 // 人脸检测最大数量

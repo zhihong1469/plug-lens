@@ -213,9 +213,8 @@ bool utils_memiszero(const void *ptr, size_t size)
 }
 
 // ==========================================================================
-// 数学工具函数实现
+// 整数工具函数
 // ==========================================================================
-
 int32_t utils_abs(int32_t x)
 {
     return (x < 0) ? -x : x;
@@ -232,6 +231,39 @@ int32_t utils_max(int32_t a, int32_t b)
 }
 
 int32_t utils_min(int32_t a, int32_t b)
+{
+    return (a < b) ? a : b;
+}
+
+// ==========================================================================
+// 浮点工具函数（你需要的核心）
+// ==========================================================================
+float utils_fabsf(float x)
+{
+    return (x < 0.0f) ? -x : x;
+}
+
+double utils_fabs(double x)
+{
+    return (x < 0.0) ? -x : x;
+}
+
+float utils_fmaxf(float a, float b)
+{
+    return (a > b) ? a : b;
+}
+
+float utils_fminf(float a, float b)
+{
+    return (a < b) ? a : b;
+}
+
+double utils_fmax(double a, double b)
+{
+    return (a > b) ? a : b;
+}
+
+double utils_fmin(double a, double b)
 {
     return (a < b) ? a : b;
 }

@@ -32,6 +32,9 @@
 class H264MemorySource;
 #endif
 
+// 外部声明：客户端检测接口（内部使用）
+extern "C" bool rtsp_has_clients(void);
+
 // ==========================================================================
 // 全局变量（兼容GCC7.5.0，无atomic编译错误）
 // ==========================================================================
@@ -52,8 +55,17 @@ static uint32_t        g_jpeg_size = 0;
 static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
+// RTSP核心全局对象
+static TaskScheduler*      scheduler = nullptr;
+static UsageEnvironment*   env = nullptr;
+static RTSPServer*         rtspServer = nullptr;
+static ServerMediaSession* g_rtsp_sms = nullptr;  // 用于检测客户端
+static pthread_t           rtsp_thread;
+static volatile bool       rtsp_running = false;
+static EventLoopWatchVariable stop_watch;
+
 // ==========================================================================
-// H264 内存数据源（主动唤醒机制，解决黑屏）
+// H264 内存数据源（主动唤醒机制 + 极致低功耗：无客户端不轮询）
 // ==========================================================================
 #if ENABLE_RTSP_H264
 class H264MemorySource : public FramedSource {
@@ -77,6 +89,11 @@ private:
     }
 
     virtual void doGetNextFrame() override {
+        // 低功耗核心：无客户端直接返回，不执行任何逻辑
+        if (!rtsp_has_clients()) {
+            return;
+        }
+
         pthread_mutex_lock(&g_h264_mutex);
 
         // 首次下发SPS/PPS
@@ -89,19 +106,19 @@ private:
             return;
         }
 
-        // 无新帧：超低延时轮询
+        // 无新帧：仅客户端在线时轮询
         if (g_h264_size == 0 || !g_frame_wake) {
             pthread_mutex_unlock(&g_h264_mutex);
             envir().taskScheduler().scheduleDelayedTask(1000, deliverFrame, this);
             return;
         }
 
-        // 有新帧：立即发送
+        // 发送最新H264帧
         unsigned frameSize = (fMaxSize < g_h264_size) ? fMaxSize : g_h264_size;
         memcpy(fTo, g_h264_buf, frameSize);
         fFrameSize = frameSize;
-        printf("[RTSP] 读取到帧: %d 字节\n", frameSize);
-        // 清空缓存和唤醒标志
+
+        // 清空标志
         g_h264_size = 0;
         g_frame_wake = false;
 
@@ -138,7 +155,7 @@ protected:
 #endif
 
 // ==========================================================================
-// JPEG 模块（不变）
+// JPEG 模块（保持原有逻辑）
 // ==========================================================================
 #if ENABLE_RTSP_JPEG
 class LiveJPEGSource : public JPEGVideoSource {
@@ -160,6 +177,10 @@ protected:
     virtual u_int8_t height()      { return GLOBAL_VIDEO_HEIGHT / 8; }
 
     virtual void doGetNextFrame() override {
+        if (!rtsp_has_clients()) {
+            return;
+        }
+
         pthread_mutex_lock(&g_jpeg_mutex);
         if (g_jpeg_size == 0) {
             pthread_mutex_unlock(&g_jpeg_mutex);
@@ -196,15 +217,8 @@ protected:
 #endif
 
 // ==========================================================================
-// RTSP 主线程（修复初始化错误）
+// RTSP 服务线程
 // ==========================================================================
-static TaskScheduler*      scheduler = nullptr;
-static UsageEnvironment*   env = nullptr;
-static RTSPServer*         rtspServer = nullptr;
-static pthread_t           rtsp_thread;
-static volatile bool       rtsp_running = false;
-static EventLoopWatchVariable stop_watch;
-
 static void* rtsp_server_thread(void* arg) {
     (void)arg;
     rtsp_running = true;
@@ -213,6 +227,7 @@ static void* rtsp_server_thread(void* arg) {
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
 
+    // 创建RTSP服务器
     rtspServer = RTSPServer::createNew(*env, RTSP_SERVER_PORT, nullptr);
     if (!rtspServer) {
         *env << "RTSP server create failed!\n";
@@ -220,27 +235,32 @@ static void* rtsp_server_thread(void* arg) {
         return nullptr;
     }
 
-    ServerMediaSession* sms = ServerMediaSession::createNew(*env,
+    // 创建媒体会话并保存全局指针（用于客户端检测）
+    g_rtsp_sms = ServerMediaSession::createNew(*env,
         "stream", "stream", "IMX6ULL RTSP H264 Stream");
 
 #if ENABLE_RTSP_H264
-    sms->addSubsession(H264ServerMediaSubsession::createNew(*env, True));
+    g_rtsp_sms->addSubsession(H264ServerMediaSubsession::createNew(*env, True));
 #endif
 #if ENABLE_RTSP_JPEG
-    sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
+    g_rtsp_sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
 #endif
 
-    rtspServer->addServerMediaSession(sms);
-    char* url = rtspServer->rtspURL(sms);
+    rtspServer->addServerMediaSession(g_rtsp_sms);
+    char* url = rtspServer->rtspURL(g_rtsp_sms);
     *env << "=====================================\n";
     *env << "RTSP 服务启动成功\n";
     *env << "播放地址: " << url << "\n";
     *env << "=====================================\n";
     delete[] url;
 
+    // 设置RTP缓冲区大小
     OutPacketBuffer::maxSize = RTP_MAX_BUFFER_SIZE;
+
+    // 启动事件循环
     env->taskScheduler().doEventLoop(&stop_watch);
 
+    // 资源回收
     rtsp_running = false;
     return nullptr;
 }
@@ -268,18 +288,18 @@ extern "C" bool rtsp_is_running(void) {
     return rtsp_running;
 }
 
-// 核心：写入帧 + 唤醒流媒体 —— 【修复版，去掉锁死逻辑】
+// 核心推流接口
 extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
     if (!buf || size == 0 || size >= MAX_FRAME_SIZE) return;
 
 #if ENABLE_RTSP_H264
     pthread_mutex_lock(&g_h264_mutex);
-    // 🔥 修复：直接覆盖旧帧（实时流标准做法，保证最新帧必发）
+    // 实时流：覆盖旧帧，保证最新帧发送
     memcpy(g_h264_buf, buf, size);
     g_h264_size = size;
-    g_frame_wake = true;  // 强制唤醒RTSP发送
+    g_frame_wake = true;
     pthread_mutex_unlock(&g_h264_mutex);
-#elif ENABLE_JPEG
+#elif ENABLE_RTSP_JPEG
     pthread_mutex_lock(&g_jpeg_mutex);
     memcpy(g_jpeg_buf, buf, size);
     g_jpeg_size = size;
@@ -288,25 +308,26 @@ extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
 }
 
 // ==========================================================================
-// 【最终无错版】对外C接口：检测是否有RTSP客户端在线
-// 原理：g_h264_source 仅在客户端连接播放时被创建，断开时自动置空
+// ✅【适配你的老版本Live555】官方标准：检测RTSP客户端
+// 接口：referenceCount() → 你头文件中明确存在的公有方法
+// 含义：引用计数 = 活跃客户端连接数
 // ==========================================================================
 extern "C" bool rtsp_has_clients(void) {
-    // RTSP未启动 → 无客户端
-    if (!rtsp_running || !rtspServer) {
+    // 服务未启动 / 流未创建 → 无客户端
+    if (!rtsp_running || !rtspServer || !g_rtsp_sms) {
         return false;
     }
-#if ENABLE_RTSP_H264
-    // 核心判断：数据源存在 = 有客户端正在播放
-    return (g_h264_source != nullptr);
-#else
-    return false;
-#endif
+
+    // 🔥 适配你版本的核心API：referenceCount()
+    unsigned clientCount = g_rtsp_sms->referenceCount();
+    return (clientCount > 0);
 }
 
+// 停止RTSP服务
 extern "C" int rtsp_server_stop(void) {
     if (!rtsp_running) return 0;
 
+    // 退出事件循环
     stop_watch = 1;
     pthread_join(rtsp_thread, nullptr);
 
@@ -317,20 +338,25 @@ extern "C" int rtsp_server_stop(void) {
     g_frame_wake = false;
     pthread_mutex_unlock(&g_h264_mutex);
 #endif
+
 #if ENABLE_RTSP_JPEG
     pthread_mutex_lock(&g_jpeg_mutex);
     g_jpeg_size = 0;
     pthread_mutex_unlock(&g_jpeg_mutex);
 #endif
 
+    // 释放Live555资源
     if (rtspServer)  Medium::close(rtspServer);
     if (env)         env->reclaim();
     if (scheduler)   delete scheduler;
 
+    // 清空全局指针
     rtspServer = nullptr;
     env = nullptr;
     scheduler = nullptr;
+    g_rtsp_sms = nullptr;
     rtsp_running = false;
+
     return 0;
 }
 

@@ -23,11 +23,8 @@ date -s "2026-05-22 12:00:00"
 cd /mnt/run_on_board/
 # 一次性添加所有库路径，大小写正确，永久生效当前终端
 export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:/mnt/run_on_board/libjpeg:/mnt/run_on_board/mnn:/mnt/run_on_board/libyuv:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/mnt/run_on_board:$LD_LIBRARY_PATH
 <!-- export LD_LIBRARY_PATH=/mnt/run_on_board/opencv:$LD_LIBRARY_PATH -->
-export LD_LIBRARY_PATH=/mnt/run_on_board/libjpeg:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/mnt/run_on_board/libyuv:$LD_LIBRARY_PATH
+
 
 
 mkdir -p /mnt/sdcard/face_capture

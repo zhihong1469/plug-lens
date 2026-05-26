@@ -7,9 +7,19 @@
 #include <time.h>
 // 时间、字节序、字符串、内存、数学五大类工具
 // ==========================================================================
+
+// 通用绝对值宏
+#define utils_abs_generic(x)   ((x) >= 0 ? (x) : -(x))
+
+// 通用最大/最小值宏
+#define utils_max_generic(a, b) ((a) > (b) ? (a) : (b))
+#define utils_min_generic(a, b) ((a) < (b) ? (a) : (b))
+
 // 时间工具函数
 // ==========================================================================
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 /**
  * @brief 获取当前时间戳（微秒）
  * @return 时间戳（微秒）
@@ -138,7 +148,9 @@ int32_t utils_abs(int32_t x);
  * @brief 计算绝对值（64位）
  */
 int64_t utils_llabs(int64_t x);
-
+// 浮点绝对值（新增！）
+float    utils_fabsf(float x);
+double   utils_fabs(double x);
 /**
  * @brief 计算两个数的最大值（32位）
  */
@@ -148,7 +160,11 @@ int32_t utils_max(int32_t a, int32_t b);
  * @brief 计算两个数的最小值（32位）
  */
 int32_t utils_min(int32_t a, int32_t b);
-
+// 浮点最大/最小（新增！修复你边界BUG）
+float    utils_fmaxf(float a, float b);
+float    utils_fminf(float a, float b);
+double   utils_fmax(double a, double b);
+double   utils_fmin(double a, double b);
 /**
  * @brief 数值钳制（限制在 min 和 max 之间）
  */
@@ -158,5 +174,7 @@ int32_t utils_clamp(int32_t val, int32_t min_val, int32_t max_val);
  * @brief 除法向上取整
  */
 uint32_t utils_div_ceil(uint32_t a, uint32_t b);
-
+#ifdef __cplusplus
+}
+#endif
 #endif /* __UTILS_H */

@@ -91,6 +91,12 @@ int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_bu
 int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
                uint8_t* dst_rgb, int dst_w, int dst_h);
 
+               // =============================================================================
+// 【OpenCV版】图像缩放+居中裁剪（替代你的libyuv版 rgb_resize，标准AI预处理）
+// 输入：640x360 BGR图像  输出：160x120模型输入图像
+// =============================================================================
+int image_resize_ai_opencv(const uint8_t* src_bgr, int src_w, int src_h,
+                           uint8_t* dst_bgr, int dst_w, int dst_h) ;
 /**
  * @brief RGB图像绘制矩形框（裸指针实现，替代OpenCV rectangle）
  * @param color RGB颜色值：0xFF0000=红, 0x00FF00=绿, 0x0000FF=蓝

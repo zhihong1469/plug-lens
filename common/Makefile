@@ -27,4 +27,5 @@ INC_FLAGS := $(GLOBAL_INC) $(LOCAL_INC)
 TARGET_NAME := libcom.a
 TARGET_TYPE := LIB
 
-LDFLAGS :=
+LDFLAGS := \
+	-pthread \

@@ -1,3 +1,12 @@
+## not have srv 
+Mem: 198044K used, 305344K free, 2152K shrd, 4700K buff, 73336K cached
+CPU:   8% usr  30% sys   0% nic  60% idle   0% io   0% irq   0% sirq
+Load average: 0.53 0.58 0.38 2/110 8814
+  PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND
+  276     1 root     S     190m  39%  21% /usr/bin/mxapp2 --plugin tslib:/dev/input/event1
+ 8710  5372 root     R     2708   1%   1% top -b -n 7676
+
+
 ## only cap srv 
 Mem: 198740K used, 304648K free, 1968K shrd, 4652K buff, 68636K cached
 CPU:   5% usr  41% sys   0% nic  52% idle   0% io   0% irq   0% sirq
@@ -103,4 +112,6 @@ Load average: 3.00 1.75 1.24 2/120 17909
 ```
 > 可见,AI模型和相关的图像处理开销极大,没有 NPU / 硬件加速 → 纯 CPU 硬扛 AI
 > 这可能已经是这块板子的性能极限了！
-> 但是,幸好我还藏了一手---降分辨率160x120 /128x96,降转化质量TJSAMP_420+20%
+> 但是,幸好我还藏了一手---降转化质量TJSAMP_420+20%
+> 降分辨率160x120 /128x96,推理模型也许支持但是效果极差
+

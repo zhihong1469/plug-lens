@@ -10,6 +10,7 @@
  *                 5. 低功耗设计：事件触发处理，无忙等待
  *                 6. 集成OpenCV原生绘制人脸框，发布带框RGB帧
  *                 7. 【优化】解码RGB + 画框RGB 双总线物理隔离
+ *                 8. 【新增】15fps采集 → 5fpsAI检测，精准帧率控制
  * @author         Luo
  * @date           2026
  ******************************************************************************
@@ -45,8 +46,15 @@
 #define CAPTURE_WIDTH                 GLOBAL_VIDEO_WIDTH
 #define CAPTURE_HEIGHT                GLOBAL_VIDEO_HEIGHT
 
-/* 线程配置 —— 【修复：CPU空转】加长间隔，杜绝空转 */
-#define FRAME_PROCESS_INTERVAL_MS    200    // 每100ms处理一次 = 10FPS（可改50=20FPS 200=5FPS）
+/* 线程配置（适配通用线程组件） */
+#define FACE_THREAD_STACK_SIZE        (1024 * 1024)  // 1MB栈
+#define FACE_RT_PRIORITY              70              // 实时优先级(低于采集80)
+#define FACE_CPU_ID                   0               // 绑定CPU0
+#define FRAME_WAIT_TIMEOUT_MS         200
+
+/* 帧率优化配置：采集15fps → 检测5fps = 每3帧处理1次 */
+#define FPS_DOWNSAMPLE_STEP           2
+#define TARGET_AI_FPS                 5
 
 /* 帧大小配置（双RGB帧大小一致，总线物理隔离） */
 #define AI_RAW_RGB_FRAME_SIZE         (CAPTURE_WIDTH * CAPTURE_HEIGHT * 3)    // 解码后原始RGB
@@ -62,25 +70,25 @@
 #include "ai_model_mnn.hpp"
 #include "initcall.h"
 #include "sd_storage.h"
+#include "thread.h"   // 新增：引入通用线程组件
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sched.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
 #include <time.h>
 
 /* =============================================================================
- * @brief 人脸检测服务控制块（线程安全 + 事件唤醒）
+ * @brief 人脸检测服务控制块（线程安全 + 事件唤醒 + 帧率控制）
  * ============================================================================*/
 typedef struct {
     ai_model_handle_t            *ai_model;              /* AI模型句柄 */
 
-    /* 线程控制 */
-    pthread_t                     work_thread;           /* 工作线程 */
+    /* 线程控制：替换为封装thread_t */
+    thread_t                     work_thread;           /* 封装工作线程 */
     pthread_mutex_t               mutex;                 /* 条件变量互斥锁 */
-    bool                          thread_running;        /* 线程运行标志 */
+    pthread_cond_t                cond;                  /* 事件唤醒条件变量 */
     bool                          is_paused;             /* 服务暂停标志 */
     bool                          is_started;            /* 服务启动标志 */
 
@@ -94,6 +102,9 @@ typedef struct {
 
     /* SD卡存储 */
     SdStorage_t                  *sd_storage;            /* SD卡存储句柄 */
+
+    /* 帧率控制：新增帧计数器 */
+    uint32_t                      frame_sample_cnt;       /* 事件采样计数器 */
 
 } face_detect_srv_t;
 
@@ -122,6 +133,16 @@ static void event_bus_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
+        /* 采集帧就绪：唤醒AI线程处理（核心：低功耗触发） */
+        case EVENT_TYPE_CAPTURE_PROTO_READY:
+            if (thread_is_running(&srv->work_thread) && !srv->is_paused)
+            {
+                pthread_mutex_lock(&srv->mutex);
+                pthread_cond_signal(&srv->cond);  /* 唤醒工作线程 */
+                pthread_mutex_unlock(&srv->mutex);
+            }
+            break;
+
         /* 系统核心就绪 */
         case EVENT_TYPE_SYS_CORE_READY:
             LOG_I(MODULE_TAG "系统核心初始化完成");
@@ -159,8 +180,28 @@ static void event_bus_cb(const event_t *event, void *user_data)
     }
 }
 
+// 项目封装函数：毫秒级条件等待
+int pthread_cond_timedwait_ms(pthread_cond_t *cond,
+                              pthread_mutex_t *mutex,
+                              uint32_t timeout_ms)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    ts.tv_sec  += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000;
+    }
+
+    return pthread_cond_timedwait(cond, mutex, &ts);
+}
+
 /* =============================================================================
- * @brief   【终极修复】AI工作线程：定时拉帧，无空转、无锁竞争、CPU极低
+ * @brief   AI工作线程（拉模式 + 事件唤醒 + OpenCV画框 + 双RGB总线隔离 + 5fps帧率控制）
+ * @param   arg: 线程参数
+ * @return  线程退出码
  * ============================================================================*/
 static void *face_work_thread(void *arg)
 {
@@ -171,20 +212,31 @@ static void *face_work_thread(void *arg)
     data_bus_item_handle_t result_rgb_item = NULL;  // 【独立2】带人脸框的结果RGB帧
     int ret;
 
-    LOG_I(MODULE_TAG "AI工作线程启动【拉模式+事件唤醒+双RGB总线隔离】");
+    LOG_I(MODULE_TAG "AI工作线程启动【拉模式+事件唤醒+5fps帧率控制】");
 
-    while (srv->thread_running)
+    // 使用封装线程状态判断循环
+    while (thread_is_running(&srv->work_thread))
     {
         /* 暂停状态：低功耗等待 */
         if (srv->is_paused)
         {
-            usleep(FRAME_PROCESS_INTERVAL_MS * 1000);
+            thread_sleep_ms(FRAME_WAIT_TIMEOUT_MS);
             continue;
         }
 
-        // ====================== 【核心绝杀】固定间隔休眠，彻底杜绝空转 ======================
-        usleep(FRAME_PROCESS_INTERVAL_MS * 1000);
-        // ==================================================================================
+        /* ============== 核心：等待采集事件唤醒 ============== */
+        pthread_mutex_lock(&srv->mutex);
+        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_WAIT_TIMEOUT_MS);
+        pthread_mutex_unlock(&srv->mutex);
+
+        // ====================== 帧率优化核心：每3帧处理1次(15→5fps) ======================
+        srv->frame_sample_cnt++;
+        if (srv->frame_sample_cnt < FPS_DOWNSAMPLE_STEP)
+        {
+            continue; // 不处理，直接跳过
+        }
+        // 重置计数器，执行AI推理
+        srv->frame_sample_cnt = 0;
 
         /* ============== 拉取最新摄像头原始帧 ============== */
         ret = data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &camera_item);
@@ -202,13 +254,14 @@ static void *face_work_thread(void *arg)
                              &raw_rgb_item);
         if (ret != DATA_BUS_OK)
         {
+            LOG_W(MODULE_TAG "AI原始RGB总线无空闲帧");
             data_bus_release(camera_item);
             camera_item = NULL;
             continue;
         }
         uint8_t *raw_rgb_data = data_bus_get_writable_ptr(raw_rgb_item);
 
-        /* ============== AI推理 ============== */
+        /* ============== AI推理：MJPEG解码+RGB转换 + 人脸检测 ============== */
         srv->face_num = 0;
         memset(srv->faces, 0, sizeof(srv->faces));
         ret = ai_model_mnn_infer_image(src_camera,
@@ -220,13 +273,23 @@ static void *face_work_thread(void *arg)
                                       &srv->face_num,
                                       INPUT_FORMAT);
 
-        if (ret != MNN_FACE_OK || srv->face_num <= 0)
+        /* 推理失败：直接释放资源 */
+        if (ret != MNN_FACE_OK)
         {
+            LOG_E(MODULE_TAG "AI推理失败，错误码:%d", ret);
             goto release_res;
         }
 
-        /* ============== 检测到人脸：画框 + 保存 ============== */
+        /* ============== 无人脸：直接释放，不发布结果帧 ============== */
+        if (srv->face_num <= 0)
+        {
+            LOG_D(MODULE_TAG "未检测到人脸");
+            goto release_res;
+        }
+
         LOG_I(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
+
+        /* ============== 绘制人脸框 ============== */
         ret = data_bus_alloc(FACE_RESULT_RGB_DATA_BUS,
                              DATA_TYPE_VIDEO_RGB,
                              FACE_RESULT_RGB_FRAME_SIZE,
@@ -235,19 +298,18 @@ static void *face_work_thread(void *arg)
         if (ret == DATA_BUS_OK)
         {
             uint8_t *result_rgb_data = data_bus_get_writable_ptr(result_rgb_item);
-
-            /* 三合一：坐标映射 + 拷贝原始RGB + 绘制人脸框 */
-            // 最终版，一次调用处理所有人脸）
-            ai_model_mnn_map_and_draw_faces(srv->faces,      // 人脸数组
-                                            srv->face_num,   // 人脸数量（新增参数）
-                                            CAPTURE_WIDTH,   
+            ai_model_mnn_map_and_draw_faces(srv->faces,
+                                            srv->face_num,
+                                            CAPTURE_WIDTH,
                                             CAPTURE_HEIGHT,
-                                            raw_rgb_data,    // 原始图像
-                                            result_rgb_data); // 输出带框图像
+                                            raw_rgb_data,
+                                            result_rgb_data);
             LOG_D(MODULE_TAG "人脸框绘制完成");
-            if (srv->sd_storage)
+            
+            // SD卡保存
+            if (srv->sd_storage) 
             {
-                if(SdStorage_SaveJpeg(srv->sd_storage, data_bus_get_readonly_ptr(result_rgb_item)) == SD_STORAGE_OK)
+                if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
                 {
                     LOG_I(MODULE_TAG "SD卡保存人脸图像成功");
                 }
@@ -256,10 +318,6 @@ static void *face_work_thread(void *arg)
                     LOG_E(MODULE_TAG "SD卡保存失败");
                 }
             }
-            else
-            {
-                LOG_W(MODULE_TAG "SD存储未初始化，跳过保存");
-            }
         }
         else
         {
@@ -267,12 +325,15 @@ static void *face_work_thread(void *arg)
         }
 
 release_res:
-        /* ============== 【修复2】严格按顺序释放，杜绝引用计数溢出 ============== */
+        /* 释放资源 */
         if (result_rgb_item)  { data_bus_release(result_rgb_item); }
         if (raw_rgb_item)     { data_bus_release(raw_rgb_item); }
         if (camera_item)      { data_bus_release(camera_item); }
-
+        
         raw_rgb_item = camera_item = result_rgb_item = NULL;
+
+        /* 发布AI处理完成事件 */
+        event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_PROCESS_DONE, MODULE_NAME);
     }
 
     LOG_I(MODULE_TAG "AI工作线程安全退出");
@@ -280,44 +341,46 @@ release_res:
 }
 
 /* =============================================================================
- * @brief   服务启动函数
+ * @brief   服务启动函数（简化版：一键实时线程，代码精简70%）
  * @return  0:成功 负数:失败
  * ============================================================================*/
 static int face_srv_start(void)
 {
     face_detect_srv_t *srv = &s_face_srv;
-    int ret = -1;
-    pthread_attr_t thread_attr;
-    struct sched_param sched_param;
+    thread_err_t thread_ret;
 
-    pthread_attr_init(&thread_attr);
-    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
-    sched_param.sched_priority = 70; // 人脸优先级
-    pthread_attr_setschedparam(&thread_attr, &sched_param);
-    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
-    /* 创建工作线程 */
-    srv->thread_running = true;
-    srv->is_paused = false;
-// 人脸线程：优先级 70
-
-    ret = pthread_create(&srv->work_thread, NULL, face_work_thread, NULL);
+    /* 初始化条件变量 */
+    int ret = pthread_cond_init(&srv->cond, NULL);
     if (ret != 0)
     {
-        LOG_E(MODULE_TAG "工作线程创建失败");
-        srv->thread_running = false;
-        pthread_attr_destroy(&thread_attr);
+        LOG_E(MODULE_TAG "条件变量初始化失败");
         return -1;
     }
-    // 销毁线程属性
-    pthread_attr_destroy(&thread_attr);
 
+    // 一键创建实时线程：命名+栈大小+入口+优先级+CPU绑定 一步到位
+    thread_ret = thread_create_rt(&srv->work_thread,
+                                  "FACE_Detect",
+                                  FACE_THREAD_STACK_SIZE,
+                                  face_work_thread,
+                                  NULL,
+                                  FACE_RT_PRIORITY,
+                                  FACE_CPU_ID);
+
+    if (thread_ret != THREAD_OK)
+    {
+        LOG_E(MODULE_TAG "实时工作线程创建失败 err=%d", thread_ret);
+        pthread_cond_destroy(&srv->cond);
+        return -1;
+    }
+
+    srv->is_paused = false;
     event_bus_publish_simple(SYS_EVENT_BUS_NAME, EVENT_TYPE_FACE_READY, MODULE_NAME);
-    LOG_I(MODULE_TAG "人脸检测服务启动成功");
+    LOG_I(MODULE_TAG "人脸检测服务启动成功 [实时优先级=70 | 5fps]");
     return 0;
 }
 
 /* =============================================================================
- * @brief   服务资源清理（安全退出）
+ * @brief   服务资源清理（适配封装线程）
  * ============================================================================*/
 static void face_srv_cleanup(void)
 {
@@ -325,13 +388,19 @@ static void face_srv_cleanup(void)
 
     LOG_W(MODULE_TAG "开始释放所有资源");
 
-    /* 停止线程 */
-    srv->thread_running = false;
+    // 1. 安全停止线程（封装API）
+    thread_stop(&srv->work_thread);
     srv->is_paused = true;
 
-    if (srv->work_thread > 0)
+    /* 唤醒阻塞线程 */
+    pthread_mutex_lock(&srv->mutex);
+    pthread_cond_signal(&srv->cond);
+    pthread_mutex_unlock(&srv->mutex);
+
+    // 2. 等待线程退出（封装API）
+    if (thread_is_running(&srv->work_thread))
     {
-        pthread_join(srv->work_thread, NULL);
+        thread_join(&srv->work_thread, NULL);
     }
 
     /* 取消事件订阅 */
@@ -345,6 +414,7 @@ static void face_srv_cleanup(void)
     }
 
     /* 销毁同步变量 */
+    pthread_cond_destroy(&srv->cond);
     pthread_mutex_destroy(&srv->mutex);
 
     /* 销毁AI模型 + 双RGB总线 */
@@ -353,10 +423,10 @@ static void face_srv_cleanup(void)
         ai_model_destroy(srv->ai_model);
         srv->ai_model = NULL;
     }
-    data_bus_deinit(AI_RAW_RGB_DATA_BUS);       // 释放原始RGB总线
-    data_bus_deinit(FACE_RESULT_RGB_DATA_BUS);  // 释放结果RGB总线
+    data_bus_deinit(AI_RAW_RGB_DATA_BUS);
+    data_bus_deinit(FACE_RESULT_RGB_DATA_BUS);
 
-    /* 安全释放SD卡存储 */
+    /* 释放SD卡 */
     if (srv->sd_storage) {
         SdStorage_Deinit(srv->sd_storage);
         srv->sd_storage = NULL;
@@ -379,6 +449,7 @@ static int face_srv_init(void)
     memset(srv, 0, sizeof(face_detect_srv_t));
     srv->evt_sys_sub_id = -1;
     srv->evt_capture_sub_id = -1;
+    srv->frame_sample_cnt = 0;  // 帧率计数器初始化
 
     /* 初始化互斥锁 */
     ret = pthread_mutex_init(&srv->mutex, NULL);
@@ -388,7 +459,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    /* 初始化【AI原始RGB总线】 */
+    /* 初始化AI原始RGB总线 */
     data_bus_config_t ai_raw_rgb_cfg = {
         .name = AI_RAW_RGB_DATA_BUS,
         .max_item_size = AI_RAW_RGB_FRAME_SIZE,
@@ -403,7 +474,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    /* 初始化【人脸结果RGB总线】 */
+    /* 初始化人脸结果RGB总线 */
     data_bus_config_t face_result_rgb_cfg = {
         .name = FACE_RESULT_RGB_DATA_BUS,
         .max_item_size = FACE_RESULT_RGB_FRAME_SIZE,
@@ -437,7 +508,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    /* 订阅系统事件 */
+    /* 订阅事件总线 */
     event_subscriber_t sys_sub = {
         .event_type = EVENT_TYPE_INVALID,
         .callback = event_bus_cb,
@@ -446,7 +517,6 @@ static int face_srv_init(void)
     };
     srv->evt_sys_sub_id = event_bus_subscribe(SYS_EVENT_BUS_NAME, &sys_sub);
 
-    /* 订阅采集帧就绪事件 */
     event_subscriber_t cap_sub = {
         .event_type = EVENT_TYPE_CAPTURE_PROTO_READY,
         .callback = event_bus_cb,
@@ -462,7 +532,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    /* 【修复】初始化SD卡存储（确保指针有效） */
+    /* 初始化SD卡 */
     srv->sd_storage = SdStorage_Init();
     if (srv->sd_storage) {
         LOG_I(MODULE_TAG "SD卡存储初始化成功");
@@ -470,12 +540,12 @@ static int face_srv_init(void)
         LOG_W(MODULE_TAG "SD卡存储初始化失败，将无法保存人脸图片");
     }
 
-    LOG_I(MODULE_TAG "人脸检测服务初始化完成（双RGB总线物理隔离+OpenCV画框）");
+    LOG_I(MODULE_TAG "人脸检测服务初始化完成（5fps+双RGB总线隔离）");
     return 0;
 }
 
 /* =============================================================================
- * @brief   模块自动初始化（系统启动时自动加载）
+ * @brief   模块自动初始化
  * ============================================================================*/
 static int face_srv_auto_init(void)
 {
