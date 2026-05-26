@@ -144,7 +144,7 @@ static void capture_srv_cleanup(void)
     LOG_I(MODULE_TAG " 线程锁已销毁");
 
     // 6. 发布停止事件
-    event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
+    // event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_STOPPED, MODULE_NAME);
     LOG_I(MODULE_TAG " 所有资源释放完成，服务已安全退出");
 }
 

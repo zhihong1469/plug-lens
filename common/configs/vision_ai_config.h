@@ -150,10 +150,10 @@ typedef enum {
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 
-// AI模型配置 原来320x240
+// AI模型配置 原来320x240 you can 160x120 /128x96 or using quantified models
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
-#define CONFIG_AI_INPUT_W    320
-#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_INPUT_W    128
+#define CONFIG_AI_INPUT_H    96
 #define CONFIG_AI_SCORE_THRESH 0.55f
 #define CONFIG_AI_IOU_THRESH   0.3f
 
@@ -164,7 +164,7 @@ typedef enum {
 // ==========================================================================
 // 【全局统一视频基准宏】唯一入口，所有模块共用，禁止单独修改！
 // ==========================================================================
-#define GLOBAL_VIDEO_FPS                8           // 全局统一帧率（采集=推流=RTSP）
+#define GLOBAL_VIDEO_FPS                14           // 全局统一帧率（采集=推流=RTSP）
 #define GLOBAL_VIDEO_WIDTH              640         // 统一分辨率宽
 #define GLOBAL_VIDEO_HEIGHT             360         // 统一分辨率高
 #define GLOBAL_JPEG_QUALITY             75          // 统一JPEG质量

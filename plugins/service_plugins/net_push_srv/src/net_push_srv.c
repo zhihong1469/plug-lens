@@ -65,6 +65,10 @@
 #define NET_PUSH_RT_PRIORITY       90              // 推流实时优先级(最高)
 #define NET_PUSH_CPU_ID            0               // 绑定CPU0
 
+// 帧率优化配置：设置为x = 每x次推流事件处理1次:cap 14fps ---2---7
+#define FPS_DOWNSAMPLE_STEP           2
+#define TARGET_PUSH_FPS               5
+
 // ==========================================================================
 // @brief 网络推流服务控制块
 // ============================================================================
@@ -77,10 +81,12 @@ typedef struct {
     bool                    is_started;
 
     int                     evt_sys_sub_id;
-    int                     evt_ai_sub_id;
+    int                     evt_capture_sub_id;  // 重命名：采集事件订阅ID
 
     h264_encoder_t          h264_enc;
     uint8_t*                h264_buf;
+
+    uint32_t                frame_sample_cnt;   // 新增：帧率控制计数器
 } net_push_srv_t;
 
 static net_push_srv_t s_net_push_srv;
@@ -190,7 +196,8 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
-        case EVENT_TYPE_FACE_PROCESS_DONE:
+        // 核心修改：监听采集帧就绪事件（和人脸检测唤醒源一致）
+        case EVENT_TYPE_CAPTURE_PROTO_READY:
             if (thread_is_running(&srv->work_thread) && !srv->is_paused)
             {
                 pthread_mutex_lock(&srv->mutex);
@@ -252,10 +259,18 @@ static void *net_push_work_thread(void *arg)
             continue;
         }
 
-        // 帧率控制
+        // 等待采集事件唤醒
         pthread_mutex_lock(&srv->mutex);
-        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_INTERVAL_MS);
+        pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_WAIT_TIMEOUT_MS);
         pthread_mutex_unlock(&srv->mutex);
+
+        // ====================== 核心：软件降帧（15fps→5fps，和人脸检测完全一致） ======================
+        srv->frame_sample_cnt++;
+        if (srv->frame_sample_cnt < FPS_DOWNSAMPLE_STEP)
+        {
+            continue; // 跳过，不处理
+        }
+        srv->frame_sample_cnt = 0; // 重置计数器
 
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -308,7 +323,7 @@ static void *net_push_work_thread(void *arg)
 }
 
 // ==========================================================================
-// 服务启动（简化版：一键实时线程，代码精简100%）
+// 服务启动（简化版：一键创建实时线程，代码精简100%）
 // ============================================================================
 static int net_push_srv_start(void)
 {
@@ -418,7 +433,7 @@ static void net_push_srv_cleanup(void)
 
     // 取消事件订阅
     if (srv->evt_sys_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_sys_sub_id);
-    if (srv->evt_ai_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_ai_sub_id);
+    if (srv->evt_capture_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_capture_sub_id);
 
     // 释放img_joint资源
     if (srv->h264_buf) { mem_free(srv->h264_buf); srv->h264_buf = NULL; }
@@ -447,7 +462,8 @@ static int net_push_srv_init(void)
 
     memset(srv, 0, sizeof(net_push_srv_t));
     srv->evt_sys_sub_id = -1;
-    srv->evt_ai_sub_id = -1;
+    srv->evt_capture_sub_id = -1;
+    srv->frame_sample_cnt = 0;  // 初始化帧率计数器
 
     ret = pthread_mutex_init(&srv->mutex, NULL);
     if (ret != 0) {
@@ -464,16 +480,10 @@ static int net_push_srv_init(void)
     };
     srv->evt_sys_sub_id = event_bus_subscribe(SYS_EVENT_BUS, &sys_sub);
 
-    // 订阅AI完成事件
-    event_subscriber_t ai_sub = {
-        .event_type = EVENT_TYPE_FACE_PROCESS_DONE,
-        .callback = net_push_event_cb,
-        .user_data = srv,
-        .skip_self_published = true
-    };
-    srv->evt_ai_sub_id = event_bus_subscribe(SYS_EVENT_BUS, &ai_sub);
 
-    if (srv->evt_sys_sub_id < 0 || srv->evt_ai_sub_id < 0) {
+
+    if (srv->evt_sys_sub_id < 0 ) 
+    {
         LOG_E(MODULE_TAG "事件订阅失败");
         net_push_srv_cleanup();
         return -3;
