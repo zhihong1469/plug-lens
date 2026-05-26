@@ -190,7 +190,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
-        case EVENT_TYPE_CAPTURE_PROTO_READY:
+        case EVENT_TYPE_FACE_PROCESS_DONE:
             if (thread_is_running(&srv->work_thread) && !srv->is_paused)
             {
                 pthread_mutex_lock(&srv->mutex);

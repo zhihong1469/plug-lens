@@ -23,6 +23,12 @@ Load average: 0.45 1.53 1.63 2/114 16522
   PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND
   276     1 root     R     190m  39%  18% /usr/bin/mxapp2 --plugin tslib:/dev/input/event1
 16521  5372 root     R     2580   1%  18% top -b -n 7676
+## cap net(have client)
+CPU:  63% usr  19% sys   0% nic  16% idle   0% io   0% irq   0% sirq
+Load average: 2.56 1.13 0.76 1/114 7164
+  PID  PPID USER     STAT   VSZ %VSZ %CPU COMMAND
+ 7013  1246 root     S    96584  19%  63% ./vision_ai_app
+
 
 thread: app main capture net rtsp 
 
