@@ -101,6 +101,9 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
         delete[] ai_img_buf;
         return MNN_FACE_ERR_INPUT;
     }
+    // 调试使用,我需要把压缩后的ai_img_buf回传给external_rgb_buf,外部已设置好保存到SD卡
+// memset(external_rgb_buf, 0, cam_w * cam_h * 3);
+// memcpy(external_rgb_buf, ai_img_buf, m_ai_w * m_ai_h * 3);
 
     // ====================== MNN图像预处理 ======================
     m_interpreter->resizeSession(m_session);

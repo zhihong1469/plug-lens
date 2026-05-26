@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include "utils.h"
 // 新增：OpenCV头文件（已在UltraFaceMNN.hpp包含，这里显式声明）
 #include "img_joint.h"
 using namespace std;
@@ -192,7 +193,7 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 }
 
 // ==========================
-// 无OpenCV版：批量坐标映射 + 拷贝图像 + 绘制多个人脸框（最终版）
+// 【已修复】100%适配 rgb_resize 等比例裁剪方案
 // ==========================
 void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
                                      int cam_w, int cam_h,
@@ -200,29 +201,69 @@ void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
 {
     if (!faces || face_num <= 0 || !src_frame || !dst_frame || !g_priv) return;
 
-    // 🔥 关键修复：只拷贝1次原始图像（原代码重复拷贝，效率极低）
+    // 拷贝原图
     memcpy(dst_frame, src_frame, cam_w * cam_h * 3);
 
-    // 遍历所有人脸，批量坐标映射 + 画框
-    float sw = (float)cam_w / g_priv->ai_w;
-    float sh = (float)cam_h / g_priv->ai_h;
+    int model_w = g_priv->ai_w;  // 160
+    int model_h = g_priv->ai_h;  // 120
 
-    for (int i = 0; i < face_num; i++) {
+    // ==============================================
+    // 【修复1】全部使用浮点计算，避免int截断误差
+    // 和rgb_resize的计算逻辑完全一致
+    // ==============================================
+    float scale_w = (float)model_w / cam_w;
+    float scale_h = (float)model_h / cam_h;
+    float scale    = utils_fmaxf(scale_w, scale_h);
+
+    float scaled_w = cam_w * scale;
+    float scaled_h = cam_h * scale;
+    float crop_x   = (scaled_w - model_w) / 2.0f;
+    float crop_y   = (scaled_h - model_h) / 2.0f;
+
+    const float score_thresh = 0.5f;
+
+    for (int i = 0; i < face_num; i++) 
+    {
         FaceInfo_C* face = &faces[i];
-        
-        // 1. 坐标等比例映射（批量计算）
-        face->x1 *= sw;
-        face->y1 *= sh;
-        face->x2 *= sw;
-        face->y2 *= sh;
+        if (face->score < score_thresh) continue;
 
-        // 2. 纯C画框（在目标图像上画所有人脸）
-        int x = (int)face->x1;
-        int y = (int)face->y1;
-        int w = (int)(face->x2 - face->x1);
-        int h = (int)(face->y2 - face->y1);
+        // 模型输出已经是模型图像素坐标（0~160, 0~120）
+        float model_x1 = face->x1;
+        float model_y1 = face->y1;
+        float model_x2 = face->x2;
+        float model_y2 = face->y2;
 
-        bgr_draw_rect(dst_frame, cam_w, cam_h, x, y, w, h, FACE_BOX_COLOR_RED, FACE_BOX_THICKNESS);
+        // ==============================================
+        // 【修复2】精确逆映射公式（使用浮点crop值）
+        // ==============================================
+        float x1 = (model_x1 + crop_x) / scale;
+        float y1 = (model_y1 + crop_y) / scale;
+        float x2 = (model_x2 + crop_x) / scale;
+        float y2 = (model_y2 + crop_y) / scale;
+    // printf("原始坐标: x1=%.2f, y1=%.2f, x2=%.2f, y2=%.2f, score=%.2f\n", 
+    //     face->x1, face->y1, face->x2, face->y2, face->score);
+    //     // 调试日志：打印计算后的原图坐标（确认是否正确）
+    //     printf("原图坐标: x1=%.2f, y1=%.2f, x2=%.2f, y2=%.2f\n", 
+    //            x1, y1, x2, y2);
+
+        // 边界保护
+        x1 = utils_fmaxf(0.0f, utils_fminf(x1, (float)cam_w));
+        y1 = utils_fmaxf(0.0f, utils_fminf(y1, (float)cam_h));
+        x2 = utils_fmaxf(0.0f, utils_fminf(x2, (float)cam_w));
+        y2 = utils_fmaxf(0.0f, utils_fminf(y2, (float)cam_h));
+
+        // 确保宽高为正
+        if (x2 <= x1 || y2 <= y1) continue;
+
+        int ix1 = (int)x1;
+        int iy1 = (int)y1;
+        int iw  = (int)(x2 - x1);
+        int ih  = (int)(y2 - y1);
+
+        if (iw < 15 || ih < 15) continue;
+
+        // 绘制框
+        bgr_draw_rect(dst_frame, cam_w, cam_h, ix1, iy1, iw, ih, FACE_BOX_COLOR_RED, FACE_BOX_THICKNESS);
     }
 }
 // ==========================

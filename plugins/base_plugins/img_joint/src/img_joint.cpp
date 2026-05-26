@@ -15,6 +15,8 @@
 // OpenH264编码头文件（严格对齐平台版本 + 官方接口）
 #include "codec_api.h"
 
+// 工具宏：向上取整到16字节对齐
+#define ALIGN16(x) (((x) + 15) & ~15)
 
 // =============================================================================
 // YUYV(YUV422) 转 RGB888（libyuv 标准转换流程）
@@ -38,7 +40,7 @@ int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_bu
                         rgb_buf, width * 3,
                         width, height);
 
-    free(temp_argb);
+    mem_free(temp_argb);
     return IMG_JOINT_OK;
 }
 
@@ -115,7 +117,8 @@ int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_bu
 }
 
 // =============================================================================
-// RGB图像缩放（libyuv ARGB中转缩放，三通道标准实现）
+// 兼容原接口：libyuv RGB缩放（无动态malloc，等比例裁剪，模型输入专用）
+// 【适配版】仅使用你库中存在的接口：RGB24ToARGB / ARGBScale / ARGBCopy / ARGBToRGB24
 // =============================================================================
 int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
                uint8_t* dst_rgb, int dst_w, int dst_h) {
@@ -123,34 +126,48 @@ int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
         return -1;
     }
 
-    int src_argb_size = src_w * src_h * 4;
-    int dst_argb_size = dst_w * dst_h * 4;
-    uint8_t* src_argb = (uint8_t*)mem_alloc(src_argb_size);
-    uint8_t* dst_argb = (uint8_t*)mem_alloc(dst_argb_size);
+    // 静态缓冲区，按16字节对齐分配
+    static uint8_t argb_buf[ALIGN16(640) * 360 * 4];
+    static uint8_t crop_argb_buf[ALIGN16(160) * 120 * 4];
 
-    if (!src_argb || !dst_argb) {
-        if (src_argb) free(src_argb);
-        if (dst_argb) free(dst_argb);
-        return -1;
-    }
+    // 等比例缩放计算（不变）
+    float scale_w = (float)dst_w / src_w;
+    float scale_h = (float)dst_h / src_h;
+    float scale    = (scale_w > scale_h) ? scale_w : scale_h;
 
-    // RGB24 -> ARGB 转换
-    libyuv::RGB24ToARGB(src_rgb, src_w * 3,
-                        src_argb, src_w * 4,
+    int scaled_w = (int)(src_w * scale);
+    int scaled_h = (int)(src_h * scale);
+    int crop_x   = (scaled_w - dst_w) / 2;
+    int crop_y   = (scaled_h - dst_h) / 2;
+
+    // 计算对齐后的步长（关键修复！）
+    int src_rgb_stride = ALIGN16(src_w * 3);
+    int src_argb_stride = ALIGN16(src_w * 4);
+    int scaled_argb_stride = ALIGN16(scaled_w * 4);
+    int dst_argb_stride = ALIGN16(dst_w * 4);
+    int dst_rgb_stride = ALIGN16(dst_w * 3);
+
+    // 1. RGB24 -> ARGB（使用对齐后的步长）
+    libyuv::RGB24ToARGB(src_rgb, src_rgb_stride,
+                        argb_buf, src_argb_stride,
                         src_w, src_h);
 
-    // ARGB 双线性缩放（libyuv原生最优算法）
-    libyuv::ARGBScale(src_argb, src_w * 4, src_w, src_h,
-                      dst_argb, dst_w * 4, dst_w, dst_h,
+    // 2. ARGB 双线性缩放（使用对齐后的步长）
+    libyuv::ARGBScale(argb_buf, src_argb_stride, src_w, src_h,
+                      argb_buf, scaled_argb_stride, scaled_w, scaled_h,
                       libyuv::kFilterBilinear);
 
-    // ARGB -> RGB24 输出
-    libyuv::ARGBToRGB24(dst_argb, dst_w * 4,
-                        dst_rgb, dst_w * 3,
+    // 3. 居中裁剪（使用对齐后的步长）
+    const uint8_t* src_crop = argb_buf + (crop_y * scaled_argb_stride) + (crop_x * 4);
+    libyuv::ARGBCopy(src_crop, scaled_argb_stride,
+                     crop_argb_buf, dst_argb_stride,
+                     dst_w, dst_h);
+
+    // 4. ARGB -> RGB24（使用对齐后的步长）
+    libyuv::ARGBToRGB24(crop_argb_buf, dst_argb_stride,
+                        dst_rgb, dst_rgb_stride,
                         dst_w, dst_h);
 
-    free(src_argb);
-    free(dst_argb);
     return 0;
 }
 
@@ -219,14 +236,14 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     int i420_size = param->width * param->height * 3 / 2;
     impl->i420_buf = (uint8_t*)mem_alloc(i420_size);
     if (!impl->i420_buf) {
-        free(impl);
+        mem_free(impl);
         return NULL;
     }
 
     int ret = WelsCreateSVCEncoder(&impl->p_encoder);
     if (ret != 0 || !impl->p_encoder) {
-        free(impl->i420_buf);
-        free(impl);
+        mem_free(impl->i420_buf);
+        mem_free(impl);
         return NULL;
     }
 
@@ -251,8 +268,8 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     ret = impl->p_encoder->InitializeExt(&impl->param);
     if (ret != 0) {
         WelsDestroySVCEncoder(impl->p_encoder);
-        free(impl->i420_buf);
-        free(impl);
+        mem_free(impl->i420_buf);
+        mem_free(impl);
         return NULL;
     }
 
@@ -360,6 +377,6 @@ void h264_encoder_destroy(h264_encoder_t encoder) {
         impl->p_encoder->Uninitialize();
         WelsDestroySVCEncoder(impl->p_encoder);
     }
-    free(impl->i420_buf);
-    free(impl);
+    mem_free(impl->i420_buf);
+    mem_free(impl);
 }

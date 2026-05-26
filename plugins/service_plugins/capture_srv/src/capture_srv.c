@@ -5,7 +5,7 @@
  * @brief          视频采集服务 - DataBus 纯推模式标准生产者
  * @author         System Team
  * @date           2026
- * @version        V3.0 彻底移除FrameLink，纯DataBus架构
+ * @version        V3.0 彻底移除FrameLink，纯DataBus架构 | 适配通用线程组件
  * @constraint     全局唯一生产者 | 绝不阻塞线程 | 零拷贝共享 | 消费者只读
  * @core_flow      摄像头取帧 → DataBus申请空闲内存 → 填充数据 → 发布总线
  *                → 自动通知所有订阅者 → 生产者释放自身引用
@@ -17,13 +17,13 @@
 #include "utils.h"
 #include "vision_ai_config.h"
 #include "camera_usb.h"
+#include "thread.h"   // 新增：引入你封装的通用线程组件
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include <pthread.h>
-#include <sched.h>
 #include <errno.h>
+
 // ==========================================================================
 // 全局宏定义（文件私有化，标注来源，方便代码巡查）
 // 来源：common\configs\vision_ai_config.h
@@ -54,46 +54,42 @@
 #define AI_TARGET_FPS             GLOBAL_VIDEO_FPS                
 #define FPS_DOWNSAMPLE_STEP       (CAPTURE_FPS / AI_TARGET_FPS)  // 30/5=6，每6帧保留1帧给AI
 
+// 线程配置
+#define CAPTURE_THREAD_STACK_SIZE (1024 * 1024)  // 采集线程栈大小 1MB
+#define CAPTURE_RT_PRIORITY       80              // 采集实时优先级
+#define CAPTURE_CPU_ID            0               // 绑定CPU0（i.MX6ULL单核）
+
 // ==========================================================================
-// 采集服务 私有结构体（静态单例，外部完全不可见）
+// 采集服务 私有结构体（替换pthread_t为封装的thread_t）
 // ==========================================================================
 typedef struct {
     // 8字节 指针/句柄
-    camera_base_t          *cam;           // 子类基指针 8/4B
-    // 8字节 线程/锁
-    pthread_t               work_thread;   // 工作线程 8B
-    pthread_mutex_t         lock;          // 线程锁 8/4B
+    camera_base_t          *cam;           // 子类基指针
+    // 替换：原生pthread → 你封装的通用线程句柄
+    thread_t                work_thread;   // 工作线程（封装组件）
+    pthread_mutex_t         lock;          // 线程锁
     // 8字节 计数/时间戳
-    uint64_t                frame_count;   // 帧总数 8B
-    uint64_t                last_fps_ts;   // 上一帧时间戳 8B
+    uint64_t                frame_count;   // 帧总数
+    uint64_t                last_fps_ts;   // 上一帧时间戳
     // 4字节 配置/参数
-    uint32_t                width;         // 宽度 4B
-    uint32_t                height;        // 高度 4B
-    uint32_t                fps;           // 帧率 4B
-    uint32_t                v4l2_format;   // V4L2摄像头格式 4B
-    uint32_t                downsample_cnt;// 降频计数 4B
-    int                     evt_sub_id;    // 事件订阅ID 4B
+    uint32_t                width;         // 宽度
+    uint32_t                height;        // 高度
+    uint32_t                fps;           // 帧率
+    uint32_t                v4l2_format;   // V4L2摄像头格式
+    uint32_t                downsample_cnt;// 降频计数
+    int                     evt_sub_id;    // 事件订阅ID
 
     // 1字节 bool（紧凑放最后）
-    bool                    thread_running;// 线程运行 1B
-    bool                    is_paused;     // 暂停 1B
-    bool                    is_started;    // 已启动 1B
+    bool                    thread_running;// 线程运行
+    bool                    is_paused;     // 暂停
+    bool                    is_started;    // 已启动
 } capture_srv_t;
-// 静态单例（服务自治，无对外暴露）
+
 static capture_srv_t s_capture;
 
 // ==========================================================================
-// 内部工具函数：线程安全加锁/解锁 + 格式转换
+// 内部工具函数
 // ==========================================================================
-// static inline void _capture_lock(void) {
-//     pthread_mutex_lock(&s_capture.lock);
-// }
-
-// static inline void _capture_unlock(void) {
-//     pthread_mutex_unlock(&s_capture.lock);
-// }
-
-// 格式转换：配置 → V4L2标准格式枚举
 static uint32_t _capture_get_v4l2_format(int cfg)
 {
     switch (cfg) {
@@ -105,7 +101,7 @@ static uint32_t _capture_get_v4l2_format(int cfg)
 }
 
 // ==========================================================================
-// 【核心】服务统一清理函数：安全释放所有资源
+// 【核心】服务统一清理函数：适配封装线程组件
 // ==========================================================================
 static void capture_srv_cleanup(void)
 {
@@ -113,13 +109,15 @@ static void capture_srv_cleanup(void)
 
     LOG_W(MODULE_TAG " 开始执行全量资源释放...");
 
-    // 1. 停止工作线程
+    // 1. 安全停止线程（封装API）
+    thread_stop(&srv->work_thread);
     srv->thread_running = false;
     srv->is_paused = true;
-    if (srv->work_thread > 0) {
-        pthread_join(srv->work_thread, NULL);
+
+    // 替换：原生pthread_join → 封装thread_join
+    if (thread_is_running(&srv->work_thread)) {
+        thread_join(&srv->work_thread, NULL);
         LOG_I(MODULE_TAG " 工作线程已安全退出");
-        srv->work_thread = 0;
     }
 
     // 2. 取消系统事件订阅
@@ -151,13 +149,7 @@ static void capture_srv_cleanup(void)
 }
 
 // ==========================================================================
-// 工作线程：【DataBus V4.0标准生产者】零拷贝 / 无阻塞 / 自动引用计数
-// 核心规范（强制遵守）：
-// 1. DataBus V4.0：唯一管理帧内存、生命周期、引用计数
-// 2. 内存池满直接丢弃帧，绝不阻塞生产线程
-// 3. 生产者唯一写权限，push发布后变为只读
-// 4. 推模式自动通知所有订阅者
-// 5. 生产者必须在push后释放自身引用
+// 工作线程：业务逻辑完全不变，仅修改运行判断
 // ==========================================================================
 static void *capture_work_thread(void *arg)
 {
@@ -174,13 +166,12 @@ static void *capture_work_thread(void *arg)
     LOG_I(MODULE_TAG " 工作线程启动，硬件采集: %ux%u@%uFPS | AI软件降频: %uFPS",
           srv->width, srv->height, srv->fps, AI_TARGET_FPS);
 
-    while (srv->thread_running) {
-        // 每次循环重置句柄
+    // 替换：用封装线程运行状态判断
+    while (thread_is_running(&srv->work_thread)) {
         item = NULL;
         cam_buf = NULL;
         writable_buf = NULL;
 
-        // 暂停状态处理
         if (srv->is_paused) {
             usleep(CAP_FRAME_WAIT_US);
             continue;
@@ -196,13 +187,12 @@ static void *capture_work_thread(void *arg)
         srv->downsample_cnt++;
         bool send_to_bus = (srv->downsample_cnt >= FPS_DOWNSAMPLE_STEP);
         
-        // 不达标：直接丢弃摄像头数据，不申请任何内存！
         if (!send_to_bus) {
             srv->frame_count++;
-            goto fps_stats; // 直接跳转到FPS统计，不操作总线
+            goto fps_stats;
         }
 
-        // ============== 第三步：降频达标 → 向DataBus V4.0申请空闲帧 ==============
+        // ============== 第三步：降频达标 → 向DataBus申请空闲帧 ==============
         srv->downsample_cnt = 0;
         ret = data_bus_alloc(CAPTURE_DATA_BUS_NAME,
                                  DATA_TYPE_VIDEO,
@@ -210,10 +200,8 @@ static void *capture_work_thread(void *arg)
                                  MODULE_NAME,
                                  &item);
         if (ret != DATA_BUS_OK) {
-            if (ret == DATA_BUS_ERR_FULL) { // 内存池满
+            if (ret == DATA_BUS_ERR_FULL) {
                 LOG_D(MODULE_TAG " 内存池满，丢弃当前帧");
-            } else {
-                LOG_D(MODULE_TAG " data_bus_alloc 失败，ret=%d", ret);
             }
             goto fps_stats;
         }
@@ -222,33 +210,30 @@ static void *capture_work_thread(void *arg)
         writable_buf = data_bus_get_writable_ptr(item);
         if (!writable_buf) {
             LOG_E(MODULE_TAG " 获取可写指针失败");
-            data_bus_release(item); // FIX: 异常必须释放
+            data_bus_release(item);
             item = NULL;
             goto fps_stats;
         }
         
-        // 安全拷贝，防止越界
         size_t copy_len = utils_min(cam_len, MAX_FRAME_SIZE);
         memcpy(writable_buf, cam_buf, copy_len);
 
-        // ============== 第五步：V4.0正式API发布数据到总线 ==============
-        ret = data_bus_push(CAPTURE_DATA_BUS_NAME, item); // FIX: 替换旧版publish为正式push
+        // ============== 第五步：发布数据到总线 ==============
+        ret = data_bus_push(CAPTURE_DATA_BUS_NAME, item);
         if (ret != DATA_BUS_OK) {
             LOG_E(MODULE_TAG " DataBus push发布帧失败，ret=%d", ret);
-            data_bus_release(item); // FIX: 发布失败必须释放
+            data_bus_release(item);
             item = NULL;
             goto fps_stats;
         }
-        // LOG_D(MODULE_TAG " ✅ 帧推入DataBus成功 | ret=%d", ret);
 
-        // 发布事件通知（轻量唤醒，不传递数据）
         event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_PROTO_READY, MODULE_NAME);
 
-        // ============== 第六步：生产者释放自身引用（V4.0强制规范） ==============
+        // ============== 第六步：生产者释放自身引用 ==============
         data_bus_release(item);
         item = NULL;
 
-        // ============== FPS统计（公共出口） ==============
+        // ============== FPS统计 ==============
 fps_stats:
         gettimeofday(&tv, NULL);
         current_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
@@ -265,14 +250,12 @@ fps_stats:
 }
 
 // ==========================================================================
-// 服务启动：启动采集线程
+// 服务启动：【简化版】一键实时线程接口，代码精简70%
 // ==========================================================================
 static int capture_srv_start(void)
 {
     capture_srv_t *srv = &s_capture;
-    int ret = -1;
-    pthread_attr_t thread_attr;
-    struct sched_param sched_param;
+    thread_err_t thread_ret;
 
     // 启动摄像头采集
     if (camera_start_capture(srv->cam) != 0) {
@@ -280,37 +263,31 @@ static int capture_srv_start(void)
         return -1;
     }
 
-    // 初始化线程属性 + 设置实时优先级（核心：采集优先级80）
-    pthread_attr_init(&thread_attr);
-    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
-    sched_param.sched_priority = 80;
-    pthread_attr_setschedparam(&thread_attr, &sched_param);
-    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
+    // 一键创建实时线程：自动完成 命名+栈+优先级+CPU绑定+FIFO调度
+    thread_ret = thread_create_rt(&srv->work_thread,
+                                  "CAPTURE_Work",
+                                  CAPTURE_THREAD_STACK_SIZE,
+                                  capture_work_thread,
+                                  NULL,
+                                  CAPTURE_RT_PRIORITY,
+                                  CAPTURE_CPU_ID);
 
-    // 启动工作线程
-    srv->thread_running = true;
-    srv->is_paused = false;
-    ret = pthread_create(&srv->work_thread, &thread_attr, capture_work_thread, NULL);
-    if (ret != 0) {
-        LOG_E(MODULE_TAG " 创建工作线程失败 err=%d", ret);
-        pthread_attr_destroy(&thread_attr);
+    if (thread_ret != THREAD_OK) {
+        LOG_E(MODULE_TAG " 创建实时工作线程失败 err=%d", thread_ret);
         camera_stop_capture(srv->cam);
-        srv->thread_running = false;
         return -1;
     }
-
-    // 销毁线程属性
-    pthread_attr_destroy(&thread_attr);
 
     // 发布状态事件
     event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_READY, MODULE_NAME);
     event_bus_publish_simple(CAPTURE_EVENT_BUS_NAME, EVENT_TYPE_CAPTURE_RUNNING, MODULE_NAME);
 
-    LOG_I(MODULE_TAG " 服务启动成功，硬件采集运行中 [优先级=80]");
+    LOG_I(MODULE_TAG " 服务启动成功，硬件采集运行中 [实时优先级=80 | 绑定CPU0]");
     return 0;
 }
+
 // ==========================================================================
-// 事件总线回调：系统事件处理
+// 事件总线回调（完全不变）
 // ==========================================================================
 static void _capture_event_cb(const event_t *event, void *user_data)
 {
@@ -355,31 +332,28 @@ static void _capture_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 服务初始化：DataBus+摄像头 初始化
+// 服务初始化（完全不变）
 // ==========================================================================
 static int capture_srv_init(void)
 {
     capture_srv_t *srv = &s_capture;
     memset(srv, 0, sizeof(capture_srv_t));
 
-    // 1. 初始化线程锁
     pthread_mutex_init(&srv->lock, NULL);
     srv->evt_sub_id = -1;
     srv->cam = NULL;
     srv->is_started = false;
     srv->downsample_cnt = 0;
 
-    // 2. 加载硬件配置
     srv->width      = CAPTURE_WIDTH;
     srv->height     = CAPTURE_HEIGHT;
     srv->fps        = CAPTURE_FPS;
     srv->v4l2_format = _capture_get_v4l2_format(CAPTURE_FORMAT_CFG);
 
-    // 3. 初始化视频数据总线（V4.0 标准配置）
     data_bus_config_t bus_cfg = {0};
-    bus_cfg.max_items = CAPTURE_BUF_CNT;                // 帧缓存数量
-    bus_cfg.max_item_size = MAX_FRAME_SIZE; // 单帧最大大小
-    bus_cfg.max_subscribers = CAPTURE_BUF_CNT;          // 最大订阅者数量
+    bus_cfg.max_items = CAPTURE_BUF_CNT;
+    bus_cfg.max_item_size = MAX_FRAME_SIZE;
+    bus_cfg.max_subscribers = CAPTURE_BUF_CNT;
     bus_cfg.name = CAPTURE_DATA_BUS_NAME;
     
     if (data_bus_init(&bus_cfg) != DATA_BUS_OK) {
@@ -388,7 +362,6 @@ static int capture_srv_init(void)
         return -1;
     }
 
-    // 4. 初始化USB摄像头
     srv->cam = camera_usb_create(CAPTURE_DEV_PATH,
                                  srv->width,
                                  srv->height,
@@ -401,7 +374,6 @@ static int capture_srv_init(void)
         return -1;
     }
 
-    // 5. 订阅系统事件
     event_subscriber_t evt_sub = {0};
     evt_sub.event_type = EVENT_TYPE_INVALID;
     evt_sub.callback = _capture_event_cb;
@@ -422,7 +394,7 @@ static int capture_srv_init(void)
 }
 
 // ==========================================================================
-// 模块自动初始化
+// 模块自动初始化（完全不变）
 // ==========================================================================
 #include "initcall.h"
 static int _capture_auto_init(void)

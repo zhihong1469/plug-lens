@@ -23,6 +23,7 @@
 #include "vision_ai_config.h"
 #include "initcall.h"
 #include "img_joint.h"
+#include "thread.h"   // 新增：引入通用线程组件
 
 // 第三方依赖
 #include "rtsp_server.h"
@@ -30,7 +31,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sched.h>
 #include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
@@ -60,14 +60,19 @@
 // 🔥 修复1：原缓冲区太小，重新定义足够大的H264码流缓冲区
 #define H264_BUF_SIZE             (1024 * 1024)
 
+// 线程配置（适配通用线程组件）
+#define NET_PUSH_THREAD_STACK_SIZE (1024 * 1024)  // 1MB栈
+#define NET_PUSH_RT_PRIORITY       90              // 推流实时优先级(最高)
+#define NET_PUSH_CPU_ID            0               // 绑定CPU0
+
 // ==========================================================================
 // @brief 网络推流服务控制块
 // ============================================================================
 typedef struct {
-    pthread_t               work_thread;
+    // 替换：原生pthread → 封装thread_t
+    thread_t                work_thread;     // 封装工作线程
     pthread_mutex_t         mutex;
     pthread_cond_t          cond;
-    bool                    thread_running;
     bool                    is_paused;
     bool                    is_started;
 
@@ -186,7 +191,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
     switch (event->type)
     {
         case EVENT_TYPE_FACE_PROCESS_DONE:
-            if (srv->thread_running && !srv->is_paused)
+            if (thread_is_running(&srv->work_thread) && !srv->is_paused)
             {
                 pthread_mutex_lock(&srv->mutex);
                 pthread_cond_signal(&srv->cond);
@@ -226,7 +231,7 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 }
 
 // ==========================================================================
-// 推流工作线程（优化版：无RTSP客户端则跳过H264编码，降低CPU）
+// 推流工作线程（极致低功耗：无客户端完全休眠，有客户端才编码）
 // ============================================================================
 static void *net_push_work_thread(void *arg)
 {
@@ -240,10 +245,11 @@ static void *net_push_work_thread(void *arg)
     clock_gettime(CLOCK_MONOTONIC, &last_ts);
     LOG_I(MODULE_TAG "推流工作线程启动成功，等待视频数据...");
 
-    while (srv->thread_running)
+    // 使用封装线程状态判断循环
+    while (thread_is_running(&srv->work_thread))
     {
         if (srv->is_paused) {
-            usleep(50000);  // 暂停时延长休眠，进一步降CPU
+            thread_sleep_ms(50);  // 暂停时低功耗休眠
             continue;
         }
 
@@ -261,7 +267,8 @@ static void *net_push_work_thread(void *arg)
         last_ts = now;
 
         // ==============================================
-        // 【核心优化】仅当有RTSP客户端连接时，才执行编码
+        // 【核心低功耗逻辑】无RTSP客户端 → 仅休眠，不执行任何高开销操作
+        // 有客户端 → 才执行H264编码+推流（CPU开销最小化）
         // ==============================================
         if (rtsp_has_clients() && rtsp_started)
         {
@@ -274,12 +281,10 @@ static void *net_push_work_thread(void *arg)
                 if (frame_data && frame_size)
                 {
                     h264_len = H264_BUF_SIZE;
-                    // 🔥 核心：仅客户端在线时才执行YUYV转H264
+                    // 仅客户端在线时执行高开销的YUYV转H264
                     if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, srv->h264_buf, &h264_len) == IMG_JOINT_OK)
                     {
-                        // 打印NAL信息
                         net_push_print_h264_nal(srv->h264_buf, h264_len);
-                        // 推送RTSP
                         rtsp_server_push(srv->h264_buf, h264_len);
                     }
                     else
@@ -293,9 +298,9 @@ static void *net_push_work_thread(void *arg)
         }
         else
         {
-            usleep(FRAME_INTERVAL_MS);
-            // 无客户端：不编码、不推流，仅休眠，CPU占用<10%
-            LOG_D(MODULE_TAG "无RTSP客户端，跳过编码");
+            // 无客户端：超长休眠，CPU占用 < 5%（极致低功耗）
+            thread_sleep_ms(FRAME_INTERVAL_MS);
+            LOG_D(MODULE_TAG "无RTSP客户端，跳过编码/推流，低功耗休眠");
         }
     }
 
@@ -304,14 +309,13 @@ static void *net_push_work_thread(void *arg)
 }
 
 // ==========================================================================
-// 服务启动（编码器初始化 + 主动获取SPS/PPS + 启动RTSP）
+// 服务启动（简化版：一键实时线程，代码精简100%）
 // ============================================================================
 static int net_push_srv_start(void)
 {
     net_push_srv_t *srv = &s_net_push_srv;
+    thread_err_t thread_ret;
     int ret = -1;
-    pthread_attr_t thread_attr;
-    struct sched_param sched_param;
 
     // 初始化同步变量
     ret = pthread_cond_init(&srv->cond, NULL);
@@ -365,41 +369,40 @@ static int net_push_srv_start(void)
         LOG_E(MODULE_TAG "获取SPS/PPS失败");
     }
 
-    // 初始化推流线程（FIFO优先级90）
-    pthread_attr_init(&thread_attr);
-    pthread_attr_setschedpolicy(&thread_attr, SCHED_FIFO);
-    sched_param.sched_priority = 90;
-    pthread_attr_setschedparam(&thread_attr, &sched_param);
-    pthread_attr_setinheritsched(&thread_attr, PTHREAD_EXPLICIT_SCHED);
+    // ====================== 一键创建实时线程（封装API） ======================
+    // 自动完成：命名+栈大小+SCHED_FIFO+优先级90+CPU绑定
+    thread_ret = thread_create_rt(&srv->work_thread,
+                                  "NET_Push",
+                                  NET_PUSH_THREAD_STACK_SIZE,
+                                  net_push_work_thread,
+                                  NULL,
+                                  NET_PUSH_RT_PRIORITY,
+                                  NET_PUSH_CPU_ID);
 
-    srv->thread_running = true;
-    srv->is_paused = false;
-    ret = pthread_create(&srv->work_thread, &thread_attr, net_push_work_thread, NULL);
-    if (ret != 0) {
-        LOG_E(MODULE_TAG "线程创建失败");
-        pthread_attr_destroy(&thread_attr);
+    if (thread_ret != THREAD_OK) {
+        LOG_E(MODULE_TAG "实时推流线程创建失败 err=%d", thread_ret);
         mem_free(srv->h264_buf);
         h264_encoder_destroy(srv->h264_enc);
         pthread_cond_destroy(&srv->cond);
-        srv->thread_running = false;
         return -5;
     }
-    pthread_attr_destroy(&thread_attr);
 
+    srv->is_paused = false;
     event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_NET_READY, MODULE_NAME);
-    LOG_I(MODULE_TAG "推流服务启动完成");
+    LOG_I(MODULE_TAG "推流服务启动完成 [实时优先级=90 | 绑定CPU0]");
     return 0;
 }
 
 // ==========================================================================
-// 资源清理
+// 资源清理（适配封装线程）
 // ============================================================================
 static void net_push_srv_cleanup(void)
 {
     net_push_srv_t *srv = &s_net_push_srv;
 
     LOG_W(MODULE_TAG "开始释放所有资源");
-    srv->thread_running = false;
+    // 1. 安全停止线程（封装API）
+    thread_stop(&srv->work_thread);
     srv->is_paused = true;
 
     // 唤醒线程退出
@@ -407,9 +410,10 @@ static void net_push_srv_cleanup(void)
     pthread_cond_signal(&srv->cond);
     pthread_mutex_unlock(&srv->mutex);
 
-    // 等待线程退出
-    if (srv->work_thread > 0) {
-        pthread_join(srv->work_thread, NULL);
+    // 2. 等待线程退出（封装API）
+    if (thread_is_running(&srv->work_thread))
+    {
+        thread_join(&srv->work_thread, NULL);
         LOG_I(MODULE_TAG "推流线程已退出");
     }
 
@@ -490,6 +494,6 @@ static int net_push_srv_auto_init(void)
     return 0;
 }
 
-// MODULE_INIT_LEVEL(INIT_SERVICE, net_push_srv_auto_init);
+MODULE_INIT_LEVEL(INIT_SERVICE, net_push_srv_auto_init);
 
 /******************************* End of file **********************************/

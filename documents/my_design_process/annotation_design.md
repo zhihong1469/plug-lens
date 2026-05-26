@@ -73,7 +73,7 @@ LICENSE: MIT License
 int capture_service_init(int width, int height);
 ```
 
-### 2.2 结构体与枚举注释
+### 2.2 结构体按结构体对齐排列与枚举注释
 ```c
 /**
  * @brief   Video frame structure
