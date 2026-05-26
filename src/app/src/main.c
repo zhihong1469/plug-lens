@@ -237,6 +237,7 @@ int main(int argc, char **argv)
     // 【仅一行】守护进程（后台运行）
     // ==========================================
     LOG_E("Main: Creating daemon...");
+    log_set_daemon_mode(1);  // 开启：仅写文件，关闭终端打印
     if (create_daemon() < 0) {
         LOG_E("Main: Failed to create daemon");
         return -1;
