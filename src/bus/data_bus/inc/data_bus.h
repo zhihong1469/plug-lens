@@ -88,7 +88,9 @@ typedef struct {
 // ==========================================================================
 // 对外核心API
 // ==========================================================================
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 /**
  * @brief  初始化数据总线
  * @param  config: 总线配置参数
@@ -121,6 +123,13 @@ int data_bus_alloc(const char *name,
  * @note   仅允许在data_bus_alloc后、data_bus_push前调用
  */
 void* data_bus_get_writable_ptr(data_bus_item_handle_t item);
+/**
+ * @brief  设置数据项实际有效数据大小（编码/填充后调用）
+ * @param  item: 数据项句柄
+ * @param  actual_size: 实际有效数据长度
+ * @return DATA_BUS_OK 成功
+ */
+int data_bus_set_item_size(data_bus_item_handle_t item, size_t actual_size);
 
 /**
  * @brief  获取数据项的实际有效数据大小（适配JPEG动态长度）
@@ -219,4 +228,7 @@ int data_bus_deinit(const char *name);
  */
 const char* data_type_to_str(data_type_t type);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* DATA_BUS_H */

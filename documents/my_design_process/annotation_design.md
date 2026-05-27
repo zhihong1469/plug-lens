@@ -285,3 +285,14 @@ ssh root@开发板IP
 - [ ] 已打版本标签`git tag v1.0.0`
 - [ ] 已推送到GitHub和Gitee双平台
 
+新增:
+对外接口必须:
+#ifdef __cplusplus
+extern "C" {
+#endif
+#ifdef __cplusplus
+}
+#endif
+
+
+

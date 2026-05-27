@@ -3,6 +3,7 @@
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 #include "vision_ai_config.h"
+#include "data_bus.h"  // 🔥 引入数据总线
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
@@ -25,6 +26,9 @@
 #define H264_PAYLOAD_TYPE       96
 #define MAX_FRAME_SIZE          (2 * 1024 * 1024)
 
+// 🔥 绑定H264数据总线
+#define H264_DATA_BUS_NAME        H264_RTSP_DATA_BUS_NAME
+
 // ==========================================================================
 // 前置声明
 // ==========================================================================
@@ -32,21 +36,15 @@
 class H264MemorySource;
 #endif
 
-// 外部声明：客户端检测接口（内部使用）
 extern "C" bool rtsp_has_clients(void);
 
 // ==========================================================================
-// 全局变量
+// 全局变量（🔥 全部删除静态H264缓存）
 // ==========================================================================
 #if ENABLE_RTSP_H264
-static volatile bool g_frame_wake = false;
 static H264MemorySource* g_h264_source = nullptr;
-
 static uint8_t         g_sps_pps_buf[MAX_FRAME_SIZE] = {0};
 static uint32_t        g_sps_pps_len = 0;
-static uint8_t         g_h264_buf[MAX_FRAME_SIZE] = {0};
-static uint32_t        g_h264_size = 0;
-static pthread_mutex_t g_h264_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 #if ENABLE_RTSP_JPEG
@@ -65,13 +63,13 @@ static volatile bool       rtsp_running = false;
 static EventLoopWatchVariable stop_watch;
 
 // ==========================================================================
-// ✅ 官方公开接口标准实现：手动维护客户端连接数（唯一合规方案）
+// 客户端计数
 // ==========================================================================
 static volatile uint32_t g_rtsp_client_count = 0;
 static pthread_mutex_t   g_client_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // ==========================================================================
-// ✅ 修复崩溃：H264内存数据源（增加任务安全管理，杜绝野指针）
+// 🔥 革命核心：H264内存数据源（从数据总线拉取）
 // ==========================================================================
 #if ENABLE_RTSP_H264
 class H264MemorySource : public FramedSource {
@@ -84,7 +82,6 @@ public:
 
     static void deliverFrame(void* clientData) {
         H264MemorySource* source = (H264MemorySource*)clientData;
-        // ✅ 安全检查：对象有效才执行（修复野指针）
         if (source != nullptr && !source->fIsDestroyed) {
             source->doGetNextFrame();
         }
@@ -94,61 +91,67 @@ private:
     H264MemorySource(UsageEnvironment& env)
         : FramedSource(env), fNeedSendSPSPPS(True), fIsDestroyed(False), fScheduleId(0) {}
     virtual ~H264MemorySource() {
-        // ✅ 析构时：取消所有延时任务（核心修复）
         if (fScheduleId != 0) {
             envir().taskScheduler().unscheduleDelayedTask(fScheduleId);
             fScheduleId = 0;
         }
-        fIsDestroyed = True;  // 标记销毁
+        fIsDestroyed = True;
         g_h264_source = nullptr;
     }
 
     virtual void doGetNextFrame() override {
-        // 无客户端：休眠，不占CPU
+        // 无客户端休眠
         if (!rtsp_has_clients()) {
             fScheduleId = envir().taskScheduler().scheduleDelayedTask(10000, deliverFrame, this);
             return;
         }
 
-        pthread_mutex_lock(&g_h264_mutex);
-
-        // 首次发送SPS/PPS
+        // 1. 首次发送SPS/PPS
         if (fNeedSendSPSPPS && g_sps_pps_len > 0) {
             memcpy(fTo, g_sps_pps_buf, g_sps_pps_len);
             fFrameSize = g_sps_pps_len;
             fNeedSendSPSPPS = False;
-            pthread_mutex_unlock(&g_h264_mutex);
             afterGetting(this);
             return;
         }
 
-        // 无新帧，轮询等待
-        if (g_h264_size == 0 || !g_frame_wake) {
-            pthread_mutex_unlock(&g_h264_mutex);
-            fScheduleId = envir().taskScheduler().scheduleDelayedTask(1000, deliverFrame, this);
+        // 🔥 2. 从数据总线拉取最新H264帧（零拷贝）
+        data_bus_item_handle_t h264_item = NULL;
+        if (data_bus_pull_latest(H264_DATA_BUS_NAME, DATA_TYPE_H264, &h264_item) != DATA_BUS_OK) {
+            fScheduleId = envir().taskScheduler().scheduleDelayedTask(500, deliverFrame, this);
             return;
         }
 
-        // 发送H264帧
-        unsigned frameSize = (fMaxSize < g_h264_size) ? fMaxSize : g_h264_size;
-        memcpy(fTo, g_h264_buf, frameSize);
-        fFrameSize = frameSize;
+        // 3. 读取总线数据
+        const uint8_t* h264_data = (const uint8_t*)data_bus_get_readonly_ptr(h264_item);
+        size_t h264_size = data_bus_get_item_size(h264_item);
 
-        g_h264_size = 0;
-        g_frame_wake = false;
+        if (h264_data && h264_size > 0) {
+            unsigned frameSize = (fMaxSize < h264_size) ? fMaxSize : h264_size;
+            memcpy(fTo, h264_data, frameSize);
+            fFrameSize = frameSize;
+        } else {
+            fFrameSize = 0;
+        }
 
-        pthread_mutex_unlock(&g_h264_mutex);
+        // 4. 释放总线引用
+        data_bus_release(h264_item);
+
+        if (fFrameSize == 0) {
+            fScheduleId = envir().taskScheduler().scheduleDelayedTask(500, deliverFrame, this);
+            return;
+        }
+
         afterGetting(this);
     }
 
     Boolean fNeedSendSPSPPS;
-    // ✅ 新增：安全防护变量
-    Boolean fIsDestroyed;       // 对象销毁标记
-    TaskToken fScheduleId;     // 延时任务ID（用于取消）
+    Boolean fIsDestroyed;
+    TaskToken fScheduleId;
 };
 
 // ==========================================================================
-// ✅ 官方公开接口：自定义H264会话（无修改，仅保留客户端计数）
+// 自定义H264会话
 // ==========================================================================
 class CustomH264Subsession : public OnDemandServerMediaSubsession {
 public:
@@ -200,7 +203,7 @@ protected:
 #endif
 
 // ==========================================================================
-// JPEG 模块（无修改）
+// JPEG 模块
 // ==========================================================================
 #if ENABLE_RTSP_JPEG
 class LiveJPEGSource : public JPEGVideoSource {
@@ -262,13 +265,18 @@ protected:
 #endif
 
 // ==========================================================================
-// RTSP 服务线程（无修改）
+// RTSP 服务线程
 // ==========================================================================
 static void* rtsp_server_thread(void* arg) {
     (void)arg;
     rtsp_running = true;
     stop_watch = 0;
     g_rtsp_client_count = 0;
+
+    // 设置实时优先级
+    struct sched_param param;
+    param.sched_priority = 85;
+    pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
 
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
@@ -306,15 +314,13 @@ static void* rtsp_server_thread(void* arg) {
 }
 
 // ==========================================================================
-// 对外 C 接口（无修改）
+// 对外 C 接口
 // ==========================================================================
 extern "C" void rtsp_set_sps_pps(const uint8_t* sps_pps, uint32_t len) {
 #if ENABLE_RTSP_H264
     if (!sps_pps || len == 0 || len >= MAX_FRAME_SIZE) return;
-    pthread_mutex_lock(&g_h264_mutex);
     memcpy(g_sps_pps_buf, sps_pps, len);
     g_sps_pps_len = len;
-    pthread_mutex_unlock(&g_h264_mutex);
 #endif
 }
 
@@ -327,26 +333,14 @@ extern "C" bool rtsp_is_running(void) {
     return rtsp_running;
 }
 
+// 🔥 废弃：删除原推流接口（数据总线替代）
 extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
-    if (!buf || size == 0 || size >= MAX_FRAME_SIZE) return;
-
-#if ENABLE_RTSP_H264
-    pthread_mutex_lock(&g_h264_mutex);
-    memcpy(g_h264_buf, buf, size);
-    g_h264_size = size;
-    g_frame_wake = true;
-    pthread_mutex_unlock(&g_h264_mutex);
-#elif ENABLE_JPEG
-    pthread_mutex_lock(&g_jpeg_mutex);
-    memcpy(g_jpeg_buf, buf, size);
-    g_jpeg_size = size;
-    pthread_mutex_unlock(&g_jpeg_mutex);
-#endif
+    // 空实现，兼容旧代码
+    (void)buf; (void)size;
 }
 
 extern "C" bool rtsp_has_clients(void) {
     if (!rtsp_running) return false;
-
     bool result = false;
     pthread_mutex_lock(&g_client_mutex);
     result = (g_rtsp_client_count > 0);
@@ -365,10 +359,7 @@ extern "C" int rtsp_server_stop(void) {
     pthread_mutex_unlock(&g_client_mutex);
 
 #if ENABLE_RTSP_H264
-    pthread_mutex_lock(&g_h264_mutex);
-    g_h264_size = g_sps_pps_len = 0;
-    g_frame_wake = false;
-    pthread_mutex_unlock(&g_h264_mutex);
+    g_sps_pps_len = 0;
 #endif
 
     if (rtspServer)  Medium::close(rtspServer);

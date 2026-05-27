@@ -25,18 +25,18 @@ cd /mnt/run_on_board/
 lsmod | grep led
 ```shell
 # 1. 开发板卸载旧模块
-rmmod board_A_led
-rmmod chip_demo_gpio
-rmmod leddrv
+rmmod drv/board_A_led
+rmmod drv/chip_demo_gpio
+rmmod drv/leddrv
 
 # 4. 开发板按顺序加载
-insmod leddrv.ko
-insmod chip_demo_gpio.ko
-insmod board_A_led.ko
+insmod drv/leddrv.ko
+insmod drv/chip_demo_gpio.ko
+insmod drv/board_A_led.ko
 ls /dev/100ask_led0
 # 5. 测试LED
-./ledtest /dev/100ask_led0 on   # 亮
-./ledtest /dev/100ask_led0 off  # 灭
+./drv/ledtest /dev/100ask_led0 on   # 亮
+./drv/ledtest /dev/100ask_led0 off  # 灭
 ```
 # 一次性添加所有库路径，大小写正确，永久生效当前终端
 export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:/mnt/run_on_board/libjpeg:/mnt/run_on_board/mnn:/mnt/run_on_board/libyuv:$LD_LIBRARY_PATH
