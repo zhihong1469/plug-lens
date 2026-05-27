@@ -7,7 +7,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#define CONFIG_LOG_FILE_PATH                  "/var/log/app.log"   // 工业级日志文件路径
+#define CONFIG_SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
+#define CONFIG_SD_STORAGE_DIR                 "/mnt/face_capture" // debug use "/mnt/nfs/face_capture"
 // ==========================================================================
 // 一、全局总线名称（全系统统一，服务禁止硬编码！）
 // 匹配采集服务 + 人脸检测服务 纯DataBus架构
@@ -111,7 +113,7 @@ typedef enum {
     DATA_TYPE_VIDEO_YUV420,  // YUV格式帧
     DATA_TYPE_VIDEO_RGB,     // AI处理后RGB帧（人脸服务发布）
     DATA_TYPE_H264,
-    
+
     // AI数据
     DATA_TYPE_AI_RESULT = 0x10,    // 人脸检测结果数据
 
@@ -162,7 +164,7 @@ typedef enum {
 #define CONFIG_AI_IOU_THRESH   0.3f
 
 // 人脸检测最大数量
-#define MAX_FACES             100
+#define MAX_FACES             10
 
 
 // ==========================================================================
