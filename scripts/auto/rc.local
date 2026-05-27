@@ -1,21 +1,23 @@
 #!/bin/sh
+# 开机自启脚本（稳定兼容IMX6ULL Buildroot）
+sleep 1
 
-# 1. 挂载SD卡（必须优先）
-mount /dev/mmcblk0p1 /mnt/sdcard
+# 1. 挂载SD卡（屏蔽错误，防止失败卡住）
+mount /dev/mmcblk0p1 /mnt/sdcard 2>/dev/null
 
-# 2. 创建日志目录
-mkdir -p /mnt/sdcard/log
-mkdir -p /mnt/sdcard/face_capture
+# 2. 创建目录（即使SD卡没挂载，也不报错）
+mkdir -p /mnt/sdcard/log 2>/dev/null
+mkdir -p /mnt/sdcard/face_capture 2>/dev/null
 
-# 3. 同步时间
+# 3. 设置系统时间
 date -s "2026-05-29 00:00:00"
 
-# 4. 加载LED驱动（按你的顺序）
-insmod /root/run_on_board/drv/leddrv.ko
-insmod /root/run_on_board/drv/chip_demo_gpio.ko
-insmod /root/run_on_board/drv/board_A_led.ko
+# 4. 加载LED驱动（屏蔽错误，不影响启动）
+insmod /root/run_on_board/drv/leddrv.ko 2>/dev/null
+insmod /root/run_on_board/drv/chip_demo_gpio.ko 2>/dev/null
+insmod /root/run_on_board/drv/board_A_led.ko 2>/dev/null
 
-# 5. 启动看门狗（后台）
-/root/run_on_board/app_start.sh &
+# 5. 启动AI程序（后台运行）
+/root/run_on_board/auto/app_start.sh &
 
 exit 0

@@ -238,9 +238,10 @@ int main(int argc, char **argv)
     memset(&g_app_ctx, 0, sizeof(g_app_ctx));
     g_app_ctx.app_running = true;
 
-    // 1. 日志初始化
+    // 1. 日志初始化（第一步，必须最先）
     log_init(LOG_LEVEL_INFO);
-    // 系统级硬件初始化：SD卡自动挂载（仅管理介质，不处理业务存储）
+
+    // 系统级硬件初始化：SD卡自动挂载
 #if USE_SD
     sd_state_t sd_state = SdMount_Init();
     if (sd_state == SD_MOUNTED) {
@@ -249,30 +250,32 @@ int main(int argc, char **argv)
         LOG_W("Main: SD card mount failed, system running without external storage");
     }
 #endif
+
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
+
 // ==============================================
 // 【模式切换】产品模式才开启守护进程
 // ==============================================
 #if RUN_PRODUCT_MODE
-    // ==========================================
-    // 【仅一行】守护进程（后台运行）
-    // ==========================================
     LOG_I("Main: Creating daemon...");
-    log_set_daemon_mode(1);  // 开启：仅写文件，关闭终端打印
+    // ===================== 【修复3】调用顺序：先创建守护进程 =====================
     if (create_daemon() < 0) {
         LOG_E("Main: Failed to create daemon");
         return -1;
     }
+    // ===================== 【修复4】后开启日志守护模式 =====================
+    log_set_daemon_mode(1);  // 守护进程创建完成后，再设置仅写文件
 #else
     LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
 #endif
 
-    // 2. 【核心新增】初始化TLSF静态内存池（必须第一个执行，所有内存分配之前）
+    // 2. 初始化TLSF静态内存池
     LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);
     mem_init(s_mem_pool, MEM_POOL_SIZE);
     LOG_I("Main: TLSF memory pool init success!");
+
 // ===================== 网络 + 时间同步逻辑 =====================
 #if USE_NET_CHECK
     LOG_I("Main: Start network status check...");
@@ -294,20 +297,17 @@ int main(int argc, char **argv)
     {
         LOG_I("Main: Start system time sync...");
 
-        // 1. 设置时区（组件只返回值）
         bool tz_ok = TimeSync_SetCstTimezone();
         if (!tz_ok)
         {
             LOG_W("Main: Set timezone failed");
         }
 
-        // 2. NTP同步时间
         bool ntp_ok = TimeSync_NtpSync(NULL);
         if (ntp_ok)
         {
             LOG_I("Main: NTP time sync success");
 
-            // 3. 获取并打印时间（调用方自主打印）
             char time_buf[TIME_FORMAT_BUF_LEN] = {0};
             TimeSync_GetLocalTimeStr(time_buf, sizeof(time_buf));
             LOG_I("Main: Current system time: %s", time_buf);
@@ -329,34 +329,28 @@ int main(int argc, char **argv)
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();
 
-    // 4. 核心总线初始化（事件+数据）
+    // 4. 核心总线初始化
     if (_main_init_buses() != 0) goto error_exit;
 
-    // 【新增】V4.0强制：双总线初始化完成 → 发布核心就绪事件（依赖注入触发）
     app_publish_sys_event(EVENT_TYPE_SYS_CORE_READY);
 
     // 5. 自动加载所有业务模块
     do_initcalls();
 
-    // 6. 底层等待退出（业务逻辑在app.c/服务中实现）
+    // 6. 主循环
     LOG_I("Main: System running, waiting for exit signal...");
     while (g_app_ctx.app_running) {
-        pause(); // 休眠等待信号，零CPU占用
+        pause(); // 零CPU占用
     }
 
     // 正常退出
     LOG_I("Main: Application exited normally");
-
-
-    // 系统资源清理
     _cleanup_resources();
     log_deinit();
     return 0;
 
 error_exit:
-    // 【新增】初始化失败 → 发布系统错误事件
     app_publish_sys_event(EVENT_TYPE_SYS_ERROR);
-    
     LOG_E("Main: Application exited with error");
     _cleanup_resources();
     log_deinit();
