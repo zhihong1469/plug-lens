@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# 1. 挂载SD卡（必须优先）
+mount /dev/mmcblk0p1 /mnt/sdcard
+
+# 2. 创建日志目录
+mkdir -p /mnt/sdcard/log
+mkdir -p /mnt/sdcard/face_capture
+
+# 3. 同步时间
+date -s "2026-05-29 00:00:00"
+
+# 4. 加载LED驱动（按你的顺序）
+insmod /root/run_on_board/drv/leddrv.ko
+insmod /root/run_on_board/drv/chip_demo_gpio.ko
+insmod /root/run_on_board/drv/board_A_led.ko
+
+# 5. 启动看门狗（后台）
+/root/run_on_board/app_start.sh &
+
+exit 0

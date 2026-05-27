@@ -21,7 +21,7 @@
 #define SD_STORAGE_ROOT_PATH           CONFIG_SD_STORAGE_ROOT_PATH
 #define SD_STORAGE_DIR                 CONFIG_SD_STORAGE_DIR // debug use "/mnt/nfs/face_capture"
 // 最大存储文件数量，超出自动覆盖旧文件
-#define SD_MAX_CAPTURE_FILES           200
+#define SD_MAX_CAPTURE_FILES           200000
 
 // 图像参数配置
 #define SD_INPUT_WIDTH                    GLOBAL_VIDEO_WIDTH

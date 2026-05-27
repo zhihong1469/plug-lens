@@ -14,7 +14,10 @@ SRC_FILES := \
 	initcall/src/initcall.c \
 	../third_lib/tlsf-master/tlsf.c \
 	mem_adapter/src/mem_adapter.c \
-	daemon/src/daemon.c
+	daemon/src/daemon.c \
+	sd_mount/src/sd_mount.c \
+	sys_time/src/sys_time_sync.c \
+	network/src/network_check.c \
 
 # 模块私有路径（common 无独有路径，留空）
 LOCAL_INC :=

@@ -11,15 +11,17 @@ cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buil
 
 cp output/vision_ai_app ~/nfs/run_on_board/
 cp third_lib/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
-cp -rf  third_lib/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board
+cp -rf  third_lib/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board/mnn
 cp -rf  third_lib/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
 <!-- cp third_lib/opencv_lib/lib/*.so.*  ~/nfs/run_on_board/opencv -->
 cp -rf third_lib/openh264/lib/* ~/nfs/run_on_board/openh264
 cp -rf third_lib/libyuv/lib/*  ~/nfs/run_on_board/libyuv
 
 [root@100ask:/mnt/run_on_board]#
-mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
-date -s "2026-05-22 12:00:00"
+(电脑直连)mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
+(路由器)mount -t nfs -o nolock,port=2050  10.168.1.173:/home/luo/nfs /mnt
+cp -rp /mnt/run_on_board /root
+date -s "2026-05-29 00:00:00"
 cd /mnt/run_on_board/
 # 检查LED驱动:
 lsmod | grep led
@@ -39,7 +41,7 @@ ls /dev/100ask_led0
 ./drv/ledtest /dev/100ask_led0 off  # 灭
 ```
 # 一次性添加所有库路径，大小写正确，永久生效当前终端
-export LD_LIBRARY_PATH=/mnt/run_on_board/openh264:/mnt/run_on_board/libjpeg:/mnt/run_on_board/mnn:/mnt/run_on_board/libyuv:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=./openh264:./libjpeg:./mnn:./libyuv:$LD_LIBRARY_PATH
 <!-- export LD_LIBRARY_PATH=/mnt/run_on_board/opencv:$LD_LIBRARY_PATH -->
 
 

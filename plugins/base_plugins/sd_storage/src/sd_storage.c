@@ -15,7 +15,7 @@
 #include "log.h"
 // 复用项目推流模块的TurboJPEG库
 #include <turbojpeg.h>
-
+#include "sd_mount.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,29 +115,32 @@ static void sd_storage_clean_old_files(const char *dir_path) {
 // ==============================================
 // 公共API：原有接口完整保留
 // ==============================================
-SdStorage_t *SdStorage_Init(void) {
-    if (access(SD_STORAGE_ROOT_PATH, F_OK) != 0) {
-        LOG_E("[SD_STORAGE] SD卡未挂载，请先mount /dev/mmcblk0p1 /mnt/sdcard");
+SdStorage_t *SdStorage_Init(void)
+{
+    // 1. 检查全局SD卡挂载状态（抽离的硬件逻辑，不再自己检查）
+    if (SdMount_GetState() != SD_MOUNTED) {
         return NULL;
     }
 
+    // 2. 分配内存
     SdStorage_t *self = (SdStorage_t *)mem_calloc(1, sizeof(SdStorage_t));
     if (!self) return NULL;
 
+    // 3. 初始化线程互斥锁
     if (pthread_mutex_init(&self->mutex, NULL) != 0) {
         mem_free(self);
         return NULL;
     }
 
-    // 初始化TurboJPEG编码器（复用推流库）
+    // 4. 初始化TurboJPEG编码器（业务核心，保留）
     self->tj_handle = tjInitCompress();
     if (!self->tj_handle) {
-        LOG_E("[SD_STORAGE] TurboJPEG编码器初始化失败");
         pthread_mutex_destroy(&self->mutex);
         mem_free(self);
         return NULL;
     }
 
+    // 5. 创建图片存储目录（业务逻辑，保留）
     if (sd_storage_mkdir(SD_STORAGE_DIR) != 0) {
         tjDestroy(self->tj_handle);
         pthread_mutex_destroy(&self->mutex);
@@ -145,11 +148,11 @@ SdStorage_t *SdStorage_Init(void) {
         return NULL;
     }
 
+    // 6. 初始化参数
     strncpy(self->work_dir, SD_STORAGE_DIR, sizeof(self->work_dir)-1);
     self->jpeg_quality = 50;
     self->is_initialized = true;
 
-    LOG_I("[SD_STORAGE] 初始化成功，存储目录: %s", SD_STORAGE_DIR);
     return self;
 }
 

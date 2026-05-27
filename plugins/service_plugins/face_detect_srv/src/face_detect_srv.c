@@ -305,7 +305,7 @@ static void *face_work_thread(void *arg)
             goto release_res;
         }
 
-        LOG_I(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
+        LOG_D(MODULE_TAG "检测到 %d 张人脸", srv->face_num);
         led_base_turn_on(srv->s_led);
         /* ============== 绘制人脸框 ============== */
         ret = data_bus_alloc(FACE_RESULT_RGB_DATA_BUS,
@@ -328,7 +328,7 @@ static void *face_work_thread(void *arg)
                 {
                     if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
                     {
-                        led_base_turn_off(srv->s_led);
+                        
                     }
                     else
                     {
@@ -338,7 +338,7 @@ static void *face_work_thread(void *arg)
             }
             else 
             {
-                printf(MODULE_TAG "无须框绘制\n");
+                LOG_D(MODULE_TAG "无须框绘制\n");
             }
         }
         else
@@ -346,7 +346,7 @@ static void *face_work_thread(void *arg)
             // LOG_W(MODULE_TAG "人脸结果RGB总线无空闲帧，跳过画框");
 
         }
-
+        led_base_turn_off(srv->s_led);
 release_res:
         /* 释放资源 */
         if (result_rgb_item)  { data_bus_release(result_rgb_item); }

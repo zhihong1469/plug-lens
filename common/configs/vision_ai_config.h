@@ -7,9 +7,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define CONFIG_LOG_FILE_PATH                  "/var/log/app.log"   // 工业级日志文件路径
-#define CONFIG_SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
-#define CONFIG_SD_STORAGE_DIR                 "/mnt/face_capture" // debug use "/mnt/nfs/face_capture"
+
+
 // ==========================================================================
 // 一、全局总线名称（全系统统一，服务禁止硬编码！）
 // 匹配采集服务 + 人脸检测服务 纯DataBus架构
