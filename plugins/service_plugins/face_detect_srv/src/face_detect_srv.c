@@ -53,7 +53,7 @@
 #define FRAME_WAIT_TIMEOUT_MS         200
 
 /* 帧率优化配置：采集15fps → 检测5fps = 每3帧处理1次 */
-#define FPS_DOWNSAMPLE_STEP           30
+#define FPS_DOWNSAMPLE_STEP           15
 #define TARGET_AI_FPS                 5
 
 /* 帧大小配置（双RGB帧大小一致，总线物理隔离） */
@@ -316,25 +316,29 @@ static void *face_work_thread(void *arg)
         if (ret == DATA_BUS_OK)
         {
             uint8_t *result_rgb_data = data_bus_get_writable_ptr(result_rgb_item);
-            ai_model_mnn_map_and_draw_faces(srv->faces,
+            if ( ai_model_mnn_map_and_draw_faces(srv->faces,
                                             srv->face_num,
                                             CAPTURE_WIDTH,
                                             CAPTURE_HEIGHT,
                                             raw_rgb_data,
-                                            result_rgb_data);
-            LOG_D(MODULE_TAG "人脸框绘制完成");
-            
-            // SD卡保存
-            if (srv->sd_storage) 
+                                            result_rgb_data) )
             {
-                if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
+                // SD卡保存
+                if (srv->sd_storage) 
                 {
-                    led_base_turn_off(srv->s_led);
+                    if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
+                    {
+                        led_base_turn_off(srv->s_led);
+                    }
+                    else
+                    {
+                        LOG_E(MODULE_TAG "SD卡保存失败");
+                    }
                 }
-                else
-                {
-                    LOG_E(MODULE_TAG "SD卡保存失败");
-                }
+            }
+            else 
+            {
+                printf(MODULE_TAG "无须框绘制\n");
             }
         }
         else

@@ -62,7 +62,10 @@ extern "C" {
 // 绘制配置（画框）
 #define FACE_BOX_COLOR_RED      0xFF0000 /**< 人脸框颜色： */
 #define FACE_BOX_THICKNESS      2        /**< 人脸框粗细 */
-
+// 人脸静止判断阈值：坐标变化小于10像素视为未移动
+#define FACE_STATIC_THRESHOLD    10.0f
+// 最大支持人脸数
+#define FACE_DETECT_MAX_FACES    10
 // ==============================================================================
 // ========================== 业务数据结构（上层专用） ========================
 // ==============================================================================
@@ -98,7 +101,7 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h);
  * @param  dst_frame: 输出带框图像帧数据
  * @return 无
  */
-void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
+int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
                                      int cam_w, int cam_h,
                                      const uint8_t *src_frame, uint8_t *dst_frame);
 

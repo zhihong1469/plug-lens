@@ -192,14 +192,33 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
     face->y2 *= sh;
 }
 
-// ==========================
-// 【已修复】100%适配 rgb_resize 等比例裁剪方案
-// ==========================
-void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
+/**
+ * @brief  人脸坐标映射+框绘制 + 静止去重存储判断(适配等比例)
+ * @param  faces: 模型输出人脸结果
+ * @param  face_num: 检测到的人脸数量
+ * @param  cam_w: 摄像头原始宽度
+ * @param  cam_h: 摄像头原始高度
+ * @param  src_frame: 原始图像数据
+ * @param  dst_frame: 绘制完成后的图像数据
+ * @return  int: 1=需要存储图片，0=人脸静止无需存储
+ */
+int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
                                      int cam_w, int cam_h,
                                      const uint8_t *src_frame, uint8_t *dst_frame)
 {
-    if (!faces || face_num <= 0 || !src_frame || !dst_frame || !g_priv) return;
+    if (!faces || face_num <= 0 || !src_frame || !dst_frame || !g_priv) {
+        return 0; // 异常情况不存图
+    }
+
+    // 静态缓存：保存上一帧有效人脸数据（用于静止判断）
+    static FaceInfo_C last_valid_faces[FACE_DETECT_MAX_FACES] = {0};
+    static int last_face_count = 0;
+    static bool is_first_frame = true;
+
+    // 当前帧有效人脸缓存
+    FaceInfo_C curr_valid_faces[FACE_DETECT_MAX_FACES] = {0};
+    int curr_face_count = 0;
+    int need_save = 1; // 默认需要存图
 
     // 拷贝原图
     memcpy(dst_frame, src_frame, cam_w * cam_h * 3);
@@ -207,10 +226,7 @@ void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
     int model_w = g_priv->ai_w;  // 160
     int model_h = g_priv->ai_h;  // 120
 
-    // ==============================================
-    // 【修复1】全部使用浮点计算，避免int截断误差
-    // 和rgb_resize的计算逻辑完全一致
-    // ==============================================
+    // 等比例缩放计算（与rgb_resize完全一致）
     float scale_w = (float)model_w / cam_w;
     float scale_h = (float)model_h / cam_h;
     float scale    = utils_fmaxf(scale_w, scale_h);
@@ -222,29 +238,17 @@ void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
 
     const float score_thresh = 0.5f;
 
-    for (int i = 0; i < face_num; i++) 
+    // ===================== 第一步：筛选当前帧有效人脸 =====================
+    for (int i = 0; i < face_num && curr_face_count < FACE_DETECT_MAX_FACES; i++) 
     {
         FaceInfo_C* face = &faces[i];
         if (face->score < score_thresh) continue;
 
-        // 模型输出已经是模型图像素坐标（0~160, 0~120）
-        float model_x1 = face->x1;
-        float model_y1 = face->y1;
-        float model_x2 = face->x2;
-        float model_y2 = face->y2;
-
-        // ==============================================
-        // 【修复2】精确逆映射公式（使用浮点crop值）
-        // ==============================================
-        float x1 = (model_x1 + crop_x) / scale;
-        float y1 = (model_y1 + crop_y) / scale;
-        float x2 = (model_x2 + crop_x) / scale;
-        float y2 = (model_y2 + crop_y) / scale;
-    // printf("原始坐标: x1=%.2f, y1=%.2f, x2=%.2f, y2=%.2f, score=%.2f\n", 
-    //     face->x1, face->y1, face->x2, face->y2, face->score);
-    //     // 调试日志：打印计算后的原图坐标（确认是否正确）
-    //     printf("原图坐标: x1=%.2f, y1=%.2f, x2=%.2f, y2=%.2f\n", 
-    //            x1, y1, x2, y2);
+        // 模型坐标转换为原图坐标
+        float x1 = (face->x1 + crop_x) / scale;
+        float y1 = (face->y1 + crop_y) / scale;
+        float x2 = (face->x2 + crop_x) / scale;
+        float y2 = (face->y2 + crop_y) / scale;
 
         // 边界保护
         x1 = utils_fmaxf(0.0f, utils_fminf(x1, (float)cam_w));
@@ -252,19 +256,74 @@ void ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
         x2 = utils_fmaxf(0.0f, utils_fminf(x2, (float)cam_w));
         y2 = utils_fmaxf(0.0f, utils_fminf(y2, (float)cam_h));
 
-        // 确保宽高为正
+        // 过滤无效框
         if (x2 <= x1 || y2 <= y1) continue;
 
-        int ix1 = (int)x1;
-        int iy1 = (int)y1;
-        int iw  = (int)(x2 - x1);
-        int ih  = (int)(y2 - y1);
+        // 保存有效人脸
+        curr_valid_faces[curr_face_count].x1 = x1;
+        curr_valid_faces[curr_face_count].y1 = y1;
+        curr_valid_faces[curr_face_count].x2 = x2;
+        curr_valid_faces[curr_face_count].y2 = y2;
+        curr_valid_faces[curr_face_count].score = face->score;
+        curr_face_count++;
+    }
+
+    // ===================== 第二步：核心 - 静止人脸判断 =====================
+    if (is_first_frame) {
+        // 第一帧强制存图
+        is_first_frame = false;
+        need_save = 1;
+    } else {
+        // 规则1：人脸数量变化 → 存图
+        if (curr_face_count != last_face_count) {
+            need_save = 1;
+        }
+        // 规则2：数量相同，判断坐标是否移动
+        else if (curr_face_count > 0) {
+            bool all_static = true;
+            for (int i = 0; i < curr_face_count; i++) {
+                float dx = utils_fabsf(curr_valid_faces[i].x1 - last_valid_faces[i].x1);
+                float dy = utils_fabsf(curr_valid_faces[i].y1 - last_valid_faces[i].y1);
+                
+                // 任意人脸移动超过阈值 → 非静止
+                if (dx > FACE_STATIC_THRESHOLD || dy > FACE_STATIC_THRESHOLD) {
+                    all_static = false;
+                    break;
+                }
+            }
+            // 所有人脸静止 → 不存图
+            if (all_static) {
+                need_save = 0;
+            }
+        }
+        // 规则3：无人脸 → 不存图
+        else {
+            need_save = 0;
+        }
+    }
+
+    // ===================== 第三步：更新上一帧缓存 =====================
+    for (int i = 0; i < curr_face_count && i < FACE_DETECT_MAX_FACES; i++) {
+        last_valid_faces[i] = curr_valid_faces[i];
+    }
+    last_face_count = curr_face_count;
+
+    // ===================== 第四步：绘制人脸框（原有逻辑不变） =====================
+    for (int i = 0; i < curr_face_count; i++)
+    {
+        int ix1 = (int)curr_valid_faces[i].x1;
+        int iy1 = (int)curr_valid_faces[i].y1;
+        int iw  = (int)(curr_valid_faces[i].x2 - curr_valid_faces[i].x1);
+        int ih  = (int)(curr_valid_faces[i].y2 - curr_valid_faces[i].y1);
 
         if (iw < 15 || ih < 15) continue;
 
-        // 绘制框
+        // 绘制人脸框
         bgr_draw_rect(dst_frame, cam_w, cam_h, ix1, iy1, iw, ih, FACE_BOX_COLOR_RED, FACE_BOX_THICKNESS);
     }
+
+    // 返回存储标志：1=存图，0=不存图
+    return need_save;
 }
 // ==========================
 // 工具接口

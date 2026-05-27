@@ -283,7 +283,6 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->param.bEnableFrameSkip = true;    // 允许跳帧，保证实时流畅
     impl->param.bIsLosslessLink = false;
 #else
-        // ✅ 适配你的旧版OpenH264，无iIdrPeriod
     impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;
     impl->param.fMaxFrameRate   = param->fps;
     impl->param.iPicWidth       = param->width;

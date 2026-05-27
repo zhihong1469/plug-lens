@@ -18,8 +18,8 @@
 #include "vision_ai_config.h"
 
 // 存储路径配置
-#define SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
-#define SD_STORAGE_DIR                 "/mnt/face_capture" // debug use "/mnt/nfs/face_capture"
+#define SD_STORAGE_ROOT_PATH           CONFIG_SD_STORAGE_ROOT_PATH
+#define SD_STORAGE_DIR                 CONFIG_SD_STORAGE_DIR // debug use "/mnt/nfs/face_capture"
 // 最大存储文件数量，超出自动覆盖旧文件
 #define SD_MAX_CAPTURE_FILES           200
 
