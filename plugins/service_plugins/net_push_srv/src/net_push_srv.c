@@ -23,7 +23,7 @@
 #include "vision_ai_config.h"
 #include "initcall.h"
 #include "img_joint.h"
-#include "thread.h"   // 新增：引入通用线程组件
+#include "thread.h"
 
 // 第三方依赖
 #include "rtsp_server.h"
@@ -54,11 +54,15 @@
 #define VIDEO_DATA_BUS            VIDEO_DATA_BUS_NAME
 #define SYS_EVENT_BUS             SYS_EVENT_BUS_NAME
 
+// 🔥 【革命核心】新增 H.264 数据总线配置
+#define H264_DATA_BUS_NAME        H264_RTSP_DATA_BUS_NAME
+#define H264_MAX_FRAME_SIZE       (1024 * 1024)   // H264单帧最大大小
+#define H264_BUS_MAX_ITEMS        8                // 总线缓存8帧（防丢流）
+#define H264_BUS_MAX_SUBSCRIBER   1                // 仅RTSP订阅
+
 #define VIDEO_WIDTH               GLOBAL_VIDEO_WIDTH
 #define VIDEO_HEIGHT              GLOBAL_VIDEO_HEIGHT
 #define H264_GOP                  GLOBAL_VIDEO_FPS
-// 🔥 修复1：原缓冲区太小，重新定义足够大的H264码流缓冲区
-#define H264_BUF_SIZE             (1024 * 1024)
 
 // 线程配置（适配通用线程组件）
 #define NET_PUSH_THREAD_STACK_SIZE (1024 * 1024)  // 1MB栈
@@ -73,29 +77,27 @@
 // @brief 网络推流服务控制块
 // ============================================================================
 typedef struct {
-    // 替换：原生pthread → 封装thread_t
-    thread_t                work_thread;     // 封装工作线程
+    thread_t                work_thread;
     pthread_mutex_t         mutex;
     pthread_cond_t          cond;
     bool                    is_paused;
     bool                    is_started;
 
     int                     evt_sys_sub_id;
-    int                     evt_capture_sub_id;  // 重命名：采集事件订阅ID
+    int                     evt_capture_sub_id;
 
     h264_encoder_t          h264_enc;
-    uint8_t*                h264_buf;
+    // 🔥 删除：静态h264_buf（改用数据总线）
 
-    uint32_t                frame_sample_cnt;   // 新增：帧率控制计数器
+    uint32_t                frame_sample_cnt;
+
+    uint8_t                 sps_pps_cache[256];
+    uint32_t                sps_pps_len;
+    bool                    rtsp_started;
+    bool                    last_rtsp_client_state;
 } net_push_srv_t;
 
 static net_push_srv_t s_net_push_srv;
-
-// ====================== SPS+PPS 缓存 ======================
-static uint8_t  g_sps_pps_cache[256] = {0};
-static uint32_t g_sps_pps_len = 0;
-// ====================== RTSP延迟启动标志 ======================
-static bool     rtsp_started = false;
 
 // ==========================================================================
 // 静态函数声明
@@ -196,7 +198,6 @@ static void net_push_event_cb(const event_t *event, void *user_data)
 
     switch (event->type)
     {
-        // 核心修改：监听采集帧就绪事件（和人脸检测唤醒源一致）
         case EVENT_TYPE_CAPTURE_PROTO_READY:
             if (thread_is_running(&srv->work_thread) && !srv->is_paused)
             {
@@ -243,50 +244,53 @@ static void *net_push_work_thread(void *arg)
 {
     net_push_srv_t *srv = &s_net_push_srv;
     data_bus_item_handle_t frame_item = NULL;
+    data_bus_item_handle_t h264_item = NULL; // 🔥 H264总线项
     const uint8_t *frame_data = NULL;
     size_t frame_size = 0;
     int h264_len = 0;
-    struct timespec last_ts;
+    uint8_t *h264_wbuf = NULL;
 
+    srv->last_rtsp_client_state = ( rtsp_has_clients() && srv->rtsp_started );
+    struct timespec last_ts;
     clock_gettime(CLOCK_MONOTONIC, &last_ts);
     LOG_I(MODULE_TAG "推流工作线程启动成功，等待视频数据...");
 
-    // 使用封装线程状态判断循环
     while (thread_is_running(&srv->work_thread))
     {
         if (srv->is_paused) {
-            thread_sleep_ms(50);  // 暂停时低功耗休眠
+            thread_sleep_ms(50);
             continue;
         }
 
-        // 等待采集事件唤醒
         pthread_mutex_lock(&srv->mutex);
         pthread_cond_timedwait_ms(&srv->cond, &srv->mutex, FRAME_WAIT_TIMEOUT_MS);
         pthread_mutex_unlock(&srv->mutex);
 
-        // ====================== 核心：软件降帧（15fps→5fps，和人脸检测完全一致） ======================
+        // 帧率降采样
         srv->frame_sample_cnt++;
         if (srv->frame_sample_cnt < FPS_DOWNSAMPLE_STEP)
         {
-            continue; // 跳过，不处理
-        }
-        srv->frame_sample_cnt = 0; // 重置计数器
-
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        uint32_t elapsed = (now.tv_sec - last_ts.tv_sec)*1000 + (now.tv_nsec - last_ts.tv_nsec)/1000000;
-        if (elapsed < FRAME_INTERVAL_MS) {
             continue;
         }
-        last_ts = now;
+        srv->frame_sample_cnt = 0;
 
-        // ==============================================
-        // 【核心低功耗逻辑】无RTSP客户端 → 仅休眠，不执行任何高开销操作
-        // 有客户端 → 才执行H264编码+推流（CPU开销最小化）
-        // ==============================================
-        if (rtsp_has_clients() && rtsp_started)
+        // 客户端状态管理
+        bool current_client_state = ( rtsp_has_clients() && srv->rtsp_started );
+        if (current_client_state != srv->last_rtsp_client_state)
         {
-            // 拉取最新YUYV帧
+            srv->last_rtsp_client_state = current_client_state;
+            if (current_client_state) {
+                event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_RTSP_CONNECTED, MODULE_NAME);
+                LOG_I(MODULE_TAG "RTSP客户端已连接，暂停人脸抓拍");
+            } else {
+                event_bus_publish_simple(SYS_EVENT_BUS, EVENT_TYPE_RTSP_DISCONNECTED, MODULE_NAME);
+                LOG_I(MODULE_TAG "RTSP客户端已断开，恢复人脸抓拍");
+            }
+        }
+
+        // 🔥 核心：有客户端才编码 + 推送H264总线
+        if (current_client_state)
+        {
             if (data_bus_pull_latest(VIDEO_DATA_BUS, DATA_TYPE_VIDEO, &frame_item) == DATA_BUS_OK)
             {
                 frame_data = data_bus_get_readonly_ptr(frame_item);
@@ -294,27 +298,40 @@ static void *net_push_work_thread(void *arg)
 
                 if (frame_data && frame_size)
                 {
-                    h264_len = H264_BUF_SIZE;
-                    // 仅客户端在线时执行高开销的YUYV转H264
-                    if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, srv->h264_buf, &h264_len) == IMG_JOINT_OK)
+                    // 1. 分配H264总线内存
+                    if (data_bus_alloc(H264_DATA_BUS_NAME,
+                                       DATA_TYPE_H264,
+                                       H264_MAX_FRAME_SIZE,
+                                       MODULE_NAME,
+                                       &h264_item) == DATA_BUS_OK)
                     {
-                        // net_push_print_h264_nal(srv->h264_buf, h264_len);
-                        rtsp_server_push(srv->h264_buf, h264_len);
-                    }
-                    else
-                    {
-                        LOG_E(MODULE_TAG "YUYV转H264编码失败");
+                        // 2. 获取可写指针
+                        h264_wbuf = data_bus_get_writable_ptr(h264_item);
+                        h264_len = H264_MAX_FRAME_SIZE;
+
+                        // 3. H264编码（直接写入总线）
+                        if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, h264_wbuf, &h264_len) == IMG_JOINT_OK)
+                        {
+                            data_bus_set_item_size(h264_item, h264_len);
+                            // 4. 推送H264总线（零拷贝）
+                            data_bus_push(H264_DATA_BUS_NAME, h264_item);
+                        }
+                        else
+                        {
+                            LOG_E(MODULE_TAG "YUYV转H264编码失败");
+                        }
+                        // 5. 生产者释放总线引用
+                        data_bus_release(h264_item);
+                        h264_item = NULL;
                     }
                 }
-                // 释放总线数据
                 data_bus_release(frame_item);
+                frame_item = NULL;
             }
         }
         else
         {
-            // 无客户端：超长休眠，CPU占用 < 5%（极致低功耗）
             thread_sleep_ms(FRAME_INTERVAL_MS);
-            LOG_D(MODULE_TAG "无RTSP客户端，跳过编码/推流，低功耗休眠");
         }
     }
 
@@ -323,7 +340,7 @@ static void *net_push_work_thread(void *arg)
 }
 
 // ==========================================================================
-// 服务启动（简化版：一键创建实时线程，代码精简100%）
+// 服务启动（🔥 初始化H264数据总线）
 // ============================================================================
 static int net_push_srv_start(void)
 {
@@ -331,14 +348,28 @@ static int net_push_srv_start(void)
     thread_err_t thread_ret;
     int ret = -1;
 
+    // 🔥 第一步：初始化 H.264 数据总线
+    data_bus_config_t h264_bus_cfg = {
+        .max_item_size = H264_MAX_FRAME_SIZE,
+        .max_items = H264_BUS_MAX_ITEMS,
+        .max_subscribers = H264_BUS_MAX_SUBSCRIBER,
+        .name = H264_DATA_BUS_NAME,
+    };
+    if (data_bus_init(&h264_bus_cfg) != DATA_BUS_OK) {
+        LOG_E(MODULE_TAG "H264数据总线初始化失败");
+        return -1;
+    }
+    LOG_I(MODULE_TAG "✅ H264数据总线初始化成功");
+
     // 初始化同步变量
     ret = pthread_cond_init(&srv->cond, NULL);
     if (ret != 0) {
         LOG_E(MODULE_TAG "条件变量初始化失败");
+        data_bus_deinit(H264_DATA_BUS_NAME);
         return -1;
     }
 
-    // 🔥 核心：初始化img_joint H264编码器
+    // 初始化H264编码器
     h264_encode_param_t enc_param = {
         .width = VIDEO_WIDTH,
         .height = VIDEO_HEIGHT,
@@ -352,39 +383,23 @@ static int net_push_srv_start(void)
     if (!srv->h264_enc) {
         LOG_E(MODULE_TAG "H.264编码器创建失败");
         pthread_cond_destroy(&srv->cond);
+        data_bus_deinit(H264_DATA_BUS_NAME);
         return -2;
     }
 
-    // 分配编码缓冲区
-    srv->h264_buf = (uint8_t*)mem_alloc(H264_BUF_SIZE);
-    if (!srv->h264_buf) {
-        LOG_E(MODULE_TAG "H.264缓冲区分配失败");
-        h264_encoder_destroy(srv->h264_enc);
-        pthread_cond_destroy(&srv->cond);
-        return -3;
-    }
-
-    // 🔥 修复3：编码器创建后，直接获取SPS/PPS（官方标准接口）
-    g_sps_pps_len = sizeof(g_sps_pps_cache);
-    if (h264_encoder_get_sps_pps(srv->h264_enc, g_sps_pps_cache, &g_sps_pps_len) == IMG_JOINT_OK)
+    // 获取SPS/PPS
+    srv->sps_pps_len = sizeof(srv->sps_pps_cache);
+    if (h264_encoder_get_sps_pps(srv->h264_enc, srv->sps_pps_cache, &srv->sps_pps_len) == IMG_JOINT_OK)
     {
-        LOG_I(MODULE_TAG "获取SPS+PPS成功 | 大小: %d bytes", g_sps_pps_len);
-        // 注入RTSP并启动服务
-        rtsp_set_sps_pps(g_sps_pps_cache, g_sps_pps_len);
+        LOG_I(MODULE_TAG "获取SPS+PPS成功 | 大小: %d bytes", srv->sps_pps_len);
+        rtsp_set_sps_pps(srv->sps_pps_cache, srv->sps_pps_len);
         if (rtsp_start_service() == 0) {
-            rtsp_started = true;
+            srv->rtsp_started = true;
             LOG_I(MODULE_TAG "✅ RTSP服务启动成功");
-        } else {
-            LOG_E(MODULE_TAG "RTSP服务启动失败");
         }
     }
-    else
-    {
-        LOG_E(MODULE_TAG "获取SPS/PPS失败");
-    }
 
-    // ====================== 一键创建实时线程（封装API） ======================
-    // 自动完成：命名+栈大小+SCHED_FIFO+优先级90+CPU绑定
+    // 创建实时线程
     thread_ret = thread_create_rt(&srv->work_thread,
                                   "NET_Push",
                                   NET_PUSH_THREAD_STACK_SIZE,
@@ -395,9 +410,9 @@ static int net_push_srv_start(void)
 
     if (thread_ret != THREAD_OK) {
         LOG_E(MODULE_TAG "实时推流线程创建失败 err=%d", thread_ret);
-        mem_free(srv->h264_buf);
         h264_encoder_destroy(srv->h264_enc);
         pthread_cond_destroy(&srv->cond);
+        data_bus_deinit(H264_DATA_BUS_NAME);
         return -5;
     }
 
@@ -408,43 +423,37 @@ static int net_push_srv_start(void)
 }
 
 // ==========================================================================
-// 资源清理（适配封装线程）
+// 资源清理（🔥 销毁H264总线）
 // ============================================================================
 static void net_push_srv_cleanup(void)
 {
     net_push_srv_t *srv = &s_net_push_srv;
 
     LOG_W(MODULE_TAG "开始释放所有资源");
-    // 1. 安全停止线程（封装API）
     thread_stop(&srv->work_thread);
     srv->is_paused = true;
 
-    // 唤醒线程退出
     pthread_mutex_lock(&srv->mutex);
     pthread_cond_signal(&srv->cond);
     pthread_mutex_unlock(&srv->mutex);
 
-    // 2. 等待线程退出（封装API）
-    if (thread_is_running(&srv->work_thread))
-    {
+    if (thread_is_running(&srv->work_thread)) {
         thread_join(&srv->work_thread, NULL);
-        LOG_I(MODULE_TAG "推流线程已退出");
     }
 
-    // 取消事件订阅
+    // 取消订阅
     if (srv->evt_sys_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_sys_sub_id);
     if (srv->evt_capture_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_capture_sub_id);
 
-    // 释放img_joint资源
-    if (srv->h264_buf) { mem_free(srv->h264_buf); srv->h264_buf = NULL; }
+    // 释放编码器
     if (srv->h264_enc) { h264_encoder_destroy(srv->h264_enc); srv->h264_enc = NULL; }
 
-    // 停止RTSP
+    // 停止RTSP + 销毁H264总线
     rtsp_server_stop();
-    rtsp_started = false;
-    g_sps_pps_len = 0;
+    data_bus_deinit(H264_DATA_BUS_NAME);
+    srv->rtsp_started = false;
+    srv->sps_pps_len = 0;
 
-    // 销毁同步变量
     pthread_cond_destroy(&srv->cond);
     pthread_mutex_destroy(&srv->mutex);
 
@@ -463,7 +472,7 @@ static int net_push_srv_init(void)
     memset(srv, 0, sizeof(net_push_srv_t));
     srv->evt_sys_sub_id = -1;
     srv->evt_capture_sub_id = -1;
-    srv->frame_sample_cnt = 0;  // 初始化帧率计数器
+    srv->frame_sample_cnt = 0;
 
     ret = pthread_mutex_init(&srv->mutex, NULL);
     if (ret != 0) {
@@ -480,9 +489,7 @@ static int net_push_srv_init(void)
     };
     srv->evt_sys_sub_id = event_bus_subscribe(SYS_EVENT_BUS, &sys_sub);
 
-
-
-    if (srv->evt_sys_sub_id < 0 ) 
+    if (srv->evt_sys_sub_id < 0 )
     {
         LOG_E(MODULE_TAG "事件订阅失败");
         net_push_srv_cleanup();

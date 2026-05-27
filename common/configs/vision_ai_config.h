@@ -17,6 +17,7 @@ extern "C" {
 #define VIDEO_DATA_BUS_NAME       "video"          // 摄像头YUYV视频总线（采集服务生产）
 #define AI_RGB_DATA_BUS_NAME      "ai_rgb"         // AI专属RGB数据总线（人脸服务生产）
 #define FACE_YUV_DATA_BUS_NAME    "face_result"    // 人脸检测结果数据总线
+#define H264_RTSP_DATA_BUS_NAME        "h264_stream_bus"
 // ==========================================================================
 // 【全局通用事件类型】（0x0000-0x0FFF）
 // 所有服务都需要订阅的系统级控制事件，仅此一处定义
@@ -77,11 +78,13 @@ typedef enum {
     EVENT_TYPE_FACE_MAX            = 0x3FFF,
 
     // ======================================
-    // 人脸检测服务事件 (0x4000 ~ 0x4FFF)
+    // 推流服务事件 (0x4000 ~ 0x4FFF)
     // ======================================
     EVENT_TYPE_NET_BASE           = 0x4000,
     EVENT_TYPE_NET_READY,         // 就绪
-    EVENT_TYPE_NET_PROCESS_START, // 开始处理
+    EVENT_TYPE_NET_PROCESS_START, // 开始
+    EVENT_TYPE_RTSP_CONNECTED,
+    EVENT_TYPE_RTSP_DISCONNECTED,
     EVENT_TYPE_NET_PROCESS_DONE,  // 完成
     EVENT_TYPE_NET_STOPPED,       // 停止
     EVENT_TYPE_NET_ERROR,         // 故障
@@ -107,7 +110,8 @@ typedef enum {
     DATA_TYPE_VIDEO = 0x01,  // 摄像头原始帧（采集服务发布）
     DATA_TYPE_VIDEO_YUV420,  // YUV格式帧
     DATA_TYPE_VIDEO_RGB,     // AI处理后RGB帧（人脸服务发布）
-
+    DATA_TYPE_H264,
+    
     // AI数据
     DATA_TYPE_AI_RESULT = 0x10,    // 人脸检测结果数据
 
@@ -152,9 +156,9 @@ typedef enum {
 
 // AI模型配置 原来320x240 you can 160x120 /128x96 or using quantified models
 #define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
-#define CONFIG_AI_INPUT_W    128
-#define CONFIG_AI_INPUT_H    96
-#define CONFIG_AI_SCORE_THRESH 0.55f
+#define CONFIG_AI_INPUT_W    320
+#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_SCORE_THRESH 0.25f
 #define CONFIG_AI_IOU_THRESH   0.3f
 
 // 人脸检测最大数量

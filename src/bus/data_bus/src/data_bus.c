@@ -552,6 +552,20 @@ void* data_bus_get_writable_ptr(data_bus_item_handle_t item) {
     }
     return ditem->data_ptr;
 }
+int data_bus_set_item_size(data_bus_item_handle_t item, size_t actual_size) {
+    data_item_t *ditem = (data_item_t *)item;
+    // 安全校验
+    if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC || ditem->published) {
+        return DATA_BUS_ERR_PARAM;
+    }
+    // 实际大小不能超过分配的最大容量
+    if (actual_size > ditem->info.data_size) {
+        return DATA_BUS_ERR_PARAM;
+    }
+    // 更新真实有效数据长度
+    ditem->info.data_size = actual_size;
+    return DATA_BUS_OK;
+}
 
 int data_bus_push(const char *name, data_bus_item_handle_t item) {
     // 参数检查

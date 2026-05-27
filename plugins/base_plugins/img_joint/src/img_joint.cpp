@@ -251,6 +251,7 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->p_encoder->GetDefaultParams(&impl->param);
 
     // ===================== 核心优化：流畅度优先 + 低算力 =====================
+#if 1
     impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;    // 实时通信模式
     impl->param.fMaxFrameRate   = param->fps;
     impl->param.iPicWidth       = param->width;
@@ -281,7 +282,24 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->param.bPrefixNalAddingCtrl = false;
     impl->param.bEnableFrameSkip = true;    // 允许跳帧，保证实时流畅
     impl->param.bIsLosslessLink = false;
+#else
+        // ✅ 适配你的旧版OpenH264，无iIdrPeriod
+    impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;
+    impl->param.fMaxFrameRate   = param->fps;
+    impl->param.iPicWidth       = param->width;
+    impl->param.iPicHeight      = param->height;
+    impl->param.iTargetBitrate  = param->bitrate * 1000;
+    impl->param.uiIntraPeriod   = param->gop;    // 旧版：这就是IDR帧周期
+    impl->param.iTemporalLayerNum = 1;
+    impl->param.iSpatialLayerNum  = 1;
+    impl->param.iMultipleThreadIdc = 1;
+    impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
+    impl->param.iEntropyCodingModeFlag = 0;
+    impl->param.bEnableDenoise = false;
+    impl->param.bEnableBackgroundDetection = false;
+    impl->param.bEnableFrameSkip = false;
 
+#endif
     // 初始化编码器
     ret = impl->p_encoder->InitializeExt(&impl->param);
     if (ret != 0) {

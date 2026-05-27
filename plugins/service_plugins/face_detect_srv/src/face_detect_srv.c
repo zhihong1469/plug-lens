@@ -144,6 +144,23 @@ static void event_bus_cb(const event_t *event, void *user_data)
             }
             break;
 
+        // ✅ RTSP有客户端：暂停人脸服务（只执行1次）
+        case EVENT_TYPE_RTSP_CONNECTED:
+            if (!srv->is_paused) {
+                srv->is_paused = true;
+                LOG_I(MODULE_TAG "RTSP推流中，暂停人脸检测/抓拍");
+            }
+            break;
+
+        // ✅ RTSP无客户端：恢复人脸服务（只执行1次）
+        case EVENT_TYPE_RTSP_DISCONNECTED:
+            if (srv->is_paused) {
+                srv->is_paused = false;
+                LOG_I(MODULE_TAG "RTSP已断开，恢复人脸检测/抓拍");
+            }
+            break;
+
+
         /* 系统核心就绪 */
         case EVENT_TYPE_SYS_CORE_READY:
             LOG_I(MODULE_TAG "系统核心初始化完成");
