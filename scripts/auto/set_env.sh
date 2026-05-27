@@ -10,7 +10,4 @@ $APP_HOME/mnn:\
 $APP_HOME/libyuv:\
 $LD_LIBRARY_PATH
 
-# 打印生效信息
-echo "✅ 环境变量配置完成"
-echo "程序目录：$APP_HOME"
-echo "库路径：$LD_LIBRARY_PATH"
+# 自己写到环境变量里更方便

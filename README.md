@@ -18,8 +18,8 @@ cp -rf third_lib/openh264/lib/* ~/nfs/run_on_board/openh264
 cp -rf third_lib/libyuv/lib/*  ~/nfs/run_on_board/libyuv
 
 [root@100ask:/mnt/run_on_board]#
-(电脑直连)mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
-(路由器)mount -t nfs -o nolock,port=2050  10.168.1.173:/home/luo/nfs /mnt
+mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt #(电脑直连)
+mount -t nfs -o nolock,port=2050  10.168.1.173:/home/luo/nfs /mnt #(路由器)
 cp -rp /mnt/run_on_board /root
 date -s "2026-05-29 00:00:00"
 cd /mnt/run_on_board/
@@ -63,6 +63,14 @@ WSL2:
 Windows:
 CMD（管理员）一键关闭所有网络防火墙:
   netsh advfirewall set allprofiles state off
+
+# 守护进程配合系统自启:
+cp -rf /mnt/run_on_board /root
+chmod +x /root/run_on_board/auto/*.sh
+## 手动测试
+cd /root
+./run_on_board/auto/app_start.sh
+./run_on_board/auto/app_stop.sh
 # 结构速通(详细见documents/architecture.md)
 一般应用层只需要专注plugins目录下的代码修改，src实现接口函数或者架构相关
 ex:

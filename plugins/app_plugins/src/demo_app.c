@@ -305,5 +305,5 @@ static int __demo_auto_init(void)
 
 // 【关键】仅当RUN_PRODUCT_MODE=0时编译调试APP
 #if RUN_PRODUCT_MODE == 0
-    // MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
+    MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
 #endif

@@ -132,7 +132,7 @@ typedef enum {
 // 0 = 调试模式（前台运行，支持键盘S控制）
 // 1 = 产品模式（守护进程，后台自动运行，无需键盘）
 // ==================================================================================
-#define RUN_PRODUCT_MODE  0
+#define RUN_PRODUCT_MODE  1
 
 // 双总线配置
 #define CONFIG_EVENT_BUS_MAX_SUBSCRIBERS 64
