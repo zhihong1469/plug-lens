@@ -2,9 +2,10 @@
 /**
  * @file main.c
  * @brief 轻量化系统主入口（纯底层框架，无业务代码）
- * @details 职责：日志/信号/双总线/优雅退出 初始化
+ * @details 职责：日志/信号/双总线/优雅退出/系统硬件(SD)初始化
  *          业务模块通过事件总线交互，main永久不变
  *          仅处理系统级异常,并通过事件总线发布通知,业务模块自行处理
+ *          【边界约定】SD卡挂载/卸载 = 系统级硬件管理 | 图片存储 = 业务逻辑（main不处理）
  * @author Luo
  * @date 2026-05-31
  */
@@ -24,13 +25,20 @@
 #include "data_bus.h"
 #include "mem_adapter.h"  // 新增：TLSF内存适配层头文件
 #include "daemon.h"  
+// 引入新增组件头文件
+#include "sd_mount.h"
+#include "config_common.h"
+#include "network_check.h"
+#include "sys_time_sync.h"
 
 #define MODULE_NAME               "MAIN"
 #define MODULE_TAG                "[MAIN]"
+
 // ==================================================================================
 // 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
 // ==================================================================================
 #define MAIN_EVENT_BUS_NAME    SYS_EVENT_BUS_NAME    // 系统事件总线名称
+
 // ==================================================================================
 // 【核心新增】TLSF静态内存池配置（嵌入式Linux 生产级大小）
 // 大小规划：256MB = 32帧视频(128MB) + 事件总线/模块内存(64MB) + 冗余余量(64MB)
@@ -199,12 +207,20 @@ static int _main_init_buses(void)
 }
 
 // ==========================================================================
-// 统一资源清理 | 适配新API：按名称销毁总线
+// 统一资源清理（系统级安全退出）
 // ==========================================================================
 static void _cleanup_resources(void)
 {
     LOG_I("Main: Starting resource cleanup...");
 
+    // ===================== 系统级安全操作：磁盘同步 =====================
+    // 作用：刷新所有文件系统缓存，防止数据损坏（工业级必需，非业务操作）
+    sync();
+    // ===================== 系统级硬件清理：SD卡安全卸载 =====================
+    // 边界：仅卸载SD卡介质，业务层存储模块已通过SYS_SHUTDOWN事件自行清理
+#if USE_SD
+    SdMount_Deinit();
+#endif
     app_restore_terminal_safe();
     
     // 优化：清理顺序与初始化严格反向（事件总线 → 数据总线）
@@ -223,12 +239,19 @@ int main(int argc, char **argv)
     g_app_ctx.app_running = true;
 
     // 1. 日志初始化
-    log_init(LOG_LEVEL_DEBUG);
+    log_init(LOG_LEVEL_INFO);
+    // 系统级硬件初始化：SD卡自动挂载（仅管理介质，不处理业务存储）
+#if USE_SD
+    sd_state_t sd_state = SdMount_Init();
+    if (sd_state == SD_MOUNTED) {
+        LOG_I("Main: SD card mounted successfully");
+    } else {
+        LOG_W("Main: SD card mount failed, system running without external storage");
+    }
+#endif
     LOG_I("Main: ========================================");
     LOG_I("Main: Vision AI Framework Starting...");
     LOG_I("Main: ========================================");
-
-
 // ==============================================
 // 【模式切换】产品模式才开启守护进程
 // ==============================================
@@ -236,7 +259,7 @@ int main(int argc, char **argv)
     // ==========================================
     // 【仅一行】守护进程（后台运行）
     // ==========================================
-    LOG_E("Main: Creating daemon...");
+    LOG_I("Main: Creating daemon...");
     log_set_daemon_mode(1);  // 开启：仅写文件，关闭终端打印
     if (create_daemon() < 0) {
         LOG_E("Main: Failed to create daemon");
@@ -250,6 +273,56 @@ int main(int argc, char **argv)
     LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);
     mem_init(s_mem_pool, MEM_POOL_SIZE);
     LOG_I("Main: TLSF memory pool init success!");
+// ===================== 网络 + 时间同步逻辑 =====================
+#if USE_NET_CHECK
+    LOG_I("Main: Start network status check...");
+
+    bool eth_link = NetCheck_GetEth0LinkStatus();
+    if (!eth_link)
+    {
+        LOG_W("Main: eth0 link down, no network cable connected");
+    }
+
+    bool internet_ok = NetCheck_GetInternetStatus();
+    if (eth_link && !internet_ok)
+    {
+        LOG_W("Main: eth0 link up, but internet unreachable");
+    }
+
+#if USE_NET_TIME_SYNC
+    if (internet_ok)
+    {
+        LOG_I("Main: Start system time sync...");
+
+        // 1. 设置时区（组件只返回值）
+        bool tz_ok = TimeSync_SetCstTimezone();
+        if (!tz_ok)
+        {
+            LOG_W("Main: Set timezone failed");
+        }
+
+        // 2. NTP同步时间
+        bool ntp_ok = TimeSync_NtpSync(NULL);
+        if (ntp_ok)
+        {
+            LOG_I("Main: NTP time sync success");
+
+            // 3. 获取并打印时间（调用方自主打印）
+            char time_buf[TIME_FORMAT_BUF_LEN] = {0};
+            TimeSync_GetLocalTimeStr(time_buf, sizeof(time_buf));
+            LOG_I("Main: Current system time: %s", time_buf);
+        }
+        else
+        {
+            LOG_W("Main: NTP time sync failed");
+        }
+    }
+    else
+    {
+        LOG_W("Main: Skip time sync, network abnormal");
+    }
+#endif
+#endif
 
     // 3. 系统底层初始化
     _init_signal_handling();
@@ -273,6 +346,9 @@ int main(int argc, char **argv)
 
     // 正常退出
     LOG_I("Main: Application exited normally");
+
+
+    // 系统资源清理
     _cleanup_resources();
     log_deinit();
     return 0;
