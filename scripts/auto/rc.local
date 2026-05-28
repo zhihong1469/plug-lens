@@ -1,25 +1,21 @@
 #!/bin/sh
-export APP_HOME=/root/run_on_board
-export LD_LIBRARY_PATH=$APP_HOME/openh264:$APP_HOME/libjpeg:$APP_HOME/mnn:$APP_HOME/libyuv:$LD_LIBRARY_PATH
-# 开机自启脚本（稳定兼容IMX6ULL Buildroot）
-sleep 9  # 等待系统完全启动（根据实际情况调整）
+# 开机自启脚本（量产模式）
+# 仅做系统级初始化，业务逻辑全部交给app_start.sh
 
-# 1. 挂载SD卡（屏蔽错误，防止失败卡住）
+# 【关键】全局导出环境变量（sysinit阶段必备）
+export APP_HOME="/root/run_on_board"
+export LD_LIBRARY_PATH=$APP_HOME/openh264:$APP_HOME/libjpeg:$APP_HOME/mnn:$APP_HOME/libyuv
+
+# 等待USB摄像头枚举完成（最稳9秒，可根据实际情况调整为5-10秒）
+sleep 9
+
+# 挂载SD卡
 mount /dev/mmcblk0p1 /mnt/sdcard 2>/dev/null
 
-# 2. 创建目录（即使SD卡没挂载，也不报错）
-mkdir -p /mnt/sdcard/log 2>/dev/null
-mkdir -p /mnt/sdcard/face_capture 2>/dev/null
-
-# 3. 设置系统时间
+# 设置系统时间（兜底）
 date -s "2026-05-29 00:00:00"
 
-# 4. 加载LED驱动（屏蔽错误，不影响启动）
-insmod /root/run_on_board/drv/leddrv.ko 2>/dev/null
-insmod /root/run_on_board/drv/chip_demo_gpio.ko 2>/dev/null
-insmod /root/run_on_board/drv/board_A_led.ko 2>/dev/null
-
-# 5. 启动AI程序（后台运行）
+# 启动业务系统（后台运行）
 /root/run_on_board/auto/app_start.sh &
 
 exit 0

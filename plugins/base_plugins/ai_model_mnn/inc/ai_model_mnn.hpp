@@ -60,8 +60,12 @@ extern "C" {
 
 
 // 绘制配置（画框）
-#define FACE_BOX_COLOR_RED      0xFF0000 /**< 人脸框颜色： */
 #define FACE_BOX_THICKNESS      2        /**< 人脸框粗细 */
+#define FACE_BOX_COLOR_BLUE     0xFF0000  /**< 静止人脸：蓝色 */
+#define FACE_BOX_COLOR_RED      0x0000FF  /**< 移动人脸：红色 */
+#define FACE_BOX_COLOR_GREEN    0x00FF00  /**< 低置信度人脸：绿色 */
+// 低置信度阈值：低于此值显示绿色框
+#define FACE_LOW_SCORE_THRESH   0.6f
 // 人脸静止判断阈值：坐标变化小于10像素视为未移动
 #define FACE_STATIC_THRESHOLD    10.0f
 // 最大支持人脸数

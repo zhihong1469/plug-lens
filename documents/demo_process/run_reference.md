@@ -27,6 +27,7 @@ use_toolchain arm32-linux-hf6ull
 进入项目根目录，执行清理+编译：
 ```bash
 make clean && make
+# 我们的项目构建逻辑支持头文件检查,按理也包括链接库检查,一般直接make可以,但是如果出现问题可以给我反馈
 ```
 
 ### 2.3 依赖库检查
@@ -59,8 +60,7 @@ cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buil
 cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libssl.so.1.1 ~/nfs/run_on_board/
 # 6. 拷贝自动化脚本目录（守护进程、启停脚本等）
 cp -rf scripts/auto ~/nfs/run_on_board/
-# 7. 清空历史抓拍图片(调试时,图片保存在nfs目录时使用)
-sudo rm -f ~/nfs/face_capture/*.jpg
+
 
 ```
 
@@ -87,6 +87,8 @@ mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
 
 # 将NFS内完整项目文件同步至板端固定目录 /root/run_on_board
 cp -rp /mnt/run_on_board /root
+# cp -rp /mnt/run_on_board/vision_ai_app /root/run_on_board/
+chmod +x /root/run_on_board/auto/*.sh
 ```
 
 ### 3.2 模式二：接入路由器局域网（多设备拉流播放---临时）
@@ -142,7 +144,7 @@ mkdir -p /mnt/sdcard/face_capture
 mount /dev/mmcblk0p1 /mnt/sdcard
 
 # 重要：拔卡/断电前务必卸载，防止文件损坏
-# umount /mnt/sdcard
+umount /mnt/sdcard
 ```
 
 ### 4.3 LED内核驱动加载测试（运行前必测试）
