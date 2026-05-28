@@ -18,6 +18,8 @@ Thumbs.db
 third_lib/compile_reference_configuration/
 third_lib/face_detector/imgs
 third_lib/face_detector/model/quant/*.json
+// 个人暂留文件
+*.my
 # ==============================================
 # 2. 编译产物忽略（屏蔽所有临时文件）
 # ==============================================

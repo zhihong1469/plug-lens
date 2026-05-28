@@ -193,7 +193,7 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
 }
 
 /**
- * @brief  人脸坐标映射+框绘制 + 静止去重存储判断(适配等比例)
+ * @brief  人脸坐标映射+多色框绘制 + 静止去重存储判断(适配等比例)
  * @param  faces: 模型输出人脸结果
  * @param  face_num: 检测到的人脸数量
  * @param  cam_w: 摄像头原始宽度
@@ -201,6 +201,11 @@ void ai_model_mnn_map_face(FaceInfo_C* face, int cam_w, int cam_h)
  * @param  src_frame: 原始图像数据
  * @param  dst_frame: 绘制完成后的图像数据
  * @return  int: 1=需要存储图片，0=人脸静止无需存储
+ * @details 功能特性：
+ *          1. 所有有效人脸全部绘制，无遗漏
+ *          2. 三色区分：移动=红色、静止=蓝色、低置信度=绿色
+ *          3. 任意人脸移动即触发存图，存图时绘制所有人脸
+ *          4. 无人移动时不绘制、不存图，零额外开销
  */
 int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num, 
                                      int cam_w, int cam_h,
@@ -215,18 +220,19 @@ int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
     static int last_face_count = 0;
     static bool is_first_frame = true;
 
-    // 当前帧有效人脸缓存
+    // 当前帧有效人脸缓存 + 移动状态标记
     FaceInfo_C curr_valid_faces[FACE_DETECT_MAX_FACES] = {0};
+    bool face_moved[FACE_DETECT_MAX_FACES] = {false}; // 标记每个人脸是否移动
     int curr_face_count = 0;
-    int need_save = 1; // 默认需要存图
+    int need_save = 0; // 默认不存图，检测到移动再置1
 
-    // 拷贝原图
+    // 拷贝原图（无论是否存图都拷贝，保证dst_frame始终有有效数据）
     memcpy(dst_frame, src_frame, cam_w * cam_h * 3);
 
     int model_w = g_priv->ai_w;  // 160
     int model_h = g_priv->ai_h;  // 120
 
-    // 等比例缩放计算（与rgb_resize完全一致）
+    // 等比例缩放计算（与rgb_resize完全一致，无修改）
     float scale_w = (float)model_w / cam_w;
     float scale_h = (float)model_h / cam_h;
     float scale    = utils_fmaxf(scale_w, scale_h);
@@ -238,11 +244,11 @@ int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
 
     const float score_thresh = 0.5f;
 
-    // ===================== 第一步：筛选当前帧有效人脸 =====================
+    // ===================== 第一步：筛选当前帧有效人脸【无过滤，全员保留】 =====================
     for (int i = 0; i < face_num && curr_face_count < FACE_DETECT_MAX_FACES; i++) 
     {
         FaceInfo_C* face = &faces[i];
-        if (face->score < score_thresh) continue;
+        if (face->score < score_thresh) continue; // 仅过滤极低置信度无效人脸
 
         // 模型坐标转换为原图坐标
         float x1 = (face->x1 + crop_x) / scale;
@@ -256,10 +262,10 @@ int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
         x2 = utils_fmaxf(0.0f, utils_fminf(x2, (float)cam_w));
         y2 = utils_fmaxf(0.0f, utils_fminf(y2, (float)cam_h));
 
-        // 过滤无效框
+        // 仅过滤完全无效的框
         if (x2 <= x1 || y2 <= y1) continue;
 
-        // 保存有效人脸
+        // 保存所有有效人脸（无任何额外过滤）
         curr_valid_faces[curr_face_count].x1 = x1;
         curr_valid_faces[curr_face_count].y1 = y1;
         curr_valid_faces[curr_face_count].x2 = x2;
@@ -268,41 +274,48 @@ int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
         curr_face_count++;
     }
 
-    // ===================== 第二步：核心 - 静止人脸判断【修复多人脸无序匹配】 =====================
+    // ===================== 第二步：核心 - 逐人脸移动判断【标记每个人脸状态】 =====================
     if (is_first_frame) {
-        // 第一帧强制存图
+        // 第一帧强制存图，所有人脸标记为移动（显示红色）
         is_first_frame = false;
         need_save = 1;
+        for (int i = 0; i < curr_face_count; i++) {
+            face_moved[i] = true;
+        }
     } else {
-        need_save = 0; // 默认不存，检测到变化再存
-        // 规则1：人脸数量变化 → 存图
+        // 规则1：人脸数量变化 → 必须存图
         if (curr_face_count != last_face_count) {
             need_save = 1;
+            // 数量变化时，所有人脸标记为移动
+            for (int i = 0; i < curr_face_count; i++) {
+                face_moved[i] = true;
+            }
         }
-        // 规则2：数量相同，【按中心坐标匹配】而非索引，兼容多人脸乱序
+        // 规则2：数量相同，逐人脸匹配判断是否移动
         else if (curr_face_count > 0) {
             for (int i = 0; i < curr_face_count; i++) {
+                face_moved[i] = true; // 默认标记为移动
                 // 计算当前人脸中心坐标
                 float curr_cx = (curr_valid_faces[i].x1 + curr_valid_faces[i].x2) / 2.0f;
                 float curr_cy = (curr_valid_faces[i].y1 + curr_valid_faces[i].y2) / 2.0f;
 
-                // 遍历上一帧所有人脸，找匹配的（解决乱序问题）
-                bool found_match = false;
+                // 遍历上一帧所有人脸，找最近匹配（解决乱序问题）
                 for (int j = 0; j < last_face_count; j++) {
                     float last_cx = (last_valid_faces[j].x1 + last_valid_faces[j].x2) / 2.0f;
                     float last_cy = (last_valid_faces[j].y1 + last_valid_faces[j].y2) / 2.0f;
 
                     float dx = utils_fabsf(curr_cx - last_cx);
                     float dy = utils_fabsf(curr_cy - last_cy);
+                    // 中心距离小于阈值 → 是同一个人，且未移动
                     if (dx < FACE_STATIC_THRESHOLD && dy < FACE_STATIC_THRESHOLD) {
-                        found_match = true;
+                        face_moved[i] = false;
                         break;
                     }
                 }
-                // 任意一张人脸未匹配到（移动/新人脸）→ 需要存图
-                if (!found_match) {
+
+                // 任意一张人脸移动 → 触发存图
+                if (face_moved[i]) {
                     need_save = 1;
-                    break;
                 }
             }
         }
@@ -318,19 +331,31 @@ int ai_model_mnn_map_and_draw_faces(FaceInfo_C* faces, int face_num,
         last_valid_faces[i] = curr_valid_faces[i];
     }
 
-    // ===================== 第四步：绘制人脸框【修复：放宽过滤，全员绘制】 =====================
-    for (int i = 0; i < curr_face_count; i++)
-    {
-        int ix1 = (int)curr_valid_faces[i].x1;
-        int iy1 = (int)curr_valid_faces[i].y1;
-        int iw  = (int)(curr_valid_faces[i].x2 - curr_valid_faces[i].x1);
-        int ih  = (int)(curr_valid_faces[i].y2 - curr_valid_faces[i].y1);
+    // ===================== 第四步：多色绘制人脸框【仅存图时才绘制】 =====================
+    if (need_save) {
+        for (int i = 0; i < curr_face_count; i++)
+        {
+            int ix1 = (int)curr_valid_faces[i].x1;
+            int iy1 = (int)curr_valid_faces[i].y1;
+            int iw  = (int)(curr_valid_faces[i].x2 - curr_valid_faces[i].x1);
+            int ih  = (int)(curr_valid_faces[i].y2 - curr_valid_faces[i].y1);
 
-        // 【修复】放宽宽高过滤阈值，避免丢弃小人脸，最小5像素即可
-        if (iw < 5 || ih < 5) continue;
+            // 仅过滤极小无效框（5像素以下）
+            if (iw < 5 || ih < 5) continue;
 
-        // 绘制人脸框（所有有效人脸都会画）
-        bgr_draw_rect(dst_frame, cam_w, cam_h, ix1, iy1, iw, ih, FACE_BOX_COLOR_RED, FACE_BOX_THICKNESS);
+            // 根据状态选择框颜色
+            uint32_t box_color;
+            if (curr_valid_faces[i].score < FACE_LOW_SCORE_THRESH) {
+                box_color = FACE_BOX_COLOR_GREEN;  // 低置信度：绿色
+            } else if (face_moved[i]) {
+                box_color = FACE_BOX_COLOR_RED;    // 移动人脸：红色
+            } else {
+                box_color = FACE_BOX_COLOR_BLUE;   // 静止人脸：蓝色
+            }
+
+            // 绘制人脸框（所有有效人脸全部绘制）
+            bgr_draw_rect(dst_frame, cam_w, cam_h, ix1, iy1, iw, ih, box_color, FACE_BOX_THICKNESS);
+        }
     }
 
     // 返回存储标志：1=存图，0=不存图
