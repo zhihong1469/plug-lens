@@ -1,6 +1,8 @@
 #!/bin/sh
+export APP_HOME=/root/run_on_board
+export LD_LIBRARY_PATH=$APP_HOME/openh264:$APP_HOME/libjpeg:$APP_HOME/mnn:$APP_HOME/libyuv:$LD_LIBRARY_PATH
 # 开机自启脚本（稳定兼容IMX6ULL Buildroot）
-sleep 1
+sleep 9  # 等待系统完全启动（根据实际情况调整）
 
 # 1. 挂载SD卡（屏蔽错误，防止失败卡住）
 mount /dev/mmcblk0p1 /mnt/sdcard 2>/dev/null

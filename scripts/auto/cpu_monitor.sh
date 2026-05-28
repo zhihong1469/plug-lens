@@ -1,11 +1,16 @@
 #!/bin/sh
-# 【工业版】系统状态监控 - 仅抓取TOP前10行（适配IMX6UL BusyBox）
-LOG_FILE="/mnt/sdcard/log/cpu_status.log"
-TIME=$(date "+%Y-%m-%d %H:%M:%S")
+# 功能：裁剪系统适配版资源监控，低频率、低占用
+# 适配：BusyBox top（无-b/-n参数）、精简ps命令
 
-# 写入时间戳
-echo "=============================================" >> $LOG_FILE
-echo "nowadays: $TIME" >> $LOG_FILE
-top -n 1 | head -n 4 >> $LOG_FILE
-top -n 1 | grep ./vision_ai_app >> $LOG_FILE
-echo "" >> $LOG_FILE
+LOG_FILE="/mnt/sdcard/log/cpu_status.log"
+MONITOR_INTERVAL=10  # 采样间隔(秒)
+mkdir -p /mnt/sdcard/log 2>/dev/null
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] cpu_monitor start" >> "$LOG_FILE"
+
+while true; do
+    echo "========================================" >> "$LOG_FILE"
+    echo "now time:$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+    top -n 1 | head -n 4 >> "$LOG_FILE"
+    top -n 1 | grep ./vision_ai_app >> "$LOG_FILE"
+    sleep $MONITOR_INTERVAL
+done

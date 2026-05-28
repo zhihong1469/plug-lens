@@ -1,45 +1,34 @@
 #!/bin/sh
-# VisionAI 看门狗监控脚本（IMX6UL 无systemd专用）
-
-# ===================== 固定配置 =====================
-APP_BIN="/root/run_on_board/vision_ai_app"
-PROC_NAME="vision_ai_app"
-WATCHDOG_LOG="/var/log/app_watchdog.log"
-CHECK_INTERVAL=2
-RETRY_DELAY=3
+APP_NAME="vision_ai_app"
+APP_PATH="/root/run_on_board/$APP_NAME"
 PID_FILE="/var/run/app_watchdog.pid"
-# ====================================================
+LOG="/mnt/sdcard/log/watchdog.log"
 
-# 单例限制
-if [ -f $PID_FILE ]; then
-    PID=$(cat $PID_FILE)
-    if ps | grep $PID | grep -v grep >/dev/null; then
-        echo "看门狗已运行，退出"
-        exit 1
-    fi
-fi
+# 单例
+[ -f $PID_FILE ] && exit 0
 echo $$ > $PID_FILE
-trap "rm -f $PID_FILE; exit 0" SIGINT SIGTERM
 
-# 日志函数
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> $WATCHDOG_LOG
-}
+# 退出清理
+trap "rm -f $PID_FILE; exit" SIGINT SIGTERM
 
-log "==================== 看门狗启动 ===================="
-log "监控程序：$APP_BIN"
+# 切目录
+cd /root/run_on_board || exit 1
 
-# 加载环境变量（修复正确路径）
-. /root/run_on_board/auto/set_env.sh
+# ======================================
+# 看门狗内部强制加载环境（最关键！）
+# 守护进程会继承这个环境变量
+# ======================================
+. ./auto/set_env.sh
 
-# 主循环
-cd /root/run_on_board
+echo "[$(date)] 看门狗启动，监控：$APP_NAME" >> $LOG
+
+# 循环监控
 while true; do
-    if ! ps | grep $PROC_NAME | grep -v grep >/dev/null; then
-        log "⚠️ 程序已退出，尝试重启..."
-        $APP_BIN
-        log "✅ 程序重启完成"
-        sleep $RETRY_DELAY
+    if ! ps | grep -v grep | grep -q "$APP_NAME"; then
+        echo "[$(date)] 进程崩溃，重启中..." >> $LOG
+        sleep 2
+        # 启动业务（环境变量已自带，守护进程直接继承）
+        nohup "$APP_PATH" >> /mnt/sdcard/log/app.log 2>&1 &
     fi
-    sleep $CHECK_INTERVAL
+    sleep 3
 done

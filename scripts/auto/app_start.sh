@@ -2,7 +2,7 @@
 # 一键启动整套系统（看门狗+程序+环境）
 echo "启动 VisionAI 系统..."
 # 强制切换到程序根目录
-cd /root/run_on_board
+cd /root/run_on_board || exit 1
 
 # 1. 创建必要目录
 mkdir -p /mnt/sdcard/log

@@ -1,17 +1,24 @@
 #!/bin/sh
-# 一键优雅停止（标准顺序：先停程序 → 再停看门狗）
-echo "🛑 停止 VisionAI 系统..."
+# 功能：优雅停止全套服务：看门狗 → 业务程序 → 兜底杀进程
+# 顺序：先停监控，再停业务，避免僵尸进程
 
 # 1. 停止看门狗
-kill $(pidof app_watchdog.sh) 2>/dev/null
-sleep 1
+WATCHDOG_PID_FILE="/var/run/app_watchdog.pid"
+if [ -f "$WATCHDOG_PID_FILE" ]; then
+    WATCHDOG_PID=$(cat "$WATCHDOG_PID_FILE")
+    kill "$WATCHDOG_PID" 2>/dev/null
+    rm -f "$WATCHDOG_PID_FILE"
+    echo "===== 已停止软件看门狗 ====="
+fi
 
 # 2. 停止业务程序
-kill $(pidof vision_ai_app) 2>/dev/null
-sleep 2
+APP_NAME="vision_ai_app"
+killall "$APP_NAME" 2>/dev/null
+sleep 1
 
-# 强制兜底
-kill -9 $(pidof vision_ai_app) 2>/dev/null
-kill -9 $(pidof app_watchdog.sh) 2>/dev/null
+# 3. 兜底强制杀死（防止僵死）
+killall -9 "$APP_NAME" 2>/dev/null
+killall app_watchdog.sh 2>/dev/null
+killall cpu_monitor.sh 2>/dev/null
 
-echo "✅ 已全部停止"
+echo "===== 所有业务服务已停止 ====="
