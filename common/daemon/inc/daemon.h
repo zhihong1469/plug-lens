@@ -1,13 +1,23 @@
 /* SPDX-License-Identifier: MIT */
 /**
  * @file    daemon.h
- * @brief   Linux 守护进程模块（产品级后台运行）
- * @author  Luo
+ * @brief   守护进程接口头文件
  */
 #ifndef DAEMON_H
 #define DAEMON_H
 
-// 创建守护进程（后台运行，脱离终端）
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief  创建标准Linux守护进程
+ * @return 0成功，-1失败
+ */
 int create_daemon(void);
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif // DAEMON_H

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /**
  * @file    daemon.c
- * @brief   标准Linux守护进程实现（修复版，适配IMX6ULL）
+ * @brief   i.MX6ULL裁剪Buildroot专用守护进程（100%避坑）
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,9 +11,8 @@
 #include <fcntl.h>
 #include <string.h>
 #include "daemon.h"
+#include "config_common.h"
 
-// 【固定】你的程序工作目录（必须和实际路径一致）
-#define DAEMON_WORK_DIR    "/root/run_on_board"
 
 int create_daemon(void)
 {
@@ -45,16 +44,16 @@ int create_daemon(void)
         exit(0);
     }
 
-    // ===================== 【修复1】设置文件权限掩码 =====================
+    // ===================== 避坑1：设置文件权限掩码 =====================
     umask(0);
 
-    // ===================== 【修复2】设置工作目录（核心！） =====================
+    // ===================== 避坑2：固定工作目录（核心！） =====================
     if (chdir(DAEMON_WORK_DIR) < 0) {
         perror("chdir failed");
         return -1;
     }
 
-    // 4. 重定向输入输出到 /dev/null
+    // 4. 重定向输入输出到空设备（关闭终端交互）
     int fd = open("/dev/null", O_RDWR);
     if (fd >= 0) {
         dup2(fd, STDIN_FILENO);

@@ -26,6 +26,8 @@
 #define CONFIG_SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
 #define CONFIG_SD_STORAGE_DIR                 "/mnt/sdcard/face_capture" // debug use "/mnt/sdcard/face_capture"/mnt/face_capture
 
+// 【固定】程序工作目录（与目录结构严格一致）
+#define DAEMON_WORK_DIR    "/root/run_on_board"
 // ===================== 功能总开关 =====================
 #define USE_NET_CHECK      1    // 开启网络状态检测
 #define USE_NET_TIME_SYNC  1    // 开启NTP网络时间同步
