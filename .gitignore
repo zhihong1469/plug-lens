@@ -35,7 +35,7 @@ third_lib/face_detector/model/quant/*.json
 *.map
 *.log
 *.tmp
-
+scripts/shell_quick_script/tmp
 # 【重点】默认忽略所有动态库（防止中间编译库提交）
 *.so
 *.so.*
