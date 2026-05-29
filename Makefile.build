@@ -1,6 +1,7 @@
 # ==========================================================================
 # Makefile.build：通用编译规则（支持C/C++混合）【修复版 - 优雅解决initcall段丢失】
-# 核心修复：仅对 libplug.a 开启 --whole-archive，保留initcall自定义段，无重复定义
+# @author LuoZhihong
+# @license MIT License
 # ==========================================================================
 
 # 1. 接收传入的参数
@@ -36,13 +37,6 @@ ifdef TARGET_NAME
 TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
 
 all: $(TARGET)
-
-# 依赖规则：可执行文件依赖静态库生成，静态库仅依赖目标文件
-ifeq ($(TARGET_TYPE), LIB)
-$(TARGET): $(OBJS)
-else
-$(TARGET): $(OBJS) $(OUTPUTDIR)/libcom.a $(OUTPUTDIR)/libplug.a
-endif
 
 # 【核心优雅修复】可执行文件链接：
 # 1. 链接脚本放在最开头：-T custom_sections.lds

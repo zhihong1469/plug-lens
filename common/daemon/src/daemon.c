@@ -1,7 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 /**
  * @file    daemon.c
- * @brief   标准Linux守护进程实现（适配IMX6ULL，无依赖）
+ * @brief   Standard Linux daemon process implementation
+ * @details Internal implementation for plug-lens Vision AI terminal:
+ *          1. Adopts POSIX-compliant double-fork daemon mechanism
+ *          2. Optimized for i.MX6ULL Buildroot embedded Linux platform
+ *          3. Integrated production-grade reliability optimizations
+ *          4. Complete terminal detachment and background silent operation
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,29 +20,68 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <string.h>
 #include "daemon.h"
+#include "config_common.h"
 
+/**
+ * @brief   Public API implementation for standard Linux daemon creation
+ * @details Implements industrial double-fork logic with embedded system optimizations
+ *          and critical reliability fixes for production deployment
+ * @return  0 on success, -1 on system call failure
+ *
+ * Core execution flow:
+ * 1. First fork: Detach from parent process and release terminal control
+ * 2. setsid(): Create new session and become session leader
+ * 3. Second fork: Prevent acquiring controlling terminal (POSIX standard)
+ * 4. Reset file permission mask and set fixed working directory
+ * 5. Redirect standard I/O to /dev/null to disable terminal interaction
+ */
 int create_daemon(void)
 {
-    // 1. 第一次fork：父进程退出，脱离终端
-    pid_t pid = fork();
-    if (pid < 0)  return -1;
-    if (pid > 0)  exit(0);
+    pid_t pid;
 
-    // 2. 创建新会话，成为会话组长 → 彻底脱离终端
-    setsid();
-
-    // 3. 第二次fork：防止重新获取终端（标准规范）
+    // First fork: Detach from terminal, parent process exits immediately
     pid = fork();
-    if (pid < 0)  return -1;
-    if (pid > 0)  exit(0);
+    if (pid < 0) {
+        perror("fork1 failed");
+        return -1;
+    }
+    if (pid > 0) {
+        exit(0);
+    }
 
-    // 4. 重定向输入/输出/错误到 /dev/null（不打印、不占用终端）
+    // Create new session to isolate from controlling terminal
+    if (setsid() < 0) {
+        perror("setsid failed");
+        return -1;
+    }
+
+    // Second fork: Critical standard step to avoid reacquiring terminal control
+    pid = fork();
+    if (pid < 0) {
+        perror("fork2 failed");
+        return -1;
+    }
+    if (pid > 0) {
+        exit(0);
+    }
+
+    // Production optimization: Reset file mode mask for full file permission control
+    umask(0);
+
+    // Critical embedded fix: Set fixed working directory to eliminate path dependency
+    if (chdir(DAEMON_WORK_DIR) < 0) {
+        perror("chdir failed");
+        return -1;
+    }
+
+    // Redirect standard I/O streams to /dev/null (disable terminal input/output)
     int fd = open("/dev/null", O_RDWR);
     if (fd >= 0) {
-        dup2(fd, 0);
-        dup2(fd, 1);
-        dup2(fd, 2);
+        dup2(fd, STDIN_FILENO);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
         close(fd);
     }
 

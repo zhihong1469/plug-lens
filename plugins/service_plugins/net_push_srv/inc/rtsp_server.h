@@ -1,12 +1,17 @@
-/* SPDX-License-Identifier: MIT */
 /**
- ******************************************************************************
- * @file           rtsp_server.h
- * @brief          RTSP Server 对外接口头文件
- * @author         Luo
- * @date           2026
- ******************************************************************************
+ * @file    rtsp_server.h
+ * @brief   RTSP Server Public Interface (Live555 Based + DataBus V4.0 H.264 Pull)
+ * @details RTSP server for i.MX6ULL, supports H.264 streaming from dedicated DataBus,
+ *          client connection management, thread-safe C interface for C/C++ integration.
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @relies  http://www.live555.com/liveMedia/
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
  */
+
 #ifndef RTSP_SERVER_H
 #define RTSP_SERVER_H
 
@@ -18,38 +23,49 @@ extern "C" {
 #endif
 
 /**
- * @brief  设置H264的SPS/PPS参数（RTSP启动前必须调用）
- * @param  sps_pps: SPS+PPS数据指针
- * @param  len: 数据长度
+ * @brief   Set H.264 SPS/PPS parameters (MUST call before RTSP start)
+ * @param   sps_pps  Pointer to SPS+PPS combined data
+ * @param   len      Length of SPS+PPS data
+ * @return  None
  */
 void rtsp_set_sps_pps(const uint8_t* sps_pps, uint32_t len);
 
 /**
- * @brief  单独启动RTSP服务
- * @return 0:成功 负数:失败
+ * @brief   Start RTSP service independently
+ * @return  0 on success, negative value on failure
  */
 int rtsp_start_service(void);
 
 /**
- * @brief  判断RTSP服务是否运行
- * @return true:运行中 false:未运行
+ * @brief   Check if RTSP server is running
+ * @return  true = running, false = stopped
  */
 bool rtsp_is_running(void);
 
 /**
- * @brief  推送H264/JPEG数据到RTSP
- * @param  buf: 帧数据
- * @param  size: 数据长度
+ * @brief   Push frame data to RTSP (Legacy interface, DataBus is used now)
+ * @param   buf   Frame data pointer
+ * @param   size  Frame data length
+ * @return  None
  */
 void rtsp_server_push(const uint8_t* buf, uint32_t size);
 
 /**
- * @brief  停止RTSP服务
- * @return 0:成功
+ * @brief   Check if any RTSP client is connected
+ * @return  true = client connected, false = no clients
+ */
+bool rtsp_has_clients(void);
+
+/**
+ * @brief   Stop RTSP server and release all resources
+ * @return  0 on success
  */
 int rtsp_server_stop(void);
 
-/* 兼容旧接口，无实际作用 */
+/**
+ * @brief   Legacy compatibility interface (no actual function)
+ * @return  0 always
+ */
 int rtsp_server_start(void);
 
 #ifdef __cplusplus

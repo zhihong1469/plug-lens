@@ -1,49 +1,66 @@
-/* SPDX-License-Identifier: MIT */
+/**
+ * @file    rtsp_server.cpp
+ * @brief   RTSP Server Implementation (Live554 + DataBus V4.0 Zero-Copy H.264)
+ * @details Core features:
+ *          - Live555 based RTSP server for i.MX6ULL
+ *          - Zero-copy H.264 frame pulling from dedicated DataBus
+ *          - Real-time FIFO thread scheduling (priority 85)
+ *          - Client connection count management
+ *          - Automatic sleep when no clients (low-power)
+ *          - SPS/PPS configuration for H.264 streaming
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @relies  http://www.live555.com/liveMedia/
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ */
+
 #include "rtsp_server.h"
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 #include "vision_ai_config.h"
+#include "data_bus.h"
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <sched.h>
 
 // ==========================================================================
-// 宏控开关
+// Configuration Macros
 // ==========================================================================
 #define ENABLE_RTSP_H264      1
 #define ENABLE_RTSP_JPEG      0
 
-// ==========================================================================
-// RTSP 配置
-// ==========================================================================
 #define RTSP_SERVER_PORT        8554
 #define RTP_MAX_BUFFER_SIZE     (2 * 1024 * 1024)
 #define EST_BITRATE_H264_KBPS   500
 #define H264_PAYLOAD_TYPE       96
 #define MAX_FRAME_SIZE          (2 * 1024 * 1024)
 
+/* Bind to dedicated H.264 DataBus */
+#define H264_DATA_BUS_NAME        H264_RTSP_DATA_BUS_NAME
+
 // ==========================================================================
-// 前置声明
+// Forward Declarations
 // ==========================================================================
 #if ENABLE_RTSP_H264
 class H264MemorySource;
 #endif
 
+extern "C" bool rtsp_has_clients(void);
+
 // ==========================================================================
-// 全局变量（兼容GCC7.5.0，无atomic编译错误）
+// Global Variables (Thread-Safe, DataBus Integrated)
 // ==========================================================================
 #if ENABLE_RTSP_H264
-static volatile bool g_frame_wake = false;
 static H264MemorySource* g_h264_source = nullptr;
-
 static uint8_t         g_sps_pps_buf[MAX_FRAME_SIZE] = {0};
 static uint32_t        g_sps_pps_len = 0;
-static uint8_t         g_h264_buf[MAX_FRAME_SIZE] = {0};
-static uint32_t        g_h264_size = 0;
-static pthread_mutex_t g_h264_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 #if ENABLE_RTSP_JPEG
@@ -52,10 +69,28 @@ static uint32_t        g_jpeg_size = 0;
 static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
+/* RTSP Core Global Objects */
+static TaskScheduler*      scheduler = nullptr;
+static UsageEnvironment*   env = nullptr;
+static RTSPServer*         rtspServer = nullptr;
+static ServerMediaSession* g_rtsp_sms = nullptr;
+static pthread_t           rtsp_thread;
+static volatile bool       rtsp_running = false;
+static EventLoopWatchVariable stop_watch;
+
+/* RTSP Client Counter (Thread-Safe) */
+static volatile uint32_t g_rtsp_client_count = 0;
+static pthread_mutex_t   g_client_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // ==========================================================================
-// H264 内存数据源（主动唤醒机制，解决黑屏）
+// H.264 Memory Source (Pull from DataBus, Zero-Copy)
 // ==========================================================================
 #if ENABLE_RTSP_H264
+/**
+ * @class   H264MemorySource
+ * @brief   Framed source for Live555, pulls H.264 frames from DataBus V4.0
+ * @note    Zero-copy design, automatic SPS/PPS sending, low-power idle
+ */
 class H264MemorySource : public FramedSource {
 public:
     static H264MemorySource* createNew(UsageEnvironment& env) {
@@ -66,62 +101,112 @@ public:
 
     static void deliverFrame(void* clientData) {
         H264MemorySource* source = (H264MemorySource*)clientData;
-        source->doGetNextFrame();
+        if (source != nullptr && !source->fIsDestroyed) {
+            source->doGetNextFrame();
+        }
     }
 
 private:
     H264MemorySource(UsageEnvironment& env)
-        : FramedSource(env), fNeedSendSPSPPS(True) {}
+        : FramedSource(env), fNeedSendSPSPPS(True), fIsDestroyed(False), fScheduleId(0) {}
     virtual ~H264MemorySource() {
+        if (fScheduleId != 0) {
+            envir().taskScheduler().unscheduleDelayedTask(fScheduleId);
+            fScheduleId = 0;
+        }
+        fIsDestroyed = True;
         g_h264_source = nullptr;
     }
 
     virtual void doGetNextFrame() override {
-        pthread_mutex_lock(&g_h264_mutex);
+        // Low-power sleep when no clients
+        if (!rtsp_has_clients()) {
+            fScheduleId = envir().taskScheduler().scheduleDelayedTask(10000, deliverFrame, this);
+            return;
+        }
 
-        // 首次下发SPS/PPS
+        // Send SPS/PPS on first frame
         if (fNeedSendSPSPPS && g_sps_pps_len > 0) {
             memcpy(fTo, g_sps_pps_buf, g_sps_pps_len);
             fFrameSize = g_sps_pps_len;
             fNeedSendSPSPPS = False;
-            pthread_mutex_unlock(&g_h264_mutex);
             afterGetting(this);
             return;
         }
 
-        // 无新帧：超低延时轮询
-        if (g_h264_size == 0 || !g_frame_wake) {
-            pthread_mutex_unlock(&g_h264_mutex);
-            envir().taskScheduler().scheduleDelayedTask(1000, deliverFrame, this);
+        // Pull latest H.264 frame from dedicated DataBus
+        data_bus_item_handle_t h264_item = NULL;
+        if (data_bus_pull_latest(H264_DATA_BUS_NAME, DATA_TYPE_H264, &h264_item) != DATA_BUS_OK) {
+            fScheduleId = envir().taskScheduler().scheduleDelayedTask(500, deliverFrame, this);
             return;
         }
 
-        // 有新帧：立即发送
-        unsigned frameSize = (fMaxSize < g_h264_size) ? fMaxSize : g_h264_size;
-        memcpy(fTo, g_h264_buf, frameSize);
-        fFrameSize = frameSize;
-        printf("[RTSP] 读取到帧: %d 字节\n", frameSize);
-        // 清空缓存和唤醒标志
-        g_h264_size = 0;
-        g_frame_wake = false;
+        // Read frame data from DataBus
+        const uint8_t* h264_data = (const uint8_t*)data_bus_get_readonly_ptr(h264_item);
+        size_t h264_size = data_bus_get_item_size(h264_item);
 
-        pthread_mutex_unlock(&g_h264_mutex);
+        if (h264_data && h264_size > 0) {
+            unsigned frameSize = (fMaxSize < h264_size) ? fMaxSize : h264_size;
+            memcpy(fTo, h264_data, frameSize);
+            fFrameSize = frameSize;
+        } else {
+            fFrameSize = 0;
+        }
+
+        // Release DataBus reference (strict compliance)
+        data_bus_release(h264_item);
+
+        if (fFrameSize == 0) {
+            fScheduleId = envir().taskScheduler().scheduleDelayedTask(500, deliverFrame, this);
+            return;
+        }
+
         afterGetting(this);
     }
 
     Boolean fNeedSendSPSPPS;
+    Boolean fIsDestroyed;
+    TaskToken fScheduleId;
 };
 
-// H264 媒体会话
-class H264ServerMediaSubsession : public OnDemandServerMediaSubsession {
+/**
+ * @class   CustomH264Subsession
+ * @brief   RTSP subsession for H.264 streaming, client connection management
+ */
+class CustomH264Subsession : public OnDemandServerMediaSubsession {
 public:
-    static H264ServerMediaSubsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
-        return new H264ServerMediaSubsession(env, reuseFirstSource);
+    static CustomH264Subsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
+        return new CustomH264Subsession(env, reuseFirstSource);
     }
 
 protected:
-    H264ServerMediaSubsession(UsageEnvironment& env, Boolean reuseFirstSource)
+    CustomH264Subsession(UsageEnvironment& env, Boolean reuseFirstSource)
         : OnDemandServerMediaSubsession(env, reuseFirstSource) {}
+
+    virtual void startStream(unsigned clientSessionId, void* streamToken,
+                             TaskFunc* rtcpRRHandler, void* rtcpRRHandlerClientData,
+                             unsigned short& rtpSeqNum, unsigned& rtpTimestamp,
+                             ServerRequestAlternativeByteHandler* serverRequestAlternativeByteHandler,
+                             void* serverRequestAlternativeByteHandlerClientData) override {
+        pthread_mutex_lock(&g_client_mutex);
+        g_rtsp_client_count++;
+        pthread_mutex_unlock(&g_client_mutex);
+        fprintf(stdout, "[RTSP] Client Connected | Online: %u\n", g_rtsp_client_count);
+
+        OnDemandServerMediaSubsession::startStream(clientSessionId, streamToken,
+                    rtcpRRHandler, rtcpRRHandlerClientData,
+                    rtpSeqNum, rtpTimestamp,
+                    serverRequestAlternativeByteHandler, serverRequestAlternativeByteHandlerClientData);
+    }
+
+    virtual void deleteStream(unsigned clientSessionId, void*& streamToken) override {
+        pthread_mutex_lock(&g_client_mutex);
+        if (g_rtsp_client_count > 0) g_rtsp_client_count--;
+        pthread_mutex_unlock(&g_client_mutex);
+        fprintf(stdout, "[RTSP] Client Disconnected | Online: %u\n", g_rtsp_client_count);
+
+        OnDemandServerMediaSubsession::deleteStream(clientSessionId, streamToken);
+    }
 
     virtual FramedSource* createNewStreamSource(unsigned, unsigned& estBitrate) override {
         estBitrate = EST_BITRATE_H264_KBPS;
@@ -138,7 +223,7 @@ protected:
 #endif
 
 // ==========================================================================
-// JPEG 模块（不变）
+// JPEG Streaming Module (Disabled by Default)
 // ==========================================================================
 #if ENABLE_RTSP_JPEG
 class LiveJPEGSource : public JPEGVideoSource {
@@ -160,6 +245,11 @@ protected:
     virtual u_int8_t height()      { return GLOBAL_VIDEO_HEIGHT / 8; }
 
     virtual void doGetNextFrame() override {
+        if (!rtsp_has_clients()) {
+            envir().taskScheduler().scheduleDelayedTask(40000, fetchFrame, this);
+            return;
+        }
+
         pthread_mutex_lock(&g_jpeg_mutex);
         if (g_jpeg_size == 0) {
             pthread_mutex_unlock(&g_jpeg_mutex);
@@ -168,7 +258,6 @@ protected:
         }
         fFrameSize = (fMaxSize < g_jpeg_size) ? fMaxSize : g_jpeg_size;
         memcpy(fTo, g_jpeg_buf, fFrameSize);
-        fNumTruncatedBytes = 0;
         pthread_mutex_unlock(&g_jpeg_mutex);
         afterGetting(this);
     }
@@ -196,19 +285,23 @@ protected:
 #endif
 
 // ==========================================================================
-// RTSP 主线程（修复初始化错误）
+// RTSP Server Thread (Real-Time Priority)
 // ==========================================================================
-static TaskScheduler*      scheduler = nullptr;
-static UsageEnvironment*   env = nullptr;
-static RTSPServer*         rtspServer = nullptr;
-static pthread_t           rtsp_thread;
-static volatile bool       rtsp_running = false;
-static EventLoopWatchVariable stop_watch;
-
+/**
+ * @brief   RTSP server worker thread (SCHED_FIFO, priority 85)
+ * @param   arg  Unused thread argument
+ * @return  NULL
+ */
 static void* rtsp_server_thread(void* arg) {
     (void)arg;
     rtsp_running = true;
     stop_watch = 0;
+    g_rtsp_client_count = 0;
+
+    // Set real-time FIFO scheduling priority
+    struct sched_param param;
+    param.sched_priority = 85;
+    pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
 
     scheduler = BasicTaskScheduler::createNew();
     env = BasicUsageEnvironment::createNew(*scheduler);
@@ -220,21 +313,21 @@ static void* rtsp_server_thread(void* arg) {
         return nullptr;
     }
 
-    ServerMediaSession* sms = ServerMediaSession::createNew(*env,
+    g_rtsp_sms = ServerMediaSession::createNew(*env,
         "stream", "stream", "IMX6ULL RTSP H264 Stream");
 
 #if ENABLE_RTSP_H264
-    sms->addSubsession(H264ServerMediaSubsession::createNew(*env, True));
+    g_rtsp_sms->addSubsession(CustomH264Subsession::createNew(*env, True));
 #endif
 #if ENABLE_RTSP_JPEG
-    sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
+    g_rtsp_sms->addSubsession(JPEGServerMediaSubsession::createNew(*env, True));
 #endif
 
-    rtspServer->addServerMediaSession(sms);
-    char* url = rtspServer->rtspURL(sms);
+    rtspServer->addServerMediaSession(g_rtsp_sms);
+    char* url = rtspServer->rtspURL(g_rtsp_sms);
     *env << "=====================================\n";
-    *env << "RTSP 服务启动成功\n";
-    *env << "播放地址: " << url << "\n";
+    *env << "RTSP Service Started Successfully\n";
+    *env << "Stream URL: " << url << "\n";
     *env << "=====================================\n";
     delete[] url;
 
@@ -246,16 +339,13 @@ static void* rtsp_server_thread(void* arg) {
 }
 
 // ==========================================================================
-// 对外 C 接口
+// Public C Language Interface
 // ==========================================================================
 extern "C" void rtsp_set_sps_pps(const uint8_t* sps_pps, uint32_t len) {
 #if ENABLE_RTSP_H264
-    if (!sps_pps || len == 0 || len >= MAX_FRAME_SIZE)
-        return;
-    pthread_mutex_lock(&g_h264_mutex);
+    if (!sps_pps || len == 0 || len >= MAX_FRAME_SIZE) return;
     memcpy(g_sps_pps_buf, sps_pps, len);
     g_sps_pps_len = len;
-    pthread_mutex_unlock(&g_h264_mutex);
 #endif
 }
 
@@ -268,23 +358,18 @@ extern "C" bool rtsp_is_running(void) {
     return rtsp_running;
 }
 
-// 核心：写入帧 + 唤醒流媒体 —— 【修复版，去掉锁死逻辑】
+// Legacy interface, replaced by DataBus
 extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
-    if (!buf || size == 0 || size >= MAX_FRAME_SIZE) return;
+    (void)buf; (void)size;
+}
 
-#if ENABLE_RTSP_H264
-    pthread_mutex_lock(&g_h264_mutex);
-    // 🔥 修复：直接覆盖旧帧（实时流标准做法，保证最新帧必发）
-    memcpy(g_h264_buf, buf, size);
-    g_h264_size = size;
-    g_frame_wake = true;  // 强制唤醒RTSP发送
-    pthread_mutex_unlock(&g_h264_mutex);
-#elif ENABLE_JPEG
-    pthread_mutex_lock(&g_jpeg_mutex);
-    memcpy(g_jpeg_buf, buf, size);
-    g_jpeg_size = size;
-    pthread_mutex_unlock(&g_jpeg_mutex);
-#endif
+extern "C" bool rtsp_has_clients(void) {
+    if (!rtsp_running) return false;
+    bool result = false;
+    pthread_mutex_lock(&g_client_mutex);
+    result = (g_rtsp_client_count > 0);
+    pthread_mutex_unlock(&g_client_mutex);
+    return result;
 }
 
 extern "C" int rtsp_server_stop(void) {
@@ -293,19 +378,15 @@ extern "C" int rtsp_server_stop(void) {
     stop_watch = 1;
     pthread_join(rtsp_thread, nullptr);
 
+    pthread_mutex_lock(&g_client_mutex);
+    g_rtsp_client_count = 0;
+    pthread_mutex_unlock(&g_client_mutex);
+
 #if ENABLE_RTSP_H264
-    pthread_mutex_lock(&g_h264_mutex);
-    g_h264_size = 0;
     g_sps_pps_len = 0;
-    g_frame_wake = false;
-    pthread_mutex_unlock(&g_h264_mutex);
-#endif
-#if ENABLE_RTSP_JPEG
-    pthread_mutex_lock(&g_jpeg_mutex);
-    g_jpeg_size = 0;
-    pthread_mutex_unlock(&g_jpeg_mutex);
 #endif
 
+    // Release Live555 resources
     if (rtspServer)  Medium::close(rtspServer);
     if (env)         env->reclaim();
     if (scheduler)   delete scheduler;
@@ -313,6 +394,8 @@ extern "C" int rtsp_server_stop(void) {
     rtspServer = nullptr;
     env = nullptr;
     scheduler = nullptr;
+    g_rtsp_sms = nullptr;
+    
     rtsp_running = false;
     return 0;
 }

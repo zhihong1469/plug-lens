@@ -2,108 +2,111 @@
 /**
  ******************************************************************************
  * @file           data_bus.c
- * @brief          嵌入式Linux 高性能零拷贝数据总线【V4.0 标准实现】
- * @details
- *  严格遵循V4.0开发准则：
- *  1. 四层架构：属于双总线中间层，仅依赖Main层基础组件
- *  2. C-OOP：不透明指针封装，内部结构完全隐藏
- *  3. 单一职责：每个函数只做一件事
- *  4. 防御性编程：全参数检查，魔法数校验，引用计数安全
- *  5. 线程安全：细粒度锁+原子操作，并发无竞争
+ * @brief          High-Performance Zero-Copy Data Bus for Embedded Linux [V4.0 Standard]
+ * @author         LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
  *
- * @author         luo
- * @date           2026
+ * @details
+ *  Strictly follow V4.0 Development Rules:
+ *  1. 4-Layer Architecture: Dual-bus middle layer, depends only on Main basic components
+ *  2. C-OOP: Opaque pointer encapsulation, fully hidden internal structure
+ *  3. Single Responsibility: One function, one job
+ *  4. Defensive Programming: Full parameter check, magic verify, safe refcount
+ *  5. Thread-Safe: Fine-grained lock + atomic operations, no concurrency race
+ *
  ******************************************************************************
  */
 
 #include "data_bus.h"
 #include "log.h"
-#include "mem_adapter.h"   // TLSF内存适配层
+#include "mem_adapter.h"   // TLSF Memory Adapter
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
-#include <stdatomic.h>    // C11原子操作核心头文件
+#include <stdatomic.h>    // C11 Atomic Operations
 
 // ==========================================================================
-// 全局配置与宏定义
+// Global Config & Macros
 // ==========================================================================
 
 #ifdef __x86_64__
-#define MEM_ALIGN_MASK  7  // 64位：8字节对齐
+#define MEM_ALIGN_MASK  7  /**< 64-bit system: 8-byte memory alignment */
 #else
-#define MEM_ALIGN_MASK  3  // 32位：4字节对齐
+#define MEM_ALIGN_MASK  3  /**< 32-bit system: 4-byte memory alignment */
 #endif
-#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK)
+#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK) /**< Align size up */
 
-#define MAX_DATA_BUS            4
-#define BUS_NAME_MAX_LEN        16
-#define DATA_BUS_MAGIC          0xA55A5AA5u  // 总线魔法数
-#define DATA_BUS_ITEM_MAGIC     0x5AA5A55Au  // 数据项魔法数
+#define MAX_DATA_BUS            4           /**< Max supported bus instances */
+#define BUS_NAME_MAX_LEN        16          /**< Max length of bus name */
+#define DATA_BUS_MAGIC          0xA55A5AA5u  /**< Bus instance magic number (safety check) */
+#define DATA_BUS_ITEM_MAGIC     0x5AA5A55Au  /**< Data item magic number (safety check) */
 
-// 默认配置
-#define DATA_BUS_MAX_ITEMS_DEFAULT         32
-#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT     (4*1024*1024)
-#define DATA_BUS_MAX_SUBSCRIBERS_DEFAULT   16
+// Default Configuration Parameters
+#define DATA_BUS_MAX_ITEMS_DEFAULT         32                  /**< Default max items */
+#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT     (4*1024*1024)       /**< Default max item size (4MB) */
+#define DATA_BUS_MAX_SUBSCRIBERS_DEFAULT   16                  /**< Default max subscribers */
 
 // ==========================================================================
-// 内部数据结构（完全私有，外部不可见）
+// Internal Data Structures (Fully Private, Encapsulated)
 // ==========================================================================
 
 /**
- * @brief 数据元信息结构体
+ * @brief Data Meta Information Structure
  */
 struct data_bus_item_info {
-    data_type_t type;
-    uint64_t timestamp;
-    uint32_t data_size;
-    atomic_uint ref_count;    // C11原子引用计数
-    const char *producer;
+    data_type_t type;                /**< Data type */
+    uint64_t timestamp;              /**< Monotonic timestamp (us) */
+    uint32_t data_size;              /**< Valid data size */
+    atomic_uint ref_count;           /**< C11 Atomic reference count */
+    const char *producer;            /**< Producer ID string */
 };
 
 /**
- * @brief 数据项结构体
+ * @brief Data Item Core Structure (Private)
  */
 typedef struct data_bus_item_t {
-    void                 *data_ptr;      // 数据指针
-    struct data_bus_item_info  info;     // 元信息
-    uint32_t              magic;         // 魔法数(安全校验)
-    bool                  in_use;        // 使用标记
-    bool                  published;     // 发布标记
+    void                 *data_ptr;      /**< Pointer to data buffer */
+    struct data_bus_item_info  info;     /**< Meta information */
+    uint32_t              magic;         /**< Magic number for safety check */
+    bool                  in_use;        /**< Item in-use flag */
+    bool                  published;     /**< Item published flag */
 } data_item_t;
 
 /**
- * @brief 订阅者结构体
+ * @brief Subscriber Structure (Private)
  */
 typedef struct data_bus_subscription_t {
-    data_bus_callback_t cb;
-    data_type_t type;
-    void *user_data;
-    bool valid;
+    data_bus_callback_t cb;            /**< Callback function */
+    data_type_t type;                   /**< Subscribed data type */
+    void *user_data;                    /**< Private user data */
+    bool valid;                         /**< Valid subscriber flag */
 } data_subscriber_t;
 
 /**
- * @brief 总线上下文结构体（完全私有）
+ * @brief Bus Context Structure (Fully Private, Core)
  */
 typedef struct data_bus_t {
-    data_item_t *items;             // 数据项数组
-    data_subscriber_t *subscribers; // 订阅者数组
-    void *memory_pool;              // 内存池基址
-    data_item_t *latest_item_held;  // 拉模式最新数据项（总线持有引用）
-    data_bus_config_t config;       // 总线配置
-    pthread_mutex_t pool_lock;      // 内存池锁：保护items数组和内存分配
-    pthread_mutex_t sub_lock;       // 订阅锁：保护subscribers数组
-    pthread_mutex_t publish_lock;   // 发布锁：保护发布过程和latest_item_held更新
-    pthread_rwlock_t rwlock;        // 读写锁：保护latest_item_held的读取
-    size_t max_item_size;           // 最大数据尺寸
-    uint32_t max_items;             // 最大项数
-    uint32_t max_subscribers;       // 最大订阅数
-    uint32_t magic;                 // 总线魔法数
+    data_item_t *items;             /**< Data item array */
+    data_subscriber_t *subscribers; /**< Subscriber array */
+    void *memory_pool;              /**< TLSF memory pool base address */
+    data_item_t *latest_item_held;  /**< Pull-mode latest item (bus holds ref) */
+    data_bus_config_t config;       /**< User configuration */
+    pthread_mutex_t pool_lock;      /**< Pool lock: protect items & allocation */
+    pthread_mutex_t sub_lock;       /**< Sub lock: protect subscribers */
+    pthread_mutex_t publish_lock;   /**< Publish lock: protect publish & latest update */
+    pthread_rwlock_t rwlock;        /**< Rwlock: protect latest item read */
+    size_t max_item_size;           /**< Max single data size */
+    uint32_t max_items;             /**< Max item count */
+    uint32_t max_subscribers;       /**< Max subscriber count */
+    uint32_t magic;                 /**< Bus magic number */
 } data_bus_context_t;
 
 /**
- * @brief 总线实例表项
+ * @brief Bus Instance Table Entry (Private)
  */
 typedef struct {
     data_bus_context_t *bus;
@@ -112,11 +115,14 @@ typedef struct {
 } data_bus_entry_t;
 
 // ==========================================================================
-// 全局静态变量（完全私有）
+// Global Static Variables (Fully Private)
 // ==========================================================================
 static data_bus_entry_t s_bus_table[MAX_DATA_BUS] = {0};
 static pthread_mutex_t  s_table_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/**
+ * @brief Data type to string mapping table (log use)
+ */
 static const char* g_data_type_str[] = {
     [DATA_TYPE_INVALID] = "INVALID",
     [DATA_TYPE_VIDEO] = "VIDEO_FRAME",
@@ -125,7 +131,7 @@ static const char* g_data_type_str[] = {
 };
 
 // ==========================================================================
-// 内部辅助函数声明（全部static）
+// Internal Helper Functions (All Static, Private)
 // ==========================================================================
 static uint64_t _data_bus_get_timestamp_us(void);
 static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx);
@@ -140,12 +146,12 @@ static int _data_bus_init_locks(data_bus_context_t *ctx);
 static void _data_bus_destroy_locks(data_bus_context_t *ctx);
 
 // ==========================================================================
-// 内部辅助函数实现
+// Internal Helper Functions Implementation
 // ==========================================================================
 
 /**
- * @brief  获取微秒级时间戳（单调时钟）
- * @return 微秒级时间戳
+ * @brief  Get system monotonic timestamp (microseconds)
+ * @return 64-bit timestamp value
  */
 static uint64_t _data_bus_get_timestamp_us(void) {
     struct timespec ts;
@@ -154,15 +160,15 @@ static uint64_t _data_bus_get_timestamp_us(void) {
 }
 
 /**
- * @brief  查找空闲数据项
- * @param  ctx: 总线上下文
- * @return 空闲数据项指针，NULL表示无空闲
- * @note   必须持有pool_lock调用
+ * @brief  Find free data item from pool
+ * @param  ctx  Bus context pointer
+ * @return Free item pointer, NULL if pool full
+ * @note   MUST hold pool_lock before calling this function
  */
 static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx) {
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         data_item_t *item = &ctx->items[i];
-        // 双重校验：未使用 且 引用计数为0
+        // Double check: unused AND refcount == 0
         if (!item->in_use && atomic_load(&item->info.ref_count) == 0) {
             return item;
         }
@@ -171,8 +177,8 @@ static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx) {
 }
 
 /**
- * @brief  重置数据项到初始状态
- * @param  item: 数据项指针
+ * @brief  Reset data item to initial state
+ * @param  item  Data item pointer
  */
 static void _data_bus_reset_item(data_item_t *item) {
     if (!item || item->magic != DATA_BUS_ITEM_MAGIC) {
@@ -185,27 +191,26 @@ static void _data_bus_reset_item(data_item_t *item) {
 }
 
 /**
- * @brief  安全释放数据项（防下溢）
- * @param  item: 数据项指针
- * @return DATA_BUS_OK 成功，负数失败
+ * @brief  Safely release data item (refcount underflow protection)
+ * @param  item  Data item pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_release_item_safe(data_item_t *item) {
     if (!item || item->magic != DATA_BUS_ITEM_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 先检查当前引用计数，防止下溢
+    // Check ref first to prevent underflow
     unsigned int current_ref = atomic_load(&item->info.ref_count);
     if (current_ref == 0) {
-        LOG_E("[BUS REF] 引用计数下溢！item=%p, ref=0", item);
+        LOG_E("[BUS REF] Refcount underflow! item=%p, ref=0", item);
         return DATA_BUS_ERR_REF_UNDERFLOW;
     }
 
-    // 原子减1，获取减之前的值
+    // Atomic decrement, get old value
     unsigned int old_ref = atomic_fetch_sub(&item->info.ref_count, 1);
-    // LOG_D("[BUS REF] item=%p, ref=%d -> %d", item, old_ref, old_ref - 1);
 
-    // 如果减之前是1，说明减完就是0，需要重置
+    // Reset item if refcount reaches 0
     if (old_ref == 1) {
         _data_bus_reset_item(item);
     }
@@ -214,16 +219,16 @@ static int _data_bus_release_item_safe(data_item_t *item) {
 }
 
 /**
- * @brief  通知所有订阅者（推模式）
- * @param  ctx: 总线上下文
- * @param  item: 数据项指针
- * @note   必须持有publish_lock调用
+ * @brief  Notify all valid subscribers (Push Mode)
+ * @param  ctx   Bus context pointer
+ * @param  item  Data item pointer
+ * @note   MUST hold publish_lock before calling this function
  */
 static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *item) {
-    data_subscriber_t *temp_sub[16]; // 栈上临时队列
+    data_subscriber_t *temp_sub[16]; /**< Stack temp queue for subscribers */
     uint32_t temp_cnt = 0;
 
-    // 🔒 第一步：全程持锁，仅收集需要通知的订阅者（极快）
+    // Lock only for fast subscriber collection (minimize critical section)
     pthread_mutex_lock(&ctx->sub_lock);
     for (uint32_t i = 0; i < ctx->max_subscribers && temp_cnt < 16; i++) {
         data_subscriber_t *s = &ctx->subscribers[i];
@@ -232,9 +237,8 @@ static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *i
         }
     }
     pthread_mutex_unlock(&ctx->sub_lock);
-    // 🔓 锁已释放，安全执行回调
 
-    // 第二步：无锁执行回调
+    // Execute callbacks without lock (safe for async processing)
     for (uint32_t i = 0; i < temp_cnt; i++) {
         data_subscriber_t *s = temp_sub[i];
         s->cb((data_bus_item_handle_t)item, s->user_data);
@@ -242,23 +246,23 @@ static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *i
 }
 
 /**
- * @brief  更新拉模式最新数据项
- * @param  ctx: 总线上下文
- * @param  new_item: 新数据项指针
- * @return DATA_BUS_OK 成功
- * @note   必须持有publish_lock调用
+ * @brief  Update Pull-Mode latest data item
+ * @param  ctx       Bus context pointer
+ * @param  new_item  New data item pointer
+ * @return DATA_BUS_OK on success
+ * @note   MUST hold publish_lock before calling this function
  */
 static int _data_bus_update_latest_item(data_bus_context_t *ctx, data_item_t *new_item) {
-    // 先释放旧的最新项
+    // Release old latest item reference
     if (ctx->latest_item_held) {
         int ret = _data_bus_release_item_safe(ctx->latest_item_held);
         if (ret != DATA_BUS_OK) {
-            LOG_W("[BUS PULL] 释放旧最新项失败: %d", ret);
+            LOG_W("[BUS PULL] Release old latest item failed: %d", ret);
         }
         ctx->latest_item_held = NULL;
     }
 
-    // 新数据项增加引用（总线持有）
+    // Add reference for new item (bus holds ownership)
     atomic_fetch_add(&new_item->info.ref_count, 1);
     ctx->latest_item_held = new_item;
 
@@ -266,9 +270,9 @@ static int _data_bus_update_latest_item(data_bus_context_t *ctx, data_item_t *ne
 }
 
 /**
- * @brief  查找总线实例
- * @param  name: 总线名称
- * @return 总线上下文指针，NULL表示不存在
+ * @brief  Find bus instance by name
+ * @param  name  Bus instance name
+ * @return Bus context pointer, NULL if not found
  */
 static data_bus_context_t* _data_bus_find_ctx(const char *name) {
     if (!name) {
@@ -289,9 +293,9 @@ static data_bus_context_t* _data_bus_find_ctx(const char *name) {
 }
 
 /**
- * @brief  分配总线上下文
- * @param  out_ctx: 输出总线上下文指针
- * @return DATA_BUS_OK 成功，负数失败
+ * @brief  Allocate bus context memory
+ * @param  out_ctx  Output bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_alloc_context(data_bus_context_t **out_ctx) {
     if (!out_ctx) {
@@ -300,7 +304,7 @@ static int _data_bus_alloc_context(data_bus_context_t **out_ctx) {
 
     *out_ctx = mem_calloc(1, sizeof(data_bus_context_t));
     if (!*out_ctx) {
-        LOG_E("[BUS INIT] 分配总线上下文失败");
+        LOG_E("[BUS INIT] Allocate bus context failed");
         return DATA_BUS_ERR_MEM;
     }
 
@@ -309,40 +313,40 @@ static int _data_bus_alloc_context(data_bus_context_t **out_ctx) {
 }
 
 /**
- * @brief  初始化内存池
- * @param  ctx: 总线上下文
- * @return DATA_BUS_OK 成功，负数失败
+ * @brief  Initialize TLSF memory pool and arrays
+ * @param  ctx  Bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_init_memory_pool(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 分配数据项数组
+    // Allocate item array
     ctx->items = mem_calloc(ctx->max_items, sizeof(data_item_t));
     if (!ctx->items) {
-        LOG_E("[BUS INIT] 分配数据项数组失败");
+        LOG_E("[BUS INIT] Allocate item array failed");
         return DATA_BUS_ERR_MEM;
     }
 
-    // 分配订阅者数组
+    // Allocate subscriber array
     ctx->subscribers = mem_calloc(ctx->max_subscribers, sizeof(data_subscriber_t));
     if (!ctx->subscribers) {
-        LOG_E("[BUS INIT] 分配订阅者数组失败");
+        LOG_E("[BUS INIT] Allocate subscriber array failed");
         mem_free(ctx->items);
         return DATA_BUS_ERR_MEM;
     }
 
-    // 分配数据内存池
+    // Allocate data memory pool
     ctx->memory_pool = mem_alloc(ctx->max_items * ctx->max_item_size);
     if (!ctx->memory_pool) {
-        LOG_E("[BUS INIT] 分配数据内存池失败");
+        LOG_E("[BUS INIT] Allocate data pool failed");
         mem_free(ctx->subscribers);
         mem_free(ctx->items);
         return DATA_BUS_ERR_MEM;
     }
 
-    // 初始化数据项
+    // Initialize item magic and data pointer
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         ctx->items[i].magic = DATA_BUS_ITEM_MAGIC;
         ctx->items[i].data_ptr = (uint8_t*)ctx->memory_pool + i * ctx->max_item_size;
@@ -352,9 +356,9 @@ static int _data_bus_init_memory_pool(data_bus_context_t *ctx) {
 }
 
 /**
- * @brief  初始化所有锁
- * @param  ctx: 总线上下文
- * @return DATA_BUS_OK 成功，负数失败
+ * @brief  Initialize all synchronization locks
+ * @param  ctx  Bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_init_locks(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
@@ -365,20 +369,20 @@ static int _data_bus_init_locks(data_bus_context_t *ctx) {
 
     ret = pthread_mutex_init(&ctx->pool_lock, NULL);
     if (ret != 0) {
-        LOG_E("[BUS INIT] 初始化pool_lock失败: %d", ret);
+        LOG_E("[BUS INIT] Init pool_lock failed: %d", ret);
         return ret;
     }
 
     ret = pthread_mutex_init(&ctx->sub_lock, NULL);
     if (ret != 0) {
-        LOG_E("[BUS INIT] 初始化sub_lock失败: %d", ret);
+        LOG_E("[BUS INIT] Init sub_lock failed: %d", ret);
         pthread_mutex_destroy(&ctx->pool_lock);
         return ret;
     }
 
     ret = pthread_mutex_init(&ctx->publish_lock, NULL);
     if (ret != 0) {
-        LOG_E("[BUS INIT] 初始化publish_lock失败: %d", ret);
+        LOG_E("[BUS INIT] Init publish_lock failed: %d", ret);
         pthread_mutex_destroy(&ctx->sub_lock);
         pthread_mutex_destroy(&ctx->pool_lock);
         return ret;
@@ -386,7 +390,7 @@ static int _data_bus_init_locks(data_bus_context_t *ctx) {
 
     ret = pthread_rwlock_init(&ctx->rwlock, NULL);
     if (ret != 0) {
-        LOG_E("[BUS INIT] 初始化rwlock失败: %d", ret);
+        LOG_E("[BUS INIT] Init rwlock failed: %d", ret);
         pthread_mutex_destroy(&ctx->publish_lock);
         pthread_mutex_destroy(&ctx->sub_lock);
         pthread_mutex_destroy(&ctx->pool_lock);
@@ -397,8 +401,8 @@ static int _data_bus_init_locks(data_bus_context_t *ctx) {
 }
 
 /**
- * @brief  销毁所有锁
- * @param  ctx: 总线上下文
+ * @brief  Destroy all synchronization locks
+ * @param  ctx  Bus context pointer
  */
 static void _data_bus_destroy_locks(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
@@ -412,7 +416,7 @@ static void _data_bus_destroy_locks(data_bus_context_t *ctx) {
 }
 
 // ==========================================================================
-// 对外API实现
+// Public APIs Implementation
 // ==========================================================================
 
 int data_bus_init(const data_bus_config_t *config) {
@@ -420,15 +424,15 @@ int data_bus_init(const data_bus_config_t *config) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 检查总线是否已存在
+    // Check if bus instance already exists
     if (_data_bus_find_ctx(config->name)) {
-        LOG_E("Data Bus[%s]: 已存在", config->name);
+        LOG_E("Data Bus[%s]: Already exists", config->name);
         return DATA_BUS_ERR_EXIST;
     }
 
     pthread_mutex_lock(&s_table_lock);
 
-    // 查找空闲实例槽位
+    // Find free instance slot
     int free_idx = -1;
     for (int i = 0; i < MAX_DATA_BUS; i++) {
         if (!s_bus_table[i].used) {
@@ -438,11 +442,11 @@ int data_bus_init(const data_bus_config_t *config) {
     }
     if (free_idx < 0) {
         pthread_mutex_unlock(&s_table_lock);
-        LOG_E("Data Bus: 实例表已满");
+        LOG_E("Data Bus: Instance table full");
         return DATA_BUS_ERR_FULL;
     }
 
-    // 分配总线上下文
+    // Allocate bus context
     data_bus_context_t *ctx = NULL;
     int ret = _data_bus_alloc_context(&ctx);
     if (ret != DATA_BUS_OK) {
@@ -450,7 +454,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // 加载配置
+    // Load user configuration
     ctx->config = *config;
     ctx->max_items = config->max_items ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
     ctx->max_item_size = config->max_item_size ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
@@ -458,7 +462,7 @@ int data_bus_init(const data_bus_config_t *config) {
     ctx->max_subscribers = config->max_subscribers ? config->max_subscribers : DATA_BUS_MAX_SUBSCRIBERS_DEFAULT;
     ctx->latest_item_held = NULL;
 
-    // 初始化内存池
+    // Initialize memory pool
     ret = _data_bus_init_memory_pool(ctx);
     if (ret != DATA_BUS_OK) {
         mem_free(ctx);
@@ -466,7 +470,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // 初始化锁
+    // Initialize synchronization locks
     ret = _data_bus_init_locks(ctx);
     if (ret != DATA_BUS_OK) {
         mem_free(ctx->memory_pool);
@@ -477,7 +481,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // 注册实例
+    // Register bus instance to global table
     strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
     s_bus_table[free_idx].name[BUS_NAME_MAX_LEN-1] = '\0';
     ctx->config.name = s_bus_table[free_idx].name;
@@ -486,7 +490,7 @@ int data_bus_init(const data_bus_config_t *config) {
 
     pthread_mutex_unlock(&s_table_lock);
 
-    LOG_I("Data Bus[%s]: 初始化成功 (max_items=%u, max_item_size=%zu, max_subscribers=%u)",
+    LOG_I("Data Bus[%s]: Init success (max_items=%u, max_item_size=%zu, max_subscribers=%u)",
           config->name, ctx->max_items, ctx->max_item_size, ctx->max_subscribers);
 
     return DATA_BUS_OK;
@@ -497,29 +501,29 @@ int data_bus_alloc(const char *name,
                    size_t size,
                    const char *producer,
                    data_bus_item_handle_t *out_item) {
-    // 参数检查
+    // Parameter validity check
     if (!name || !out_item || type == DATA_TYPE_INVALID) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 查找总线
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 检查数据大小
+    // Check data size limit
     if (size > ctx->max_item_size) {
-        LOG_E("[BUS ALLOC] 数据大小超过限制: %zu > %zu", size, ctx->max_item_size);
+        LOG_E("[BUS ALLOC] Data size exceeds limit: %zu > %zu", size, ctx->max_item_size);
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 申请空闲数据项
+    // Allocate free item from pool
     pthread_mutex_lock(&ctx->pool_lock);
     data_item_t *item = _data_bus_find_free_item(ctx);
     if (!item) {
-        // 内存池满，打印调试信息
-        LOG_E("[BUS ALLOC] 内存池已满！总线: %s", name);
+        // Debug: print pool status when full
+        LOG_E("[BUS ALLOC] Memory pool full! Bus: %s", name);
         for (uint32_t i = 0; i < ctx->max_items; i++) {
             data_item_t *it = &ctx->items[i];
             LOG_E("  Item[%u]: ref=%u, published=%d, in_use=%d",
@@ -529,13 +533,13 @@ int data_bus_alloc(const char *name,
         return DATA_BUS_ERR_FULL;
     }
 
-    // 初始化数据项
+    // Initialize item metadata
     _data_bus_reset_item(item);
     item->info.type = type;
     item->info.data_size = size;
     item->info.timestamp = _data_bus_get_timestamp_us();
     item->info.producer = producer;
-    atomic_init(&item->info.ref_count, 1);  // 生产者初始引用
+    atomic_init(&item->info.ref_count, 1);  // Producer initial reference
     item->in_use = true;
     item->published = false;
 
@@ -553,19 +557,34 @@ void* data_bus_get_writable_ptr(data_bus_item_handle_t item) {
     return ditem->data_ptr;
 }
 
+int data_bus_set_item_size(data_bus_item_handle_t item, size_t actual_size) {
+    data_item_t *ditem = (data_item_t *)item;
+    // Safety validation
+    if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC || ditem->published) {
+        return DATA_BUS_ERR_PARAM;
+    }
+    // Size limit check
+    if (actual_size > ditem->info.data_size) {
+        return DATA_BUS_ERR_PARAM;
+    }
+    // Update valid data length
+    ditem->info.data_size = actual_size;
+    return DATA_BUS_OK;
+}
+
 int data_bus_push(const char *name, data_bus_item_handle_t item) {
-    // 参数检查
+    // Parameter check
     if (!name || !item) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 查找总线
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 检查数据项
+    // Validate data item
     data_item_t *ditem = (data_item_t *)item;
     if (ditem->magic != DATA_BUS_ITEM_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -573,31 +592,28 @@ int data_bus_push(const char *name, data_bus_item_handle_t item) {
 
     pthread_mutex_lock(&ctx->publish_lock);
 
-    // 检查状态
+    // State validation
     if (!ditem->in_use || ditem->published) {
         pthread_mutex_unlock(&ctx->publish_lock);
-        LOG_E("[BUS PUSH] 状态错误: in_use=%d, published=%d", ditem->in_use, ditem->published);
+        LOG_E("[BUS PUSH] State error: in_use=%d, published=%d", ditem->in_use, ditem->published);
         return DATA_BUS_ERR_STATE;
     }
 
-    // 标记为已发布
+    // Mark item as published (read-only)
     ditem->published = true;
 
-    // 1. 推模式：通知所有订阅者
+    // Push Mode: notify all subscribers
     _data_bus_notify_subscribers(ctx, ditem);
 
-    // 2. 拉模式：更新最新数据项
+    // Pull Mode: update latest data item
     _data_bus_update_latest_item(ctx, ditem);
 
     pthread_mutex_unlock(&ctx->publish_lock);
 
-    // LOG_D("[BUS PUSH] 数据发布成功: type=%s, size=%u, producer=%s",
-    //       data_type_to_str(ditem->info.type), ditem->info.data_size, ditem->info.producer);
-
     return DATA_BUS_OK;
 }
 
-// 推模式专用：引用+1
+// Push Mode Only: Atomic refcount increment
 int data_bus_push_acquire(data_bus_item_handle_t item)
 {
     data_item_t *ditem = (data_item_t *)item;
@@ -605,24 +621,23 @@ int data_bus_push_acquire(data_bus_item_handle_t item)
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 原子安全+1
+    // Atomic safe increment
     atomic_fetch_add(&ditem->info.ref_count, 1);
-    LOG_D("[BUS PUSH] 引用+1 item=%p, ref=%u",
+    LOG_D("[BUS PUSH] Ref +1 item=%p, ref=%u",
           ditem, atomic_load(&ditem->info.ref_count));
 
     return DATA_BUS_OK;
 }
 
-
 int data_bus_subscribe(const char *name, data_type_t type,
                        data_bus_callback_t cb, void *user_data,
                        data_bus_subscription_handle_t *out_sub) {
-    // 参数检查
+    // Parameter check
     if (!name || !cb || !out_sub) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 查找总线
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -630,7 +645,7 @@ int data_bus_subscribe(const char *name, data_type_t type,
 
     pthread_mutex_lock(&ctx->sub_lock);
 
-    // 查找空闲订阅槽位
+    // Find free subscriber slot
     for (uint32_t i = 0; i < ctx->max_subscribers; i++) {
         if (!ctx->subscribers[i].valid) {
             ctx->subscribers[i].type = type;
@@ -639,23 +654,23 @@ int data_bus_subscribe(const char *name, data_type_t type,
             ctx->subscribers[i].valid = true;
             *out_sub = (data_bus_subscription_handle_t)&ctx->subscribers[i];
             pthread_mutex_unlock(&ctx->sub_lock);
-            LOG_I("[BUS SUB] 订阅成功: 总线=%s, 类型=%s", name, data_type_to_str(type));
+            LOG_I("[BUS SUB] Subscribe success: Bus=%s, Type=%s", name, data_type_to_str(type));
             return DATA_BUS_OK;
         }
     }
 
     pthread_mutex_unlock(&ctx->sub_lock);
-    LOG_E("[BUS SUB] 订阅表已满: 总线=%s", name);
+    LOG_E("[BUS SUB] Subscriber table full: Bus=%s", name);
     return DATA_BUS_ERR_FULL;
 }
 
 int data_bus_unsubscribe(const char *name, data_bus_subscription_handle_t *sub) {
-    // 参数检查
+    // Parameter check
     if (!name || !sub || !*sub) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 查找总线
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -668,25 +683,25 @@ int data_bus_unsubscribe(const char *name, data_bus_subscription_handle_t *sub) 
     pthread_mutex_unlock(&ctx->sub_lock);
 
     *sub = NULL;
-    LOG_I("[BUS SUB] 取消订阅成功: 总线=%s", name);
+    LOG_I("[BUS SUB] Unsubscribe success: Bus=%s", name);
     return DATA_BUS_OK;
 }
 
 int data_bus_pull_latest(const char *name,
                          data_type_t type,
                          data_bus_item_handle_t *out_item) {
-    // 参数检查
+    // Parameter check
     if (!name || !out_item) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // 查找总线
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 加读锁获取最新项
+    // Read lock for concurrent access
     pthread_rwlock_rdlock(&ctx->rwlock);
 
     if (!ctx->latest_item_held) {
@@ -696,13 +711,13 @@ int data_bus_pull_latest(const char *name,
 
     data_item_t *item = ctx->latest_item_held;
 
-    // 检查数据类型
+    // Data type filter check
     if (type != DATA_TYPE_INVALID && item->info.type != type) {
         pthread_rwlock_unlock(&ctx->rwlock);
         return DATA_BUS_ERR_TYPE;
     }
 
-    // 增加引用计数
+    // Increment reference count
     atomic_fetch_add(&item->info.ref_count, 1);
 
     pthread_rwlock_unlock(&ctx->rwlock);
@@ -721,11 +736,10 @@ const void* data_bus_get_readonly_ptr(data_bus_item_handle_t item) {
 
 size_t data_bus_get_item_size(data_bus_item_handle_t item) {
     data_item_t *ditem = (data_item_t *)item;
-    // 合法性校验
+    // Validity check
     if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC) {
         return 0;
     }
-    // 返回实际存储的有效数据大小
     return ditem->info.data_size;
 }
 
@@ -747,34 +761,34 @@ int data_bus_deinit(const char *name) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // 加写锁防止并发访问
+    // Write lock to prevent concurrent access
     pthread_rwlock_wrlock(&ctx->rwlock);
 
-    // 释放最新项
+    // Release latest item reference
     if (ctx->latest_item_held) {
         _data_bus_release_item_safe(ctx->latest_item_held);
         ctx->latest_item_held = NULL;
     }
 
-    // 释放所有数据项（强制重置）
+    // Force reset all items
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         _data_bus_reset_item(&ctx->items[i]);
     }
 
-    // 释放内存
+    // Free all allocated memory
     mem_free(ctx->memory_pool);
     mem_free(ctx->items);
     mem_free(ctx->subscribers);
 
     pthread_rwlock_unlock(&ctx->rwlock);
 
-    // 销毁锁
+    // Destroy synchronization locks
     _data_bus_destroy_locks(ctx);
 
-    // 释放上下文
+    // Free bus context
     mem_free(ctx);
 
-    // 清空实例表
+    // Clear global instance table
     pthread_mutex_lock(&s_table_lock);
     for (int i = 0; i < MAX_DATA_BUS; i++) {
         if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {
@@ -784,7 +798,7 @@ int data_bus_deinit(const char *name) {
     }
     pthread_mutex_unlock(&s_table_lock);
 
-    LOG_I("Data Bus[%s]: 销毁成功", name);
+    LOG_I("Data Bus[%s]: Destroy success", name);
     return DATA_BUS_OK;
 }
 

@@ -1,3 +1,25 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    queue.h
+ * @brief   Universal thread-safe static circular queue (pointer-based)
+ * @details Core features for plug-lens Vision AI terminal:
+ *          1. Static buffer only (no dynamic memory allocation)
+ *          2. Classic circular queue design (size-1 capacity for state detection)
+ *          3. Optional pthread mutex for multi-thread safety
+ *          4. Generic void* element support for any object type
+ *          5. Lightweight, high-performance O(1) enqueue/dequeue
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Global rules:
+ *          1. Actual usable capacity = buffer size - 1
+ *          2. Buffer size recommended to be power of 2 for performance
+ *          3. All APIs are thread-safe when mutex is enabled
+ */
 #ifndef __QUEUE_H
 #define __QUEUE_H
 
@@ -5,113 +27,161 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ==========================================================================
-// 配置宏：是否启用线程安全（Linux多线程环境下建议开启）
+// Configuration Macro: Thread Safety Enable
 // ==========================================================================
+/**
+ * @brief   Thread safety switch for multi-thread environment
+ * @details 1 = Enable pthread mutex (recommended for Linux)
+ *          0 = Disable mutex for maximum single-thread performance
+ */
 #define QUEUE_ENABLE_THREAD_SAFE  1
 
 #if QUEUE_ENABLE_THREAD_SAFE
 #include <pthread.h>
 #endif
 
-#define QUEUE_STATIC_BUFFER_SIZE(type, count)  (sizeof(type*) * (count))
 /**
- * @brief 辅助宏：定义队列静态缓冲区
- * @param name 缓冲区名称
- * @param type 队列元素类型（指针类型）
- * @param count 队列容量
+ * @brief   Calculate static buffer size for queue
+ * @param   type    Element data type
+ * @param   count   Maximum queue capacity
+ * @return  Required buffer size in bytes
+ */
+#define QUEUE_STATIC_BUFFER_SIZE(type, count)  (sizeof(type*) * (count))
+
+/**
+ * @brief   Helper macro: Define static queue buffer
+ * @param   name    Buffer variable name
+ * @param   type    Element type (pointer type)
+ * @param   count   Queue capacity
+ * @note    Used for compile-time static buffer allocation
  */
 #define QUEUE_DEFINE_STATIC_BUFFER(name, type, count) \
     static type* name[count]
 
 // ==========================================================================
-// 队列句柄结构体（通用指针队列）
+// Universal Circular Queue Handle Structure
 // ==========================================================================
+/**
+ * @brief   Generic pointer-based circular queue handle
+ * @details Manages void* elements with ring buffer architecture
+ * @note    All memory managed externally, no internal allocation
+ */
 typedef struct {
-    void **buffer;          // 指向指针数组的指针（存储 void* 元素）
-    uint32_t size;          // 队列总容量（注意：实际能存 size-1 个元素）
-    uint32_t head;          // 头指针（写入位置）
-    uint32_t tail;          // 尾指针（读取位置）
+    void **buffer;          /**< Pointer array buffer (stores void* elements) */
+    uint32_t size;          /**< Total buffer size (usable = size - 1) */
+    uint32_t head;          /**< Head pointer (write/enqueue position) */
+    uint32_t tail;          /**< Tail pointer (read/dequeue position) */
 
 #if QUEUE_ENABLE_THREAD_SAFE
-    pthread_mutex_t mutex;  // 互斥锁（保证多线程安全）
+    pthread_mutex_t mutex;  /**< Thread safety mutex for concurrent access */
 #endif
 } Queue_t;
 
 // ==========================================================================
-// 错误码定义（可选，用于更精细的错误处理）
+// Queue Operation Error Codes
 // ==========================================================================
+/**
+ * @brief   Error codes for queue operations
+ */
 typedef enum {
-    QUEUE_OK = 0,
-    QUEUE_ERR_FULL,         // 队列已满
-    QUEUE_ERR_EMPTY,        // 队列为空
-    QUEUE_ERR_NULL_PARAM,   // 参数为空
-    QUEUE_ERR_LOCK          // 加锁失败（仅线程安全模式下）
+    QUEUE_OK = 0,                /**< Operation successful */
+    QUEUE_ERR_FULL,              /**< Queue is full (enqueue failed) */
+    QUEUE_ERR_EMPTY,             /**< Queue is empty (dequeue failed) */
+    QUEUE_ERR_NULL_PARAM,        /**< NULL input parameter */
+    QUEUE_ERR_LOCK               /**< Mutex lock failed (thread-safe mode) */
 } QueueErr_t;
 
 // ==========================================================================
-// 对外 API 接口
+// Public API Interface
 // ==========================================================================
 
 /**
- * @brief 初始化队列
- * @param q        队列句柄指针
- * @param buffer   外部传入的指针数组缓冲区 (void* 数组)
- * @param size     缓冲区的总大小（元素个数，建议为 2 的幂次）
- * @note 【重要】实际可存储元素数量为 (size - 1)，这是环形队列的经典设计
- *       用于区分"空"和"满"两种状态。
+ * @brief   Initialize circular queue
+ * @param   q       Pointer to queue handle
+ * @param   buffer  External pointer array buffer
+ * @param   size    Total buffer size (element count)
+ * @return  None
+ *
+ * @note    IMPORTANT: Usable capacity = size - 1
+ *          Classic design to distinguish empty/full states
+ * @pre     Buffer must be valid and sufficiently sized
+ * @thread_safety No
  */
 void Queue_Init(Queue_t *q, void **buffer, uint32_t size);
 
 /**
- * @brief 放入一个元素（指针入队）
- * @param q    队列句柄指针
- * @param item 要存入的指针（可以是任意类型的对象指针）
- * @return 错误码
+ * @brief   Enqueue one pointer element
+ * @param   q       Queue handle pointer
+ * @param   item    Pointer to store (any object type)
+ * @return  QueueErr_t Error code
+ *
+ * @thread_safety Yes (if enabled)
  */
 QueueErr_t Queue_Put(Queue_t *q, void *item);
 
 /**
- * @brief 取出一个元素（指针出队）
- * @param q    队列句柄指针
- * @param item 输出参数，用于存放取出的指针
- * @return 错误码
+ * @brief   Dequeue one pointer element
+ * @param   q       Queue handle pointer
+ * @param   item    Output pointer for dequeued element
+ * @return  QueueErr_t Error code
+ *
+ * @thread_safety Yes (if enabled)
  */
 QueueErr_t Queue_Get(Queue_t *q, void **item);
 
 /**
- * @brief 查看队头元素但不出队（Peek操作）
- * @param q    队列句柄指针
- * @param item 输出参数，用于存放队头指针
- * @return 错误码
+ * @brief   Peek head element without dequeuing
+ * @param   q       Queue handle pointer
+ * @param   item    Output pointer for head element
+ * @return  QueueErr_t Error code
+ *
+ * @thread_safety Yes (if enabled)
  */
 QueueErr_t Queue_Peek(Queue_t *q, void **item);
 
 /**
- * @brief 判断队列是否为空
- * @param q 队列句柄指针
- * @return true 为空
+ * @brief   Check if queue is empty
+ * @param   q   Queue handle pointer
+ * @return  true = empty
+ *
+ * @thread_safety Yes (if enabled)
  */
 bool Queue_IsEmpty(Queue_t *q);
 
 /**
- * @brief 判断队列是否已满
- * @param q 队列句柄指针
- * @return true 为满
+ * @brief   Check if queue is full
+ * @param   q   Queue handle pointer
+ * @return  true = full
+ *
+ * @thread_safety Yes (if enabled)
  */
 bool Queue_IsFull(Queue_t *q);
 
 /**
- * @brief 获取当前队列中元素的个数
- * @param q 队列句柄指针
- * @return 元素个数
+ * @brief   Get current element count in queue
+ * @param   q   Queue handle pointer
+ * @return  Current element count
+ *
+ * @thread_safety Yes (if enabled)
  */
 uint32_t Queue_GetCount(Queue_t *q);
 
 /**
- * @brief 清空队列（重置指针，不释放内存）
- * @param q 队列句柄指针
+ * @brief   Clear queue (reset pointers, no memory free)
+ * @param   q   Queue handle pointer
+ *
+ * @post    Queue reset to empty state
+ * @thread_safety Yes (if enabled)
  */
 void Queue_Clear(Queue_t *q);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __QUEUE_H */

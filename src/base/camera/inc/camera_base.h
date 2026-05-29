@@ -1,3 +1,35 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    camera_base.h
+ * @brief   Camera Device Abstract Base Class (V3.0 Architecture)
+ * @details Universal abstract interface for camera devices (USB/CSI),
+ *          V4L2 kernel interface low-level encapsulation, C-OOP polymorphic design.
+ *          Core feature: Hardware buffer closed-loop management, auto-recycle without manual release.
+ *          All camera subclasses MUST inherit and implement this base class.
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Global rules:
+ *          1. All functions are not thread-safe unless marked specially.
+ *          2. Call functions in order: init → start_capture → get_frame → stop_capture → deinit.
+ *          3. Subclasses must place camera_base_t as the first structure member.
+ *          4. V4L2 buffer operations are handled internally, upper layer MUST NOT modify buffers.
+ */
+
+/**
+ * @brief   Safe type conversion macro for C-OOP
+ * @details Forced base-to-subclass casting solution, forbid raw pointer casting.
+ *          Core macro for embedded object-oriented programming.
+ *
+ * @param   ptr     Pointer to base class instance
+ * @param   type    Data type of target subclass structure
+ * @param   member  Name of base class member in subclass structure
+ * @return  Valid pointer to subclass instance
+ */
 #ifndef __CAMERA_BASE_H__
 #define __CAMERA_BASE_H__
 
@@ -13,190 +45,350 @@
 extern "C" {
 #endif
 
-/**
- * @file camera_base.h
- * @brief 摄像头设备抽象基类头文件（V3.0 架构版）
- * @details 定义摄像头通用抽象接口、能力结构体、V4L2底层封装
- *          所有摄像头子类（USB/CSI等）必须继承该基类实现
- *          核心特性：硬件缓冲区管理内部闭环，上层无需要手动释放
- * @version 3.0
- * @date 2025
- */
-
-/**
- * @brief container_of 宏：V3.0 强制向下转型方案
- * @details 禁止裸指针强制转换，仅通过该宏实现基类→子类的安全转换
- *          嵌入式面向对象C语言核心宏
- * @param ptr 基类指针
- * @param type 子类结构体类型
- * @param member 子类中基类的成员名
- */
 #ifndef container_of
 #define container_of(ptr, type, member) \
     ((type *)((char *)(ptr) - offsetof(type, member)))
 #endif
 
-/* 前置声明：摄像头基类 */
+/**
+ * @brief   Forward declaration of camera base class
+ * @details Opaque structure, external modules only use the pointer type
+ */
 typedef struct camera_base camera_base_t;
 
 /**
- * @brief 摄像头硬件能力检测结构体
- * @details 通用设备能力描述，子类初始化时自动填充
- *          用于上层查询设备支持的格式、参数等特性
+ * @brief   Camera hardware capability structure
+ * @details Stores device information and supported features, auto-filled during initialization.
+ *          Used by upper layers to query device capabilities and supported formats.
  */
 typedef struct {
-    char device_name[32];                // 设备名 32B
-    char bus_info[32];                  // 总线信息 32B
-    bool support_yuyv;                  // 支持YUYV 1B
-    bool support_mjpeg;                 // 支持MJPEG 1B
-    bool support_nv12;                  // 支持NV12 1B
-    bool support_exposure;              // 支持曝光 1B
-    bool support_white_balance;         // 支持白平衡 1B
-    bool support_gain;                  // 支持增益 1B
+    char device_name[32];                /**< Camera device name string */
+    char bus_info[32];                    /**< Hardware bus information (USB/CSI) */
+    bool support_yuyv;                    /**< Support YUYV pixel format */
+    bool support_mjpeg;                   /**< Support MJPEG compressed format */
+    bool support_nv12;                    /**< Support NV12 semi-planar format */
+    bool support_exposure;                /**< Support manual exposure control */
+    bool support_white_balance;           /**< Support white balance adjustment */
+    bool support_gain;                    /**< Support analog/digital gain control */
 } camera_capability_t;
 
 /**
- * @brief 摄像头操作函数表（OPS）
- * @details V3.0 强制规则：
- *          1. 仅存储函数指针，const 实例化在 .c 文件中
- *          2. 所有子类必须实现全部接口
- *          3. 纯硬件操作，无业务逻辑
+ * @brief   Camera operation virtual function table (OPS)
+ * @details Polymorphic interface for subclasses, pure hardware operations only.
+ * @note    V3.0 Mandatory Rules:
+ *          1. Must be instantiated as const in source file
+ *          2. All subclasses MUST implement all function pointers
+ *          3. No business logic, only hardware register/driver operations
  */
 typedef struct {
-    /** 设备初始化（含自检、格式配置、缓冲区申请） */
-    int (*init)(camera_base_t *me);
-    /** 设备反初始化（释放资源、关闭设备） */
-    int (*deinit)(camera_base_t *me);
-    /** 启动视频流采集 */
-    int (*start_capture)(camera_base_t *me);
-    /** 停止视频流采集 */
-    int (*stop_capture)(camera_base_t *me);
-    /** 获取一帧视频数据 */
-    int (*get_frame)(camera_base_t *me, void **frame, size_t *len);
-    /** 设置摄像头参数（曝光/亮度/白平衡等） */
-    int (*set_param)(camera_base_t *me, int cmd, void *arg);
-    /** 获取摄像头硬件能力信息 */
-    int (*get_capability)(camera_base_t *me, camera_capability_t *cap);
+    int (*init)(camera_base_t *me);            /**< Initialize hardware and resources */
+    int (*deinit)(camera_base_t *me);          /**< Release hardware and resources */
+    int (*start_capture)(camera_base_t *me);   /**< Start video stream capture */
+    int (*stop_capture)(camera_base_t *me);    /**< Stop video stream capture */
+    int (*get_frame)(camera_base_t *me, void **frame, size_t *len); /**< Get video frame data */
+    int (*set_param)(camera_base_t *me, int cmd, void *arg); /**< Set camera parameters */
+    int (*get_capability)(camera_base_t *me, camera_capability_t *cap); /**< Get device capabilities */
 } camera_ops_t;
 
 /**
- * @brief 摄像头基类结构体
- * @details V3.0 强制规则：
- *          1. const ops 必须为第一个成员
- *          2. 仅存放公共属性，无硬件私有成员
- *          3. 纯设备抽象，无业务逻辑
+ * @brief   Camera base class core structure
+ * @details Base object for all camera devices, public attributes only.
+ * @note    V3.0 Mandatory Rules:
+ *          1. const ops table MUST be the FIRST member
+ *          2. No hardware-specific private members
+ *          3. Pure device abstraction, no business logic
+ *          4. Do NOT modify members directly, use public APIs only
  */
 struct camera_base {
-    const camera_ops_t *ops;  /**< 固定首位：只读操作函数表 */
-    const char *name;         /**< 设备名称（usb_camera/csi_camera） */
-    int width;                /**< 实际生效的图像宽度 */
-    int height;               /**< 实际生效的图像高度 */
-    uint32_t fps;             /**< 实际生效的帧率 */
-    bool is_running;          /**< 采集运行状态：true-运行 false-停止 */
-    bool is_init;             /**< 初始化状态：true-已初始化 false-未初始化 */
+    const camera_ops_t *ops;      /**< Read-only virtual function table (fixed first position) */
+    const char *name;             /**< Device identifier (usb_camera/csi_camera) */
+    int width;                    /**< Effective image width (pixels) */
+    int height;                   /**< Effective image height (pixels) */
+    uint32_t fps;                 /**< Actual frame rate (frames per second) */
+    bool is_running;              /**< Stream status: true = capturing, false = stopped */
+    bool is_init;                 /**< Init status: true = initialized, false = uninitialized */
 };
 
 /**
- * @brief 摄像头公共参数配置命令枚举
- * @details 上层调用 camera_set_param 时使用的命令字
+ * @brief   Camera parameter control commands
+ * @details Command enumeration for camera_set_param() interface,
+ *          used by upper layers to configure camera parameters.
  */
 enum camera_param_cmd {
-    CAMERA_PARAM_SET_FPS,             /**< 设置帧率 */
-    CAMERA_PARAM_SET_EXPOSURE,        /**< 设置手动曝光 */
-    CAMERA_PARAM_SET_BRIGHTNESS,      /**< 设置亮度 */
-    CAMERA_PARAM_SET_WHITE_BALANCE,   /**< 设置手动白平衡 */
-    CAMERA_PARAM_SET_GAIN,            /**< 设置手动增益 */
+    CAMERA_PARAM_SET_FPS,             /**< Set video frame rate */
+    CAMERA_PARAM_SET_EXPOSURE,        /**< Set manual exposure value */
+    CAMERA_PARAM_SET_BRIGHTNESS,      /**< Set image brightness */
+    CAMERA_PARAM_SET_WHITE_BALANCE,   /**< Set manual white balance */
+    CAMERA_PARAM_SET_GAIN,            /**< Set sensor gain value */
 };
 
 /* ============================================================================
- * @brief V4L2 系统调用薄封装（设备驱动层专用）
- * @details 无业务逻辑，仅封装Linux V4L2原生接口
- *          所有摄像头子类通用，禁止上层直接调用
- * ========================================================================== */
-// 基础设备操作
-int v4l2_open(const char *dev_path);                /**< 打开V4L2设备 */
-void v4l2_close(int fd);                            /**< 关闭V4L2设备 */
-int v4l2_stream_ctrl(int fd, bool on);              /**< 开启/关闭视频流 */
-
-// 硬件自检核心函数
-int v4l2_query_capability(int fd, camera_capability_t *cap);  /**< 查询设备基础能力 */
-int v4l2_check_control_support(int fd, uint32_t cid);        /**< 检查参数是否支持 */
-int v4l2_enum_formats(int fd, camera_capability_t *cap);      /**< 枚举支持的像素格式 */
-
-// 图像格式配置
-int v4l2_set_format(int fd, int *width, int *height, uint32_t pixelformat); /**< 设置图像格式 */
-int v4l2_get_format(int fd, int *width, int *height, uint32_t *pixelformat); /**< 获取当前格式 */
-int v4l2_set_fps(int fd, uint32_t *fps);                                    /**< 设置并回读帧率 */
-
-// 缓冲区管理
-int v4l2_reqbufs(int fd, int *buf_cnt);                 /**< 申请V4L2内核缓冲区 */
-int v4l2_querybuf(int fd, struct v4l2_buffer *buf);     /**< 查询缓冲区信息 */
-int v4l2_qbuf(int fd, struct v4l2_buffer *buf);        /**< 缓冲区入队（归还内核） */
-int v4l2_dqbuf(int fd, struct v4l2_buffer *buf);       /**< 缓冲区出队（从内核获取） */
-void *v4l2_mmap(int fd, size_t length, off_t offset);  /**< 内存映射 */
-void v4l2_munmap(void *addr, size_t length);           /**< 解除内存映射 */
-
-// 参数控制
-int v4l2_set_ctrl(int fd, uint32_t cid, int value);    /**< 设置V4L2控制参数 */
-int v4l2_get_ctrl(int fd, uint32_t cid, int *value);  /**< 获取V4L2控制参数 */
-
-/* ============================================================================
- * @brief 摄像头基类对外统一接口（V3.0 强制校验+分发）
- * @details 上层业务模块唯一调用接口，自动校验参数+分发到子类实现
+ * @brief   V4L2 kernel system call thin encapsulation
+ * @details Low-level driver layer only, no business logic, universal for all subclasses.
+ *          FORBID direct calls from upper business modules.
  * ========================================================================== */
 /**
- * @brief 初始化摄像头设备
- * @param me 摄像头基类指针
- * @return 0成功 负数失败
+ * @brief   Open V4L2 video device
+ * @param   dev_path    Device file path (e.g. /dev/video0)
+ * @return  File descriptor (>=0) on success, negative errno on failure
+ * @pre     Device path must be valid and accessible
+ * @thread_safety No
+ */
+int v4l2_open(const char *dev_path);
+
+/**
+ * @brief   Close V4L2 video device
+ * @param   fd  V4L2 device file descriptor
+ * @return  None
+ * @pre     File descriptor must be valid
+ * @thread_safety No
+ */
+void v4l2_close(int fd);
+
+/**
+ * @brief   Control V4L2 stream start/stop
+ * @param   fd  V4L2 device file descriptor
+ * @param   on  true = start stream, false = stop stream
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_stream_ctrl(int fd, bool on);
+
+/**
+ * @brief   Query V4L2 device basic capabilities
+ * @param   fd  V4L2 device file descriptor
+ * @param   cap Output pointer to store capability data
+ * @return  0 on success, negative errno on failure
+ * @pre     File descriptor and capability pointer must be valid
+ * @thread_safety No
+ */
+int v4l2_query_capability(int fd, camera_capability_t *cap);
+
+/**
+ * @brief   Check if V4L2 control parameter is supported
+ * @param   fd  V4L2 device file descriptor
+ * @param   cid V4L2 control ID
+ * @return  1 = supported, 0 = not supported
+ * @thread_safety No
+ */
+int v4l2_check_control_support(int fd, uint32_t cid);
+
+/**
+ * @brief   Enumerate supported pixel formats and controls
+ * @param   fd  V4L2 device file descriptor
+ * @param   cap Output pointer to store format support info
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_enum_formats(int fd, camera_capability_t *cap);
+
+/**
+ * @brief   Set V4L2 video format and verify actual parameters
+ * @param   fd            V4L2 device file descriptor
+ * @param   width         Input: target width, Output: actual width
+ * @param   height        Input: target height, Output: actual height
+ * @param   pixelformat   V4L2 pixel format FourCC code
+ * @return  0 on success, negative errno on failure
+ * @note    Auto read-back to confirm hardware-supported resolution
+ * @thread_safety No
+ */
+int v4l2_set_format(int fd, int *width, int *height, uint32_t pixelformat);
+
+/**
+ * @brief   Get current V4L2 video format
+ * @param   fd            V4L2 device file descriptor
+ * @param   width         Output: image width
+ * @param   height        Output: image height
+ * @param   pixelformat   Output: pixel format FourCC code
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_get_format(int fd, int *width, int *height, uint32_t *pixelformat);
+
+/**
+ * @brief   Set V4L2 frame rate and verify actual value
+ * @param   fd  V4L2 device file descriptor
+ * @param   fps Input: target FPS, Output: actual FPS
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_set_fps(int fd, uint32_t *fps);
+
+/**
+ * @brief   Request V4L2 kernel buffers for streaming
+ * @param   fd      V4L2 device file descriptor
+ * @param   buf_cnt Input: request count, Output: actual allocated count
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_reqbufs(int fd, int *buf_cnt);
+
+/**
+ * @brief   Query V4L2 buffer information
+ * @param   fd  V4L2 device file descriptor
+ * @param   buf V4L2 buffer structure pointer
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_querybuf(int fd, struct v4l2_buffer *buf);
+
+/**
+ * @brief   Enqueue buffer to V4L2 kernel queue
+ * @param   fd  V4L2 device file descriptor
+ * @param   buf V4L2 buffer structure pointer
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_qbuf(int fd, struct v4l2_buffer *buf);
+
+/**
+ * @brief   Dequeue buffer from V4L2 kernel queue
+ * @param   fd  V4L2 device file descriptor
+ * @param   buf V4L2 buffer structure pointer
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_dqbuf(int fd, struct v4l2_buffer *buf);
+
+/**
+ * @brief   Memory map V4L2 kernel buffer to user space
+ * @param   fd      V4L2 device file descriptor
+ * @param   length  Buffer length
+ * @param   offset  Buffer offset
+ * @return  Mapped virtual address on success, MAP_FAILED on failure
+ * @thread_safety No
+ */
+void *v4l2_mmap(int fd, size_t length, off_t offset);
+
+/**
+ * @brief   Unmap user-space memory buffer
+ * @param   addr    Mapped virtual address
+ * @param   length  Buffer length
+ * @return  None
+ * @thread_safety No
+ */
+void v4l2_munmap(void *addr, size_t length);
+
+/**
+ * @brief   Set V4L2 device control parameter
+ * @param   fd      V4L2 device file descriptor
+ * @param   cid     V4L2 control ID
+ * @param   value   Target parameter value
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_set_ctrl(int fd, uint32_t cid, int value);
+
+/**
+ * @brief   Get V4L2 device control parameter
+ * @param   fd      V4L2 device file descriptor
+ * @param   cid     V4L2 control ID
+ * @param   value   Output pointer to store parameter value
+ * @return  0 on success, negative errno on failure
+ * @thread_safety No
+ */
+int v4l2_get_ctrl(int fd, uint32_t cid, int *value);
+
+/* ============================================================================
+ * @brief   Camera base class unified public interfaces
+ * @details ONLY valid interfaces for upper business modules,
+ *          Auto parameter validation + polymorphic dispatch to subclasses.
+ * ========================================================================== */
+/**
+ * @brief   Initialize camera base class and subclass hardware
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Instance must be in uninitialized state
+ * @post    Instance marked as initialized if success
+ *
+ * @warning Do not call repeatedly
+ * @thread_safety No
+ *
+ * @example
+ * @code
+ * camera_base_t *cam = usb_camera_create("/dev/video0");
+ * int ret = camera_init(cam);
+ * if (ret != 0) {
+ *     // Handle initialization error
+ * }
+ * @endcode
  */
 int camera_init(camera_base_t *me);
 
 /**
- * @brief 反初始化摄像头设备
- * @param me 摄像头基类指针
- * @return 0成功 负数失败
+ * @brief   De-initialize camera and release all resources
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Capture must be stopped before deinit
+ * @post    Instance marked as uninitialized, all resources released
+ *
+ * @thread_safety No
  */
 int camera_deinit(camera_base_t *me);
 
 /**
- * @brief 启动摄像头采集
- * @param me 摄像头基类指针
- * @return 0成功 负数失败
+ * @brief   Start camera video capture stream
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Instance must be initialized
+ * @post    Capture state set to running
+ *
+ * @thread_safety No
  */
 int camera_start_capture(camera_base_t *me);
 
 /**
- * @brief 停止摄像头采集
- * @param me 摄像头基类指针
- * @return 0成功 负数失败
+ * @brief   Stop camera video capture stream
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Instance must be running
+ * @post    Capture state set to stopped
+ *
+ * @thread_safety No
  */
 int camera_stop_capture(camera_base_t *me);
 
 /**
- * @brief 获取一帧视频数据
- * @param me 摄像头基类指针
- * @param frame 输出：帧数据指针
- * @param len 输出：帧数据长度
- * @return 0成功 负数失败
- * @note 【核心重要】内部已完成V4L2缓冲区 dqbuf+qbuf 闭环
- *       硬件缓冲区自动回收，上层**无需、禁止**手动释放！
+ * @brief   Get one valid video frame from camera
+ * @param   me      Pointer to camera base class instance, cannot be NULL
+ * @param   frame   Output pointer to frame data buffer, cannot be NULL
+ * @param   len     Output pointer to frame data length, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Capture must be started
+ * @post    Buffer auto-enqueued internally (closed-loop management)
+ *
+ * @note    Core feature: V4L2 DQBUF/QBUF handled internally,
+ *          Upper layer MUST NOT release or modify the frame buffer
+ * @warning Do not free the returned frame pointer
+ * @thread_safety No
  */
 int camera_get_frame(camera_base_t *me, void **frame, size_t *len);
 
 /**
- * @brief 设置摄像头参数
- * @param me 摄像头基类指针
- * @param cmd 参数命令（enum camera_param_cmd）
- * @param arg 参数值指针
- * @return 0成功 负数失败
+ * @brief   Set camera runtime parameters
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @param   cmd Parameter control command (enum camera_param_cmd)
+ * @param   arg Pointer to parameter value, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Instance must be initialized
+ * @thread_safety No
  */
 int camera_set_param(camera_base_t *me, int cmd, void *arg);
 
 /**
- * @brief 获取摄像头硬件能力信息
- * @param me 摄像头基类指针
- * @param cap 输出：能力信息结构体
- * @return 0成功 负数失败
+ * @brief   Get camera hardware capability information
+ * @param   me  Pointer to camera base class instance, cannot be NULL
+ * @param   cap Output pointer to capability structure, cannot be NULL
+ * @return  0 on success, negative errno on failure
+ *
+ * @pre     Instance must be initialized
+ * @thread_safety No
  */
 int camera_get_capability(camera_base_t *me, camera_capability_t *cap);
 
