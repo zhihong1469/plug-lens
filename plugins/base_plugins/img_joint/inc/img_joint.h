@@ -15,6 +15,7 @@
 // 与项目全局错误码完全对齐
 #define IMG_JOINT_OK             0
 #define IMG_JOINT_ERR_INPUT     -1
+#define IMG_JOINT_ERR_SKIP      -2  // 正常跳帧
 #define IMG_JOINT_ERR_JPEG      -5  // JPEG编解码错误
 #define IMG_JOINT_ERR_H264      -6  // H264编码错误
 

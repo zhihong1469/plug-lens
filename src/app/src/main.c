@@ -247,7 +247,7 @@ int main(int argc, char **argv)
     if (sd_state == SD_MOUNTED) {
         LOG_I("Main: SD card mounted successfully");
     } else {
-        LOG_W("Main: SD card mount failed, system running without external storage");
+        LOG_W("Main: The internal SD card mounting of the program failed, and the system ran without external storage");
     }
 #endif
 

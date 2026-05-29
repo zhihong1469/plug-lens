@@ -52,7 +52,7 @@ extern "C" {
 #define CONFIG_SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
 /** 视觉采集数据存储目录 | 人脸/图像采集文件保存路径 */
 #define CONFIG_SD_STORAGE_DIR                 "/mnt/sdcard/face_capture"
-
+// /mnt/nfs/face_capture
 // ==========================================================================
 // 系统工作目录配置（固定不可修改）
 // ==========================================================================

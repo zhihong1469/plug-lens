@@ -40,9 +40,11 @@ arm-buildroot-linux-gnueabihf-readelf -d xxxxxxxxxxxx | grep NEEDED
 ### 2.4 批量拷贝文件至NFS共享目录
 将**可执行程序、AI模型、所有第三方动态库**统一拷贝到PC端NFS共享目录 `~/nfs/run_on_board`，开发板通过NFS挂载访问：
 ```bash
+mkdir -p ~/nfs/run_on_board/{mnn,libjpeg,openh264,libyuv,drv}
 # 1. 拷贝主程序
 cp output/vision_ai_app ~/nfs/run_on_board/
 
+cp -rf drv/led_drv/*.ko  ~/nfs/run_on_board/drv
 # 2. 拷贝MNN AI模型文件
 cp third_lib/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
 
@@ -85,8 +87,10 @@ vi /etc/network/interfaces
 # 挂载PC端NFS共享目录至板端 /mnt
 mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
 
-# 将NFS内完整项目文件同步至板端固定目录 /root/run_on_board
-cp -rp /mnt/run_on_board /root
+# 将NFS内完整项目文件同步至板端固定目录 如:/root/run_on_board
+mkdir run_on_board
+cp -rp /mnt/run_on_board /root/
+
 # cp -rp /mnt/run_on_board/vision_ai_app /root/run_on_board/
 chmod +x /root/run_on_board/auto/*.sh
 ```
@@ -115,6 +119,17 @@ mount -t nfs -o nolock,port=2050 10.168.1.173:/home/luo/nfs /mnt
 cp -rp /mnt/run_on_board /root
 ```
 ```bash
+# 清空原有全部内容,类似如下:
+auto lo
+iface lo inet loopback
+
+# 以太网eth0 静态IP 永久配置
+auto eth0
+iface eth0 inet static
+    address 192.168.5.9
+    netmask 255.255.255.0
+    gateway 192.168.5.10
+    dns-nameservers 114.114.114.114
 # 永久生效备用---把文件里的 eth0 配置改成下面这样（固定 IP + 网关 + DNS）:
 auto eth0
 iface eth0 inet static

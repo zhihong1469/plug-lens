@@ -24,11 +24,9 @@ bool TimeSync_NtpSync(const char *ntp_server)
 {
     char cmd[CMD_BUF_LEN] = {0};
     const char *server = ntp_server ? ntp_server : NTP_SERVER_ADDR;
-
     // 嵌入式Linux专用：强制时间同步（-u 绕过端口占用）
     snprintf(cmd, sizeof(cmd) - 1, "ntpdate -s -u %s", server);
     int ret = system(cmd);
-
     return (ret == 0);
 }
 bool TimeSync_GetLocalTimeStr(char *buf, int buf_len)

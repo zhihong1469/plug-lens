@@ -106,6 +106,7 @@ static int __app_auto_init(void) {
     pthread_attr_destroy(&thread_attr);
     return 0;
 }
+    MODULE_INIT_LEVEL(INIT_APP, __app_auto_init);
 // 仅产品模式编译
 #if RUN_PRODUCT_MODE
     MODULE_INIT_LEVEL(INIT_APP, __app_auto_init);
