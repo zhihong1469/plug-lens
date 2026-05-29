@@ -1,11 +1,21 @@
 /* SPDX-License-Identifier: MIT
- * Copyright (c) 2026 LuoZhihong (相醉为友)
+ * Copyright (c) 2026 LuoZhihong
  * All rights reserved.
+ */
+/**
+ * @file    sys_time_sync.h
+ * @brief   System timezone and NTP network time synchronization component
+ * @details Core functions:
+ *          1. Set system timezone to UTC+8 (CST/Beijing Time)
+ *          2. Synchronize system time via NTP server
+ *          3. Get formatted local time string and timestamp
+ * @note    Depends on system ntpdate tool (pre-installed in embedded Linux)
  *
- * @file sys_time_sync.h
- * @brief 系统时区 + NTP网络时间同步组件
- * @brief System timezone and NTP time sync component
- * @note 依赖系统 ntpdate 工具(嵌入式Linux标配, 极简系统可预装)
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
  */
 #ifndef __SYS_TIME_SYNC_H__
 #define __SYS_TIME_SYNC_H__
@@ -18,33 +28,37 @@
 extern "C" {
 #endif
 
-// 配置
-#define NTP_SERVER_ADDR       "ntp.aliyun.com" // 203.107.6.88
+// ===================== Configuration Macros =====================
+/** NTP server address (Alibaba Cloud NTP) */
+#define NTP_SERVER_ADDR       "ntp.aliyun.com"
+/** Buffer length for formatted time string */
 #define TIME_FORMAT_BUF_LEN   64
 
+// ===================== Public API Declarations =====================
 /**
- * @brief 设置系统时区为东八区(北京时间 CST)
- * @return true: 成功  false: 失败
+ * @brief   Set system timezone to UTC+8 (CST, Beijing Time)
+ * @return  true: Success, false: Failure
  */
 bool TimeSync_SetCstTimezone(void);
 
 /**
- * @brief 通过NTP服务器同步系统时间
- * @param ntp_server: 自定义NTP服务器, 传NULL使用默认配置
- * @return true: 同步成功  false: 网络/命令执行失败
+ * @brief   Synchronize system time via NTP server
+ * @param   ntp_server  Custom NTP server address, NULL to use default
+ * @return  true: Sync success, false: Network/command failure
  */
 bool TimeSync_NtpSync(const char *ntp_server);
 
 /**
- * @brief 获取格式化本地时间字符串
- * @param buf: 外部传入缓冲区
- * @param buf_len: 缓冲区长度
- * @return true: 获取成功
+ * @brief   Get formatted local time string (YYYY-MM-DD HH:MM:SS)
+ * @param   buf         External buffer for time string
+ * @param   buf_len     Length of the buffer
+ * @return  true: Success, false: Invalid parameter
  */
 bool TimeSync_GetLocalTimeStr(char *buf, int buf_len);
 
 /**
- * @brief 获取系统时间戳(秒)
+ * @brief   Get system timestamp (seconds since epoch)
+ * @return  time_t  Unix timestamp
  */
 time_t TimeSync_GetTimeStamp(void);
 

@@ -10,7 +10,7 @@
 #endif
 
 // ==========================================================================
-// 内部宏
+// Internal Macros
 // ==========================================================================
 #if THREAD_ENABLE_LOG
     #define THREAD_LOG_I(fmt, ...) LOG_I(fmt, ##__VA_ARGS__)
@@ -23,7 +23,7 @@
 #endif
 
 // ==========================================================================
-// 内部函数：保留原有
+// Internal Function: Map generic priority to system real-time priority
 // ==========================================================================
 static int _thread_priority_to_system(thread_priority_t priority)
 {
@@ -41,7 +41,7 @@ static int _thread_priority_to_system(thread_priority_t priority)
 }
 
 // ==========================================================================
-// 内部入口：保留原有，增加停止标志
+// Internal Wrapper: Thread entry with running state management
 // ==========================================================================
 static void* _thread_entry_wrapper(void *arg)
 {
@@ -60,7 +60,7 @@ static void* _thread_entry_wrapper(void *arg)
 }
 
 // ==========================================================================
-// 原有接口实现：完全保留，仅修复调度设置
+// Public API Implementation
 // ==========================================================================
 void thread_attr_init(thread_attr_t *attr)
 {
@@ -102,7 +102,6 @@ thread_err_t thread_create(thread_t *thread,
         thread->attr.joinable = true;
     }
 
-    // 【修复】创建时不强行设置调度，避免失败，交给新增RT接口设置
     int ret = pthread_create(&thread->thread_id, &pthread_attr, _thread_entry_wrapper, thread);
     pthread_attr_destroy(&pthread_attr);
 
@@ -132,20 +131,20 @@ thread_err_t thread_create_rt(thread_t *thread,
     thread_err_t ret;
     thread_attr_t attr;
 
-    // 1. 初始化属性
+    // Initialize attributes
     thread_attr_init(&attr);
     attr.name = name;
     attr.stack_size = stack_size;
     attr.priority = THREAD_PRIORITY_HIGH;
 
-    // 2. 创建基础线程
+    // Create base thread
     ret = thread_create(thread, &attr, entry, user_data);
     if (ret != THREAD_OK) return ret;
 
-    // 3. 自动设置实时优先级（FIFO）
+    // Set real-time priority (FIFO)
     thread_set_rt_priority(thread, THREAD_SCHED_FIFO, rt_prio);
 
-    // 4. 自动绑定CPU
+    // Bind CPU core
     thread_set_affinity(thread, cpu_id);
 
     return THREAD_OK;
@@ -207,7 +206,7 @@ void thread_yield(void) { sched_yield(); }
 void thread_stop(thread_t *thread) { if (thread) thread->running = false; }
 
 // ==========================================================================
-// 新增：Linux 实时线程核心实现（你最需要的！）
+// Linux Real-time Thread Implementation
 // ==========================================================================
 #ifdef __linux__
 thread_err_t thread_set_rt_priority(thread_t *thread, thread_sched_policy_t policy, int prio)

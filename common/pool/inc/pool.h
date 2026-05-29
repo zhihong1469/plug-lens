@@ -1,3 +1,25 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    pool.h
+ * @brief   Universal static object pool for embedded Vision AI system
+ * @details Core features:
+ *          1. Static memory mode (external buffer, no runtime fragmentation)
+ *          2. Stack-based free list for high-performance object management
+ *          3. Optional thread-safe mutex protection
+ *          4. Zero dynamic memory allocation, embedded-optimized
+ *          5. Standard error code system for robust operation
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Global rules:
+ *          1. Use static external buffers to avoid heap fragmentation
+ *          2. Thread safety controlled by compile-time macro
+ *          3. All APIs are thread-safe when mutex is enabled
+ */
 #ifndef __POOL_H
 #define __POOL_H
 
@@ -5,9 +27,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // ==========================================================================
-// 配置宏：是否启用线程安全
+// Configuration Macro: Thread Safety Enable
 // ==========================================================================
+/**
+ * @brief   Thread safety configuration switch
+ * @details 1 = Enable pthread mutex for multi-thread access
+ *          0 = Disable mutex for maximum single-thread performance
+ */
 #define POOL_ENABLE_THREAD_SAFE  1
 
 #if POOL_ENABLE_THREAD_SAFE
@@ -15,46 +46,59 @@
 #endif
 
 // ==========================================================================
-// 错误码定义
+// Object Pool Error Code Definition
 // ==========================================================================
+/**
+ * @brief   Object pool operation status error codes
+ */
 typedef enum {
-    POOL_OK = 0,
-    POOL_ERR_FULL,         // 池已满
-    POOL_ERR_EMPTY,        // 池已空
-    POOL_ERR_NULL_PARAM,   // 参数为空
-    POOL_ERR_LOCK,         // 加锁失败
-    POOL_ERR_NO_MEMORY,    // 内存不足
-    POOL_ERR_INVALID       // 无效操作
+    POOL_OK = 0,                /**< Operation successful */
+    POOL_ERR_FULL,              /**< Object pool is full */
+    POOL_ERR_EMPTY,             /**< Object pool is empty */
+    POOL_ERR_NULL_PARAM,        /**< NULL input parameter */
+    POOL_ERR_LOCK,              /**< Mutex lock/unlock failed */
+    POOL_ERR_NO_MEMORY,         /**< Insufficient memory */
+    POOL_ERR_INVALID            /**< Invalid operation */
 } PoolErr_t;
 
 // ==========================================================================
-// 对象池句柄结构体（通用对象池）
+// Universal Object Pool Handle Structure
 // ==========================================================================
+/**
+ * @brief   Object pool handle (static memory based)
+ * @details Manages fixed-size objects with stack-style free list
+ * @note    All memory managed externally, no internal allocation
+ */
 typedef struct {
-    void *memory_pool;          // 指向预分配的内存池
-    void **free_list;           // 空闲对象指针列表（栈结构）
-    uint32_t item_size;         // 单个对象的大小（字节）
-    uint32_t pool_capacity;     // 池的总容量
-    uint32_t free_count;        // 当前空闲对象数量
-    uint32_t top;               // 空闲列表栈顶指针
+    void *memory_pool;          /**< Base address of pre-allocated memory buffer */
+    void **free_list;           /**< Free object pointer list (stack structure) */
+    uint32_t item_size;         /**< Size of single object in bytes */
+    uint32_t pool_capacity;     /**< Maximum number of objects (total capacity) */
+    uint32_t free_count;        /**< Current number of free available objects */
+    uint32_t top;               /**< Stack top pointer of free list */
 
 #if POOL_ENABLE_THREAD_SAFE
-    pthread_mutex_t mutex;      // 互斥锁（保证多线程安全）
+    pthread_mutex_t mutex;      /**< Thread safety mutex for concurrent access */
 #endif
 } Pool_t;
 
 // ==========================================================================
-// 对外 API 接口
+// Public API Interface
 // ==========================================================================
 
 /**
- * @brief 初始化对象池（静态内存模式，外部传入缓冲区）
- * @param pool           对象池句柄指针
- * @param item_size      单个对象的大小（字节）
- * @param pool_capacity  池的总容量（对象个数）
- * @param memory_buffer  外部传入的内存缓冲区（大小至少为 item_size * pool_capacity）
- * @param free_list_buffer  外部传入的空闲列表缓冲区（大小至少为 sizeof(void*) * pool_capacity）
- * @note 【静态内存模式】所有内存由外部管理，避免运行时 malloc 碎片
+ * @brief   Initialize object pool (static memory mode)
+ * @param   pool            Pointer to object pool handle
+ * @param   item_size       Size of one single object (bytes)
+ * @param   pool_capacity   Total capacity (number of objects)
+ * @param   memory_buffer   External memory buffer (size >= item_size * capacity)
+ * @param   free_list_buffer External free list buffer (size >= sizeof(void*) * capacity)
+ * @return  None
+ *
+ * @note    Static memory mode: All buffers managed externally
+ *          Eliminates runtime malloc and memory fragmentation
+ * @pre     All input buffers must be valid and sufficiently sized
+ * @thread_safety No
  */
 void Pool_Init(Pool_t *pool,
                size_t item_size,
@@ -63,46 +107,63 @@ void Pool_Init(Pool_t *pool,
                void **free_list_buffer);
 
 /**
- * @brief 从池中获取一个对象
- * @param pool  对象池句柄指针
- * @param out_item  输出参数，返回对象指针
- * @return 错误码
+ * @brief   Acquire one free object from the pool
+ * @param   pool        Pointer to object pool handle
+ * @param   out_item    Output pointer to the acquired object
+ * @return  PoolErr_t   Error code (POOL_OK on success)
+ *
+ * @thread_safety Yes (if enabled)
  */
 PoolErr_t Pool_Acquire(Pool_t *pool, void **out_item);
 
 /**
- * @brief 归还一个对象到池中
- * @param pool  对象池句柄指针
- * @param item  要归还的对象指针
- * @return 错误码
+ * @brief   Return one object back to the pool
+ * @param   pool        Pointer to object pool handle
+ * @param   item        Pointer to the object to release
+ * @return  PoolErr_t   Error code (POOL_OK on success)
+ *
+ * @thread_safety Yes (if enabled)
  */
 PoolErr_t Pool_Release(Pool_t *pool, void *item);
 
 /**
- * @brief 判断池是否为空
- * @param pool  对象池句柄指针
- * @return true 为空
+ * @brief   Check if the object pool is empty
+ * @param   pool    Pointer to object pool handle
+ * @return  true    Pool is empty
+ *
+ * @thread_safety Yes (if enabled)
  */
 bool Pool_IsEmpty(Pool_t *pool);
 
 /**
- * @brief 判断池是否已满
- * @param pool  对象池句柄指针
- * @return true 为满
+ * @brief   Check if the object pool is full
+ * @param   pool    Pointer to object pool handle
+ * @return  true    Pool is full
+ *
+ * @thread_safety Yes (if enabled)
  */
 bool Pool_IsFull(Pool_t *pool);
 
 /**
- * @brief 获取当前空闲对象数量
- * @param pool  对象池句柄指针
- * @return 空闲对象数量
+ * @brief   Get current number of free objects
+ * @param   pool        Pointer to object pool handle
+ * @return  uint32_t    Count of free available objects
+ *
+ * @thread_safety Yes (if enabled)
  */
 uint32_t Pool_GetFreeCount(Pool_t *pool);
 
 /**
- * @brief 重置池（清空所有对象，不释放内存）
- * @param pool  对象池句柄指针
+ * @brief   Reset object pool (clear all objects, no memory free)
+ * @param   pool    Pointer to object pool handle
+ *
+ * @post    Free list restored to full capacity
+ * @thread_safety Yes (if enabled)
  */
 void Pool_Reset(Pool_t *pool);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __POOL_H */

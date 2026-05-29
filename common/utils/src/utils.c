@@ -1,16 +1,24 @@
+/**
+ * @file    utils.c
+ * @brief   Implementation of universal utility functions
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ */
 #include "utils.h"
-#include <stdio.h>      // 【新增】用于 snprintf
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
-#include <limits.h>     // 【新增】用于 INT_MIN / INT_MAX
-#include <arpa/inet.h>  // 用于字节序转换
+#include <limits.h>
+#include <arpa/inet.h>
 
 // ==========================================================================
-// 时间工具函数实现
+// Time Utilities Implementation
 // ==========================================================================
-
 uint64_t utils_get_timestamp_us(void)
 {
     struct timespec ts;
@@ -37,7 +45,6 @@ char* utils_format_timestamp(uint64_t timestamp_us, char *buf, size_t buf_size)
 
     strftime(buf, buf_size, "%Y-%m-%d %H:%M:%S", &tm);
     
-    // 追加微秒
     size_t len = strlen(buf);
     if (len + 8 < buf_size) {
         snprintf(buf + len, buf_size - len, ".%06u", us);
@@ -47,9 +54,8 @@ char* utils_format_timestamp(uint64_t timestamp_us, char *buf, size_t buf_size)
 }
 
 // ==========================================================================
-// 字节序转换工具函数实现
+// Endian Conversion Implementation
 // ==========================================================================
-
 uint16_t utils_htons(uint16_t host16)
 {
     return htons(host16);
@@ -80,9 +86,8 @@ bool utils_is_big_endian(void)
 }
 
 // ==========================================================================
-// 字符串工具函数实现
+// String Utilities Implementation
 // ==========================================================================
-
 size_t utils_strlcpy(char *dst, const char *src, size_t dst_size)
 {
     if (dst == NULL || src == NULL || dst_size == 0) {
@@ -123,13 +128,13 @@ char* utils_trim(char *str)
         return NULL;
     }
 
-    // 去除首部空白
+    // Trim leading whitespace
     char *start = str;
     while (*start != '\0' && isspace((unsigned char)*start)) {
         start++;
     }
 
-    // 去除尾部空白
+    // Trim trailing whitespace
     if (*start != '\0') {
         char *end = start + strlen(start) - 1;
         while (end > start && isspace((unsigned char)*end)) {
@@ -138,7 +143,7 @@ char* utils_trim(char *str)
         *(end + 1) = '\0';
     }
 
-    // 如果有移动，需要拷贝
+    // Move trimmed string to start if shifted
     if (start != str) {
         memmove(str, start, strlen(start) + 1);
     }
@@ -186,9 +191,8 @@ int utils_atoll_safe(const char *str, int64_t *out_val)
 }
 
 // ==========================================================================
-// 内存工具函数实现
+// Memory Utilities Implementation
 // ==========================================================================
-
 void utils_memzero(void *ptr, size_t size)
 {
     if (ptr == NULL || size == 0) {
@@ -213,7 +217,7 @@ bool utils_memiszero(const void *ptr, size_t size)
 }
 
 // ==========================================================================
-// 整数工具函数
+// Integer Math Implementation
 // ==========================================================================
 int32_t utils_abs(int32_t x)
 {
@@ -236,7 +240,7 @@ int32_t utils_min(int32_t a, int32_t b)
 }
 
 // ==========================================================================
-// 浮点工具函数（你需要的核心）
+// Floating-Point Math Implementation
 // ==========================================================================
 float utils_fabsf(float x)
 {

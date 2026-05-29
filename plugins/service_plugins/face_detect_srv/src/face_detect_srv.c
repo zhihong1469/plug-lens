@@ -53,7 +53,7 @@
 #define FRAME_WAIT_TIMEOUT_MS         200
 
 /* 帧率优化配置：采集15fps → 检测5fps = 每3帧处理1次 */
-#define FPS_DOWNSAMPLE_STEP           15
+#define FPS_DOWNSAMPLE_STEP           14
 #define TARGET_AI_FPS                 5
 
 /* 帧大小配置（双RGB帧大小一致，总线物理隔离） */
@@ -451,7 +451,7 @@ static void face_srv_cleanup(void)
 
     /* 释放SD卡 */
     if (srv->img_storage) {
-        SdStorage_Deinit(srv->img_storage);
+        img_storage_deinit(srv->img_storage);
         srv->img_storage = NULL;
     }
 

@@ -1,35 +1,79 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    sd_mount.h
+ * @brief   SD card mount management component for embedded Linux
+ * @details Core capabilities:
+ *          1. Automatic SD card detection and mounting
+ *          2. Mount directory creation and state management
+ *          3. Standard mount/umount system call integration
+ *          4. Configurable parameters via config_common.h
+ *          5. Lightweight state machine for SD status
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Target device: /dev/mmcblk0p1 (SD card partition)
+ *          Filesystem: vfat, thread-safe public APIs
+ */
 #ifndef __SD_MOUNT_H
 #define __SD_MOUNT_H
 
 #include <stdbool.h>
 #include "config_common.h"
 
-// ===================== 【宏配置：全部可手动修改，无硬编码】 =====================
-// SD卡设备节点 (核心硬件参数)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ===================== Configuration Macros (Configurable) =====================
+/** SD card device node (hardware parameter) */
 #define CONFIG_SD_DEV_NODE          "/dev/mmcblk0p1"
-// SD卡默认文件系统类型
+/** Default filesystem type for SD card */
 #define CONFIG_SD_FS_TYPE           "vfat"
-// 挂载命令前缀
+/** Command prefix for creating mount directory */
 #define CONFIG_MKDIR_CMD            "mkdir -p "
 
-// SD卡状态枚举
+// ===================== SD Card State Enumeration =====================
+/**
+ * @brief   SD card mounting status enumeration
+ */
 typedef enum {
-    SD_UNMOUNT    = 0,  // 未挂载
-    SD_MOUNTED    = 1,  // 已挂载成功
-    SD_MOUNT_FAIL = 2   // 挂载失败
+    SD_UNMOUNT    = 0,  /**< SD card unmounted */
+    SD_MOUNTED    = 1,  /**< SD card mounted successfully */
+    SD_MOUNT_FAIL = 2   /**< SD card mounting failed */
 } sd_state_t;
 
-// ===================== 对外接口（保持不变） =====================
-// 初始化并挂载SD卡（全局唯一调用）
+// ===================== Public APIs =====================
+/**
+ * @brief   Initialize and mount SD card (global single call)
+ * @return  Current SD card state
+ * @note    Creates mount directory and executes mount system call
+ */
 sd_state_t SdMount_Init(void);
 
-// 获取当前SD卡挂载状态
+/**
+ * @brief   Get current SD card mount state
+ * @return  SD card state enumeration
+ */
 sd_state_t SdMount_GetState(void);
 
-// 获取SD卡根目录路径
+/**
+ * @brief   Get SD card mount root path
+ * @return  Read-only root path string
+ */
 const char *SdMount_GetRootPath(void);
 
-// 卸载SD卡，反初始化
+/**
+ * @brief   Unmount SD card and deinitialize
+ * @note    Executes umount system call and resets state
+ */
 void SdMount_Deinit(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
