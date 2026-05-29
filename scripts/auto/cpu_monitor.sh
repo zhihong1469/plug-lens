@@ -1,10 +1,9 @@
 #!/bin/sh
-# 功能：裁剪系统适配版资源监控，低频率、低占用
-# 适配：BusyBox top（无-b/-n参数）、精简ps命令
+LOG_FILE="/mnt/test/log/cpu_status.log"
+MONITOR_INTERVAL=10
 
-LOG_FILE="/mnt/sdcard/log/cpu_status.log"
-MONITOR_INTERVAL=10  # 采样间隔(秒)
-mkdir -p /mnt/sdcard/log 2>/dev/null
+mkdir -p /mnt/test/log 2>/dev/null
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] cpu_monitor start" >> "$LOG_FILE"
 
 while true; do

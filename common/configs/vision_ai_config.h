@@ -173,7 +173,9 @@ typedef enum {
  * @brief   系统运行模式配置
  * @details 0=调试模式(前台运行，键盘控制)；1=产品模式(后台守护进程)
  */
-#define RUN_PRODUCT_MODE  0
+// 脚本守护和程序内部守护只能选其一
+#define USE_SH 1
+#define RUN_PRODUCT_MODE  1
 
 // --------------------- 双总线(Event/DataBus)核心配置 ---------------------
 /** 事件总线最大订阅者数 | 支持多服务并发订阅 */

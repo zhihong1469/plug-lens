@@ -7,7 +7,7 @@ SRC_FILES := \
 	base_plugins/camera_usb/src/camera_usb.c \
 	base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
 	base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp \
-	base_plugins/sd_storage/src/sd_storage.c \
+	base_plugins/img_storage/src/img_storage.c \
 	base_plugins/img_joint/src/img_joint.cpp \
 	base_plugins/led_controller/src/led_indicator.c \
 	service_plugins/net_push_srv/src/rtsp_server.cpp \
@@ -24,7 +24,7 @@ SRC_FILES := \
 LOCAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
-	-I$(TOPDIR)/plugins/base_plugins/sd_storage/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_storage/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
 	-I$(TOPDIR)/plugins/base_plugins/led_controller/inc \
 	-I$(TOPDIR)/plugins/service_plugins/net_push_srv/inc \

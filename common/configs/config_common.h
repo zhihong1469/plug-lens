@@ -34,14 +34,14 @@ extern "C" {
 
 /** SD卡功能启用开关 | 1=启用SD卡存储，0=禁用SD卡功能 */
 #ifndef USE_SD
-#define USE_SD 1
+#define USE_SD 0
 #endif
 
 // ==========================================================================
 // 日志配置（工业级可配置）
 // ==========================================================================
 /** 工业级应用日志文件存储路径 | 日志持久化存储绝对路径 */
-#define LOG_FILE_PATH                  "/mnt/sdcard/log/app.log"
+#define LOG_FILE_PATH                  "/mnt/test/log/app.log"
 /** 日志文件滚动阈值 | 单文件最大10MB，超出自动切割 */
 #define LOG_MAX_FILE_SIZE (10 * 1024 * 1024)
 
@@ -51,8 +51,8 @@ extern "C" {
 /** SD卡挂载根目录 | 系统SD卡标准挂载路径 */
 #define CONFIG_SD_STORAGE_ROOT_PATH           "/mnt/sdcard"
 /** 视觉采集数据存储目录 | 人脸/图像采集文件保存路径 */
-#define CONFIG_SD_STORAGE_DIR                 "/mnt/sdcard/face_capture"
-// /mnt/nfs/face_capture
+#define CONFIG_SD_STORAGE_DIR                 "/mnt/test/face_capture"
+
 // ==========================================================================
 // 系统工作目录配置（固定不可修改）
 // ==========================================================================

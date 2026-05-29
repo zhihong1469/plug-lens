@@ -172,9 +172,37 @@ static void _init_signal_handling(void)
     sa.sa_handler = _signal_handler;
     sa.sa_flags = 0;
     sigfillset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
 
+    // ==============================================
+    // 【模式1：调试模式（前台运行）】
+    // 响应 Ctrl+C + 系统关机，忽略网络断开信号
+    // ==============================================
+#if !RUN_PRODUCT_MODE
+    sigaction(SIGINT, &sa, NULL);   // 支持 Ctrl+C 退出
+    sigaction(SIGTERM, &sa, NULL);  // 支持系统关机优雅退出
+
+    // 【必加】忽略网络断开信号，防止RTSP客户端断开导致程序崩溃
+    signal(SIGPIPE, SIG_IGN);
+
+// ==============================================
+// 【模式2：产品模式（守护进程/后台运行）】
+    // 忽略所有终端相关信号，仅响应系统关机和崩溃
+    // ==============================================
+#else
+    // 【核心修复】忽略终端挂断信号（根治后台运行被杀死）
+    signal(SIGHUP, SIG_IGN);
+    
+    // 忽略 Ctrl+C（守护进程无终端，永远收不到）
+    signal(SIGINT, SIG_IGN);
+    
+    // 忽略网络断开信号
+    signal(SIGPIPE, SIG_IGN);
+    
+    // 仅保留系统关机信号（reboot/halt 时优雅退出）
+    sigaction(SIGTERM, &sa, NULL);
+#endif
+
+    // 崩溃信号：两种模式都必须处理
     struct sigaction sa_crash;
     sa_crash.sa_handler = _crash_signal_handler;
     sa_crash.sa_flags = 0;
@@ -182,7 +210,8 @@ static void _init_signal_handling(void)
     sigaction(SIGABRT, &sa_crash, NULL);
     sigaction(SIGSEGV, &sa_crash, NULL);
     
-    LOG_I("Main: Signal handler init success");
+    LOG_I("Main: Signal handler init success (mode: %s)", 
+          RUN_PRODUCT_MODE ? "PRODUCT" : "DEBUG");
 }
 
 // ==========================================================================
@@ -258,17 +287,19 @@ int main(int argc, char **argv)
 // ==============================================
 // 【模式切换】产品模式才开启守护进程
 // ==============================================
-#if RUN_PRODUCT_MODE
-    LOG_I("Main: Creating daemon...");
-    // ===================== 【修复3】调用顺序：先创建守护进程 =====================
-    if (create_daemon() < 0) {
-        LOG_E("Main: Failed to create daemon");
-        return -1;
-    }
-    // ===================== 【修复4】后开启日志守护模式 =====================
-    log_set_daemon_mode(1);  // 守护进程创建完成后，再设置仅写文件
-#else
-    LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
+#if USE_SH == 0
+    #if RUN_PRODUCT_MODE
+        LOG_I("Main: Creating daemon...");
+        // ===================== 【修复3】调用顺序：先创建守护进程 =====================
+        if (create_daemon() < 0) {
+            LOG_E("Main: Failed to create daemon");
+            return -1;
+        }
+        // ===================== 【修复4】后开启日志守护模式 =====================
+        log_set_daemon_mode(1);  // 守护进程创建完成后，再设置仅写文件
+    #else
+        LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
+    #endif
 #endif
 
     // 2. 初始化TLSF静态内存池
@@ -324,7 +355,8 @@ int main(int argc, char **argv)
 #endif
 #endif
 
-    // 3. 系统底层初始化
+    // 3. 系统底层初始化 【重要】信号初始化必须在守护进程创建之后
+    // 原因：fork() 会继承父进程的信号处理，守护进程需要自己独立的信号策略
     _init_signal_handling();
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();

@@ -3,7 +3,7 @@ echo "========================================"
 echo "          停止 VisionAI 系统"
 echo "========================================"
 
-# 1. 停止看门狗（优先停止，防止自动重启）
+# 1. 停止看门狗
 WATCHDOG_PID_FILE="/var/run/app_watchdog.pid"
 if [ -f "$WATCHDOG_PID_FILE" ]; then
     WATCHDOG_PID=$(cat "$WATCHDOG_PID_FILE" 2>/dev/null)
@@ -17,7 +17,7 @@ APP_NAME="vision_ai_app"
 killall "$APP_NAME" 2>/dev/null
 sleep 1
 
-# 3. 兜底强制杀死所有残留进程
+# 3. 兜底强制杀死
 killall -9 "$APP_NAME" 2>/dev/null
 killall app_watchdog.sh 2>/dev/null
 killall cpu_monitor.sh 2>/dev/null
