@@ -1,21 +1,32 @@
 #!/bin/sh
-# 开机自启脚本（量产模式）
-# 仅做系统级初始化，业务逻辑全部交给app_start.sh
+# VisionAI 项目 开机全自动启动脚本
+# 适配i.MX6ULL Buildroot 系统
 
-# 【关键】全局导出环境变量（sysinit阶段必备）
-export APP_HOME="/root/run_on_board"
-export LD_LIBRARY_PATH=$APP_HOME/openh264:$APP_HOME/libjpeg:$APP_HOME/mnn:$APP_HOME/libyuv
+# 1. 长延时：等待系统、网卡、SD卡、USB摄像头完全枚举（关键！防启动失败）
+sleep 12
 
-# 等待USB摄像头枚举完成（最稳9秒，可根据实际情况调整为5-10秒）
-sleep 9
-
-# 挂载SD卡
+# 2. 挂载SD卡（兜底，防止开机未挂载）
 mount /dev/mmcblk0p1 /mnt/sdcard 2>/dev/null
 
-# 设置系统时间（兜底）
-date -s "2026-05-29 00:00:00"
+# 3. 加载全局环境变量
+source /etc/profile
 
-# 启动业务系统（后台运行）
+# 4. 启动项目主程序（后台运行）
 /root/run_on_board/auto/app_start.sh &
+
+# 5. 【自动数据回传任务】后台定时拷贝数据到NFS（每30分钟回传一次）
+# 作用：24小时演示场景，定期把日志/图片传到PC，避免SD卡满载
+(
+while true
+do
+    # 检测SD卡和NFS挂载正常才拷贝
+    if mount | grep -q "/mnt/sdcard" && mount | grep -q "/mnt"; then
+        cp -rf /mnt/sdcard/log /mnt/auto_backup_log
+        cp -rf /mnt/sdcard/face_capture /mnt/auto_backup_face
+        echo "[$(date)] 自动数据回传完成" >> /mnt/sdcard/log/auto_sync.log
+    fi
+    sleep 1800  # 30分钟执行一次
+done
+) &
 
 exit 0

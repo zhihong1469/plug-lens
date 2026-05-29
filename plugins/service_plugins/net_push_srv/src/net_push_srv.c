@@ -57,7 +57,7 @@
 // 🔥 【革命核心】新增 H.264 数据总线配置
 #define H264_DATA_BUS_NAME        H264_RTSP_DATA_BUS_NAME
 #define H264_MAX_FRAME_SIZE       (1024 * 1024)   // H264单帧最大大小
-#define H264_BUS_MAX_ITEMS        8                // 总线缓存8帧（防丢流）
+#define H264_BUS_MAX_ITEMS        10                // 总线缓存8帧（防丢流）
 #define H264_BUS_MAX_SUBSCRIBER   1                // 仅RTSP订阅
 
 #define VIDEO_WIDTH               GLOBAL_VIDEO_WIDTH
@@ -310,14 +310,21 @@ static void *net_push_work_thread(void *arg)
                         h264_len = H264_MAX_FRAME_SIZE;
 
                         // 3. H264编码（直接写入总线）
-                        if (yuyv_to_h264(srv->h264_enc, frame_data, frame_size, h264_wbuf, &h264_len) == IMG_JOINT_OK)
+                        int ret_h = yuyv_to_h264(srv->h264_enc, frame_data, frame_size, h264_wbuf, &h264_len);
+                        if ( ret_h == IMG_JOINT_OK)
                         {
-                            data_bus_set_item_size(h264_item, h264_len);
-                            // 4. 推送H264总线（零拷贝）
-                            data_bus_push(H264_DATA_BUS_NAME, h264_item);
+
+                                data_bus_set_item_size(h264_item, h264_len);
+                                // 4. 推送H264总线（零拷贝）
+                                data_bus_push(H264_DATA_BUS_NAME, h264_item);
+                        }
+                        else if(ret_h == IMG_JOINT_ERR_SKIP)
+                        {
+                            LOG_I(MODULE_TAG "算力不够,正常跳帧");
                         }
                         else
                         {
+
                             LOG_E(MODULE_TAG "YUYV转H264编码失败");
                         }
                         // 5. 生产者释放总线引用
@@ -373,7 +380,7 @@ static int net_push_srv_start(void)
     h264_encode_param_t enc_param = {
         .width = VIDEO_WIDTH,
         .height = VIDEO_HEIGHT,
-        .fps = NET_PUSH_TARGET_FPS,
+        .fps = NET_PUSH_TARGET_FPS/FPS_DOWNSAMPLE_STEP,
         .bitrate = H264_BITRATE,
         .gop = H264_GOP,
     };

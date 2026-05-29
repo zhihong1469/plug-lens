@@ -257,30 +257,30 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->param.iPicWidth       = param->width;
     impl->param.iPicHeight      = param->height;
     impl->param.iTargetBitrate  = param->bitrate * 1000;
-    impl->param.uiIntraPeriod   = 30;                        // 增大IDR周期，减少算力开销
+    impl->param.uiIntraPeriod   = 30;                        // IDR帧周期
     impl->param.iTemporalLayerNum = 1;
     impl->param.iSpatialLayerNum  = 1;
 
-    // 🔥 最低复杂度模式：最快编码速度（流畅度拉满）
+    // 🔥 最低复杂度模式
     impl->param.iComplexityMode = LOW_COMPLEXITY;
-    // 🔥 单核CPU：关闭多线程，避免抢占
-    impl->param.iMultipleThreadIdc = 1;
-    // 🔥 最低参考帧：仅1帧，大幅降低算力
+    // 🔥 修复：IMX6ULL单核 → 关闭多线程（必须设为0）
+    impl->param.iMultipleThreadIdc = 0;
+    // 🔥 最低参考帧
     impl->param.iNumRefFrame = 1;
-    // 🔥 低算力熵编码：CAVLC（替代高算力CABAC）
+    // 🔥 低算力熵编码
     impl->param.iEntropyCodingModeFlag = 0;
-    // 🔥 关闭环路滤波：节省大量CPU
+    // 🔥 关闭环路滤波
     impl->param.iLoopFilterDisableIdc = 1;
-    // 🔥 SPS/PPS固定ID：减少开销
+    // 🔥 SPS/PPS固定ID
     impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
 
-    // 🔥 关闭所有冗余高级功能（全关，省算力）
+    // 关闭所有冗余高级功能
     impl->param.bEnableDenoise = false;
     impl->param.bEnableBackgroundDetection = false;
     impl->param.bEnableAdaptiveQuant = false;
     impl->param.bEnableSceneChangeDetect = false;
     impl->param.bPrefixNalAddingCtrl = false;
-    impl->param.bEnableFrameSkip = true;    // 允许跳帧，保证实时流畅
+    impl->param.bEnableFrameSkip = true;    // 允许跳帧（正常优化）
     impl->param.bIsLosslessLink = false;
 #else
     impl->param.iUsageType      = CAMERA_VIDEO_REAL_TIME;
@@ -315,7 +315,6 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->height = param->height;
     return (h264_encoder_t)impl;
 }
-
 
 // =============================================================================
 // 标准获取SPS/PPS（官方接口，全网通用）
@@ -381,8 +380,10 @@ int yuyv_to_h264(h264_encoder_t encoder,
     }
 
     int ret = impl->p_encoder->EncodeFrame(&pic, &bs_info);
-    if (ret != 0 || bs_info.eFrameType == videoFrameTypeSkip)
+    if (ret != 0 )
         return IMG_JOINT_ERR_H264;
+    if (bs_info.eFrameType == videoFrameTypeSkip)
+        return IMG_JOINT_ERR_SKIP;
 
     // 拷贝所有NAL数据
     int total_len = 0;
