@@ -1,19 +1,26 @@
 /* SPDX-License-Identifier: MIT */
 /**
- ******************************************************************************
- * @file           mem_adapter.h
- * @brief          跨平台线程安全内存管理适配中间层
- * @defgroup       MEM_ADAPTER
- * @details
- *  1. 双模式支持：TLSF高性能静态内存池（嵌入式量产）/ Linux原生malloc（调试）
- *  2. 编译期宏 USE_TLSF 控制模式切换，无运行时性能损耗
- *  3. 提供标准分配、清零分配、对齐分配、内存释放接口
- *  4. 内置线程互斥锁，多线程并发调用安全可靠
- *  5. 接口行为与标准C库 malloc/calloc/memalign/free 完全一致
- *  6. 专为 FrameLink/DataBus/视频帧/AI推理 场景设计
- * @author         FrameLink System Team
- * @date           2025
- ******************************************************************************
+ * @file    mem_adapter.h
+ * @brief   Cross-platform thread-safe memory management adapter layer
+ * @details Core capabilities for plug-lens Vision AI terminal:
+ *          1. Dual-mode support: TLSF high-performance static pool / Linux native malloc
+ *          2. Compile-time switch (USE_TLSF) with zero runtime performance loss
+ *          3. Standard APIs: alloc/calloc/memalign/free (fully compatible with libc)
+ *          4. Built-in thread mutex for safe multi-thread concurrent access
+ *          5. Optimized for frame buffer, DataBus, AI inference, and video processing
+ *          6. Unified interface hides underlying allocator differences
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Global rules:
+ *          1. Call mem_init() once at system startup before any allocation
+ *          2. USE_TLSF=1 for mass production (embedded Linux), 0 for debug
+ *          3. All public APIs are thread-safe
+ *          4. Only free pointers allocated by this module
  */
 #ifndef __MEM_ADAPTER_H__
 #define __MEM_ADAPTER_H__
@@ -26,66 +33,79 @@ extern "C" {
 #endif
 
 // ==========================================================================
-// @brief 内存模式编译宏
-// @note  1 = 使用TLSF静态内存池（推荐量产/嵌入式Linux）
-// @note  0 = 使用Linux原生malloc/free（推荐开发调试）
+// @brief   Compile-time memory mode selection
+// @note    1 = TLSF static memory pool (production/embedded Linux)
+// @note    0 = Linux native malloc/free (development/debug)
 // ==========================================================================
 #define USE_TLSF    1
 
 // ==========================================================================
-// 公共接口声明
+// Public API Declarations
 // ==========================================================================
 
 /**
- * @brief  初始化内存适配层
- * @param  pool: 静态内存池起始地址（仅USE_TLSF=1时需要传入，原生模式传NULL即可）
- * @param  pool_size: 静态内存池总大小（仅USE_TLSF=1时有效）
- * @return 无
- * @note   系统启动时仅调用一次，必须在所有内存分配接口之前执行
+ * @brief   Initialize memory adapter layer
+ * @param   pool        Static memory pool start address (required for TLSF, NULL for native)
+ * @param   pool_size   Total size of static memory pool (valid for TLSF only)
+ * @return  None
+ *
+ * @pre     Called once at system initialization, before any memory operations
+ * @post    Memory allocator ready for use
+ * @thread_safety No
  */
 void mem_init(void *pool, size_t pool_size);
 
 /**
- * @brief  销毁内存适配层，释放底层资源
- * @return 无
- * @note   系统退出时调用
+ * @brief   Destroy memory adapter and release underlying resources
+ * @return  None
+ *
+ * @pre     System shutdown stage
+ * @post    All allocator resources released
+ * @thread_safety No
  */
 void mem_destroy(void);
 
 /**
- * @brief  内存分配（等价于标准malloc，不清零）
- * @param  size: 待分配的内存字节数
- * @retval 成功：返回内存指针；失败：返回NULL
- * @note   分配的内存未初始化（脏数据），性能最优
- * @note   视频帧、数据缓冲推荐使用此接口
+ * @brief   Allocate memory (equivalent to standard malloc, no zero-initialization)
+ * @param   size    Number of bytes to allocate
+ * @return  Valid pointer on success, NULL on failure
+ *
+ * @note    Uninitialized (dirty data) for optimal performance
+ * @note    Recommended for video frames and data buffers
+ * @thread_safety Yes
  */
 void *mem_alloc(size_t size);
 
 /**
- * @brief  清零内存分配（等价于标准calloc，自动清零）
- * @param  num: 元素数量
- * @param  size: 单个元素的字节大小
- * @retval 成功：返回内存指针（全体置0）；失败：返回NULL
- * @note   分配后会执行memset清零，有一定性能开销
- * @note   仅用于状态结构体、计数器等需要初始化为0的场景
+ * @brief   Allocate zero-initialized memory (equivalent to standard calloc)
+ * @param   num     Number of elements
+ * @param   size    Size of one element in bytes
+ * @return  Valid zero-initialized pointer on success, NULL on failure
+ *
+ * @note    Includes memset overhead, use only for state structs/counters
+ * @thread_safety Yes
  */
 void *mem_calloc(size_t num, size_t size);
 
 /**
- * @brief  对齐内存分配（硬件/AI/视频专用）
- * @param  align: 内存对齐字节数（必须为2的幂，如32/64）
- * @param  size: 待分配的内存字节数
- * @retval 成功：返回对齐后的内存指针；失败：返回NULL
- * @note   摄像头帧、NPU/AI推理、DMA操作必须使用对齐分配
+ * @brief   Allocate aligned memory (hardware/AI/video optimized)
+ * @param   align   Alignment bytes (power of two: 32/64 recommended)
+ * @param   size    Number of bytes to allocate
+ * @return  Aligned pointer on success, NULL on failure
+ *
+ * @note    Mandatory for camera frames, NPU/AI inference, DMA operations
+ * @thread_safety Yes
  */
 void *mem_memalign(size_t align, size_t size);
 
 /**
- * @brief  内存释放（等价于标准free）
- * @param  ptr: 待释放的内存指针
- * @return 无
- * @note   允许传入NULL，此时不执行任何操作
- * @note   必须释放由本模块分配的指针，禁止混合释放
+ * @brief   Free allocated memory (equivalent to standard free)
+ * @param   ptr     Pointer to memory to free
+ * @return  None
+ *
+ * @note    NULL input is safely ignored
+ * @note    Do not mix with standard free() or other allocators
+ * @thread_safety Yes
  */
 void mem_free(void *ptr);
 

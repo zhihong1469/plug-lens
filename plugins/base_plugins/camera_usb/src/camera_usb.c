@@ -1,3 +1,19 @@
+/**
+ * @file    camera_usb.c
+ * @brief   USB Camera Subclass Driver Implementation
+ * @details Low-level V4L2 implementation for USB camera:
+ *          - Full self-inspection during initialization
+ *          - MMAP buffer management for zero-copy capture
+ *          - Support YUYV/MJPEG/NV12 formats
+ *          - Parameter control: exposure, brightness, white balance
+ *          - Inherits camera_base OOP interface
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ */
 #include "../inc/camera_usb.h"
 #include "../inc/camera_base.h"
 #include <stdio.h>
@@ -10,80 +26,91 @@
 #include <linux/videodev2.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-/* USB 摄像头最大缓冲区数 */
 #include "vision_ai_config.h"
-#define CAM_USB_MAX_BUF             CONFIG_CAPTURE_BUF_COUNT      // 摄像头最大缓冲区数量
+
+/** Maximum number of USB camera DMA buffers (configured in project) */
+#define CAM_USB_MAX_BUF             CONFIG_CAPTURE_BUF_COUNT
 
 /**
- * @brief USB 摄像头私有子类（完全封装，对外不可见）
- * V3.0 规则：基类必须放在第一个成员
+ * @brief   Private USB camera subclass structure (fully encapsulated)
+ * @details V3.0 Rule: Base class MUST be the first member for OOP inheritance.
+ *          All members are private, inaccessible to upper-layer code.
+ * @note    Use container_of() to convert base pointer to subclass pointer.
  */
 typedef struct {
-    camera_base_t        base;                           // 基类指针
-    camera_capability_t  cap;                            // 相机能力集
-    void                *buf[CONFIG_CAPTURE_BUF_COUNT];  // 数据缓冲区 8/4B x N
-    size_t               buf_len[CONFIG_CAPTURE_BUF_COUNT];// 长度 4/8B x N
-    const char          *dev_path;                       // 设备路径 8/4B
-    uint32_t             pixel_fmt;                      // 像素格式 4B
-    int                  fd;                             // 文件描述符 4B
-    int                  buf_cnt;                        // 缓冲区数量 4B
+    camera_base_t        base;                           /**< Camera base class (MUST be first) */
+    camera_capability_t  cap;                            /**< Camera hardware capability set */
+    void                *buf[CONFIG_CAPTURE_BUF_COUNT];  /**< MMAP mapped buffers */
+    size_t               buf_len[CONFIG_CAPTURE_BUF_COUNT];/**< Buffer length */
+    const char          *dev_path;                       /**< V4L2 device node path */
+    uint32_t             pixel_fmt;                      /**< Pixel format (YUYV/MJPEG/NV12) */
+    int                  fd;                             /**< V4L2 file descriptor */
+    int                  buf_cnt;                        /**< Actual used buffer count */
 } camera_usb_t;
 
 /* ============================================================================
- * 私有工具函数
+ * Private Helper Functions
  * ========================================================================== */
+/**
+ * @brief   Check if target pixel format is supported by camera hardware
+ * @param   me  Pointer to USB camera private instance
+ * @return  0 on success; -ENOTSUP if format not supported
+ */
 static int camera_usb_check_format_support(camera_usb_t *me)
 {
     if (!me->cap.support_yuyv && me->pixel_fmt == V4L2_PIX_FMT_YUYV) {
-        printf("[USB Camera] YUYV 格式不支持\n");
+        printf("[USB Camera] YUYV format not supported\n");
         return -ENOTSUP;
     }
     if (!me->cap.support_mjpeg && me->pixel_fmt == V4L2_PIX_FMT_MJPEG) {
-        printf("[USB Camera] MJPEG 格式不支持\n");
+        printf("[USB Camera] MJPEG format not supported\n");
         return -ENOTSUP;
     }
     if (!me->cap.support_nv12 && me->pixel_fmt == V4L2_PIX_FMT_NV12) {
-        printf("[USB Camera] NV12 格式不支持\n");
+        printf("[USB Camera] NV12 format not supported\n");
         return -ENOTSUP;
     }
     return 0;
 }
 
 /* ============================================================================
- * 子类 OPS 实现（全自检版）
+ * Subclass Virtual Function Implementations (OOP Interface)
  * ========================================================================== */
+/**
+ * @copydoc camera_base_init
+ */
 static int camera_usb_init(camera_base_t *base_me)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
     int ret, i;
 
-    // ====================== 【自检 1】打开设备 ======================
+    // Step 1: Open V4L2 device
     me->fd = v4l2_open(me->dev_path);
     if (me->fd < 0) {
         perror("[USB Camera] open failed");
         return -errno;
     }
 
-    // ====================== 【自检 2】查询设备基础能力 ======================
+    // Step 2: Query device basic capabilities
     ret = v4l2_query_capability(me->fd, &me->cap);
     if (ret < 0) {
-        printf("[USB Camera] 设备能力查询失败\n");
+        printf("[USB Camera] Failed to query device capability\n");
         goto err_close;
     }
 
-    // ====================== 【自检 3】枚举所有支持格式 ======================
+    // Step 3: Enumerate all supported formats
     ret = v4l2_enum_formats(me->fd, &me->cap);
     if (ret < 0) {
-        printf("[USB Camera] 格式枚举失败\n");
+        printf("[USB Camera] Failed to enumerate formats\n");
         goto err_close;
     }
 
-    // ====================== 【自检 4】检查目标格式是否支持 ======================
+    // Step 4: Validate target pixel format
     ret = camera_usb_check_format_support(me);
     if (ret < 0)
         goto err_close;
 
-    // ====================== 【自检 5】设置格式 + 回读校验 ======================
+    // Step 5: Set and verify image format
     int w = me->base.width;
     int h = me->base.height;
     ret = v4l2_set_format(me->fd, &w, &h, me->pixel_fmt);
@@ -94,15 +121,15 @@ static int camera_usb_init(camera_base_t *base_me)
     me->base.width = w;
     me->base.height = h;
 
-    // ====================== 【自检 6】设置帧率 + 回读 ======================
+    // Step 6: Set and read back frame rate
     uint32_t fps = me->base.fps;
     ret = v4l2_set_fps(me->fd, &fps);
     if (ret < 0) {
-        printf("[USB Camera] set fps warning\n");
+        printf("[USB Camera] Warning: set FPS failed\n");
     }
     me->base.fps = fps;
 
-    // ====================== 【自检 7】申请缓冲区 ======================
+    // Step 7: Request DMA buffers from kernel
     me->buf_cnt = CAM_USB_MAX_BUF;
     ret = v4l2_reqbufs(me->fd, &me->buf_cnt);
     if (ret < 0) {
@@ -110,7 +137,7 @@ static int camera_usb_init(camera_base_t *base_me)
         goto err_close;
     }
 
-    // ====================== 【自检 8】MMAP 映射 ======================
+    // Step 8: MMAP mapping and buffer queue
     for (i = 0; i < me->buf_cnt; i++) {
         struct v4l2_buffer buf = {0};
         buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -131,7 +158,7 @@ static int camera_usb_init(camera_base_t *base_me)
             goto err_munmap;
         }
 
-        // 入队
+        // Queue buffer to kernel
         ret = v4l2_qbuf(me->fd, &buf);
         if (ret < 0) {
             perror("[USB Camera] qbuf failed");
@@ -139,10 +166,11 @@ static int camera_usb_init(camera_base_t *base_me)
         }
     }
 
-    printf("[USB Camera] 初始化全自检完成 ✅\n");
+    printf("[USB Camera] Initialization self-check passed ✅\n");
     return 0;
 
 err_munmap:
+    // Unmap allocated buffers on failure
     for (int j = 0; j < i; j++)
         v4l2_munmap(me->buf[j], me->buf_len[j]);
 err_close:
@@ -151,47 +179,64 @@ err_close:
     return ret;
 }
 
+/**
+ * @copydoc camera_base_deinit
+ */
 static int camera_usb_deinit(camera_base_t *base_me)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
 
+    // Stop capture before releasing resources
     camera_stop_capture(base_me);
 
+    // Unmap all DMA buffers
     for (int i = 0; i < me->buf_cnt; i++)
         v4l2_munmap(me->buf[i], me->buf_len[i]);
 
+    // Close V4L2 device
     v4l2_close(me->fd);
     me->fd = -1;
 
-    printf("[USB Camera] 反初始化完成\n");
+    printf("[USB Camera] De-initialization completed\n");
     return 0;
 }
 
+/**
+ * @copydoc camera_base_start_capture
+ */
 static int camera_usb_start_capture(camera_base_t *base_me)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
     if (me->fd < 0) return -ENODEV;
 
+    // Start V4L2 video stream
     int ret = v4l2_stream_ctrl(me->fd, true);
     if (ret < 0) {
         perror("[USB Camera] stream on failed");
         return ret;
     }
 
-    printf("[USB Camera] 开始采集\n");
+    printf("[USB Camera] Start capture\n");
     return 0;
 }
 
+/**
+ * @copydoc camera_base_stop_capture
+ */
 static int camera_usb_stop_capture(camera_base_t *base_me)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
     if (me->fd < 0) return -ENODEV;
 
+    // Stop V4L2 video stream
     v4l2_stream_ctrl(me->fd, false);
-    printf("[USB Camera] 停止采集\n");
+    printf("[USB Camera] Stop capture\n");
     return 0;
 }
 
+/**
+ * @copydoc camera_base_get_frame
+ */
 static int camera_usb_get_frame(camera_base_t *base_me, void **frame, size_t *len)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
@@ -201,16 +246,22 @@ static int camera_usb_get_frame(camera_base_t *base_me, void **frame, size_t *le
     buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_MMAP;
 
+    // Dequeue filled buffer from kernel
     int ret = v4l2_dqbuf(me->fd, &buf);
     if (ret < 0) return ret;
 
+    // Return frame data pointer and length (zero-copy)
     *frame = me->buf[buf.index];
     *len = me->buf_len[buf.index];
 
+    // Requeue buffer to kernel
     v4l2_qbuf(me->fd, &buf);
     return 0;
 }
 
+/**
+ * @copydoc camera_base_set_param
+ */
 static int camera_usb_set_param(camera_base_t *base_me, int cmd, void *arg)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
@@ -224,19 +275,19 @@ static int camera_usb_set_param(camera_base_t *base_me, int cmd, void *arg)
             if (!me->cap.support_exposure) return -ENOTSUP;
             v4l2_set_ctrl(me->fd, V4L2_CID_EXPOSURE_AUTO, V4L2_EXPOSURE_MANUAL);
             ret = v4l2_set_ctrl(me->fd, V4L2_CID_EXPOSURE_ABSOLUTE, *val);
-            printf("[USB Camera] 曝光 = %d\n", *val);
+            printf("[USB Camera] Exposure = %d\n", *val);
             return ret;
 
         case CAMERA_PARAM_SET_BRIGHTNESS:
             ret = v4l2_set_ctrl(me->fd, V4L2_CID_BRIGHTNESS, *val);
-            printf("[USB Camera] 亮度 = %d\n", *val);
+            printf("[USB Camera] Brightness = %d\n", *val);
             return ret;
 
         case CAMERA_PARAM_SET_WHITE_BALANCE:
             if (!me->cap.support_white_balance) return -ENOTSUP;
             v4l2_set_ctrl(me->fd, V4L2_CID_AUTO_WHITE_BALANCE, 0);
             ret = v4l2_set_ctrl(me->fd, V4L2_CID_WHITE_BALANCE_TEMPERATURE, *val);
-            printf("[USB Camera] 白平衡 = %d\n", *val);
+            printf("[USB Camera] White Balance = %d\n", *val);
             return ret;
 
         default:
@@ -244,6 +295,9 @@ static int camera_usb_set_param(camera_base_t *base_me, int cmd, void *arg)
     }
 }
 
+/**
+ * @copydoc camera_base_get_capability
+ */
 static int camera_usb_get_capability(camera_base_t *base_me, camera_capability_t *cap)
 {
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
@@ -252,8 +306,13 @@ static int camera_usb_get_capability(camera_base_t *base_me, camera_capability_t
 }
 
 /* ============================================================================
- * 虚函数表（V3.0 必须 const）
+ * Camera Subclass Virtual Function Table (CONST required by V3.0)
  * ========================================================================== */
+/**
+ * @brief   Virtual function table for USB camera subclass
+ * @details Implements all mandatory interfaces from camera_base_t.
+ *          Binds subclass functions to base class callbacks.
+ */
 static const camera_ops_t g_camera_usb_ops = {
     .init           = camera_usb_init,
     .deinit         = camera_usb_deinit,
@@ -265,8 +324,11 @@ static const camera_ops_t g_camera_usb_ops = {
 };
 
 /* ============================================================================
- * 对外构造 / 析构
+ * Public Constructor & Destructor
  * ========================================================================== */
+/**
+ * @copydoc camera_usb_create
+ */
 camera_base_t *camera_usb_create(const char *dev_path,
                                  int width,
                                  int height,
@@ -276,9 +338,11 @@ camera_base_t *camera_usb_create(const char *dev_path,
     if (!dev_path || width <= 0 || height <= 0)
         return NULL;
 
+    // Allocate memory for subclass instance
     camera_usb_t *me = mem_calloc(1, sizeof(*me));
     if (!me) return NULL;
 
+    // Initialize base class properties (OOP core)
     me->base.ops        = &g_camera_usb_ops;
     me->base.name       = "usb_camera";
     me->base.width      = width;
@@ -287,6 +351,7 @@ camera_base_t *camera_usb_create(const char *dev_path,
     me->base.is_init    = false;
     me->base.is_running = false;
 
+    // Initialize private parameters
     me->dev_path    = dev_path;
     me->pixel_fmt   = fmt;
     me->fd          = -1;
@@ -294,11 +359,18 @@ camera_base_t *camera_usb_create(const char *dev_path,
     return &me->base;
 }
 
+/**
+ * @copydoc camera_usb_destroy
+ */
 void camera_usb_destroy(camera_base_t *base_me)
 {
     if (!base_me) return;
     camera_usb_t *me = container_of(base_me, camera_usb_t, base);
+
+    // Release hardware resources
     camera_deinit(base_me);
+    // Free instance memory
     mem_free(me);
-    printf("[USB Camera] 销毁成功\n");
+
+    printf("[USB Camera] Instance destroyed successfully\n");
 }

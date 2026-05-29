@@ -1,12 +1,14 @@
 # ==========================================================================
-# src/Makefile：核心框架模块（新增AI Link路径）
+# src/Makefile
+# @author LuoZhihong
+# @license MIT License
 # ==========================================================================
 
 # 1. 源文件（新增 ai_model_link.cpp）
 SRC_FILES := \
 	base/camera/src/camera_base.c \
  	base/ai_model/src/ai_model_base.cpp \
-	base/service/src/service_base.c \
+	base/led/src/led_base.c \
 	bus/event_bus/src/event_bus.c \
 	bus/data_bus/src/data_bus.c \
 	app/src/main.c \

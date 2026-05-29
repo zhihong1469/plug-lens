@@ -18,6 +18,8 @@ Thumbs.db
 third_lib/compile_reference_configuration/
 third_lib/face_detector/imgs
 third_lib/face_detector/model/quant/*.json
+// 个人暂留文件
+*.my
 # ==============================================
 # 2. 编译产物忽略（屏蔽所有临时文件）
 # ==============================================
@@ -35,7 +37,7 @@ third_lib/face_detector/model/quant/*.json
 *.map
 *.log
 *.tmp
-
+scripts/shell_quick_script/tmp
 # 【重点】默认忽略所有动态库（防止中间编译库提交）
 *.so
 *.so.*
