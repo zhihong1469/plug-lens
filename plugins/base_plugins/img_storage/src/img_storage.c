@@ -1,22 +1,28 @@
+/**
+ * @file    img_storage.c
+ * @brief   Universal Image Storage Service Implementation
+ * @details Internal implementation:
+ *          - Thread-safe operations with pthread mutex
+ *          - TurboJPEG hardware-accelerated JPEG encoding
+ *          - Recursive directory creation and automatic old file cleanup
+ *          - fsync disk synchronization for NFS/network real-time preview
+ *          - No SD card dependency, pure Linux file I/O
+ *          - Static memory management at initialization only
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @relies  https://github.com/libjpeg-turbo/libjpeg-turbo
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ */
 #ifndef USE_SD
 #define USE_SD 0
 #endif
 /* SPDX-License-Identifier: MIT */
-/**
- ******************************************************************************
- * @file           img_storage.c
- * @brief          通用图像存储服务模块实现（无SD卡强依赖）
- * @details        1. 线程安全的RGB原始数据读写
- *                 2. 基于TurboJPEG的标准JPEG图片编码存储
- *                 3. 自动清理旧文件 + fsync磁盘同步
- *                 4. 兼容NFS/本地/网络挂载实时预览
- * @author         Luo
- * @date           2026
- ******************************************************************************
- */
 #include "img_storage.h"
 #include "log.h"
-// 复用项目推流模块的TurboJPEG库
+// Reuse TurboJPEG library from project stream module
 #include <turbojpeg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,36 +35,43 @@
 #include <limits.h>
 #include <fcntl.h>
 
-// ==============================================
-// 私有结构体：保留原有成员 + 新增JPEG编码器句柄
-// ==============================================
+/**
+ * @brief   Private structure for image storage instance
+ * @details Core context for storage module, contains all runtime resources.
+ * @note    External code cannot access members directly (opaque pointer).
+ */
 struct ImgStorage {
-    bool            is_initialized;
-    pthread_mutex_t mutex;
-    char            work_dir[128];
-    tjhandle        tj_handle;     // TurboJPEG编码器句柄
-    int             jpeg_quality;  // JPEG编码质量
+    bool            is_initialized;  /**< Module initialization flag */
+    pthread_mutex_t mutex;           /**< Thread safety mutex for I/O operations */
+    char            work_dir[128];   /**< Working directory path */
+    tjhandle        tj_handle;       /**< TurboJPEG compressor handle */
+    int             jpeg_quality;    /**< JPEG encoding quality (1-100) */
 };
 
 // ==============================================
-// 静态工具函数：100%保留原有逻辑
+// Private Static Helper Functions
 // ==============================================
 /**
- * @brief  递归创建文件夹
- * @param  path: 文件夹路径
- * @return 0成功，负数失败
+ * @brief   Recursively create directory
+ * @details Uses system mkdir command for cross-platform compatibility.
+ * @param   path  Target directory path
+ * @return  0 on success; non-zero on failure
  */
 static int img_storage_mkdir(const char *path) {
     if (access(path, F_OK) == 0) return 0;
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "mkdir -p %s", path);
     int ret = system(cmd);
-    if (ret != 0) LOG_E("[IMG_STORAGE] 创建目录失败: %s", path);
+    if (ret != 0) LOG_E("[IMG_STORAGE] Failed to create directory: %s", path);
     return ret;
 }
 
 /**
- * @brief  生成RGB文件名（原有逻辑，完整保留）
+ * @brief   Generate time-stamped RGB file name
+ * @details File format: face_YYYYMMDD_HHMMSS.rgb
+ * @param   name  Output buffer for file name
+ * @param   len   Size of name buffer
+ * @return  void
  */
 static void img_storage_gen_rgb_filename(char *name, size_t len) {
     time_t t = time(NULL);
@@ -69,7 +82,11 @@ static void img_storage_gen_rgb_filename(char *name, size_t len) {
 }
 
 /**
- * @brief  生成JPEG文件名（标准格式）
+ * @brief   Generate time-stamped JPEG file name
+ * @details File format: face_YYYYMMDD_HHMMSS.jpg
+ * @param   name  Output buffer for file name
+ * @param   len   Size of name buffer
+ * @return  void
  */
 static void img_storage_gen_jpeg_filename(char *name, size_t len) {
     time_t t = time(NULL);
@@ -80,7 +97,11 @@ static void img_storage_gen_jpeg_filename(char *name, size_t len) {
 }
 
 /**
- * @brief  清理旧文件，兼容RGB+JPG
+ * @brief   Auto clean up old image files
+ * @details Delete oldest RGB/JPG file when file count exceeds maximum limit.
+ *          Protects disk space from overflow.
+ * @param   dir_path  Target directory to clean up
+ * @return  void
  */
 static void img_storage_clean_old_files(const char *dir_path) {
     DIR *dir = opendir(dir_path);
@@ -94,7 +115,7 @@ static void img_storage_clean_old_files(const char *dir_path) {
     char full_path[256];
 
     while ((ent = readdir(dir)) != NULL) {
-        // 同时匹配rgb和jpg格式文件
+        // Filter RGB and JPG files only
         if (!strstr(ent->d_name, ".rgb") && !strstr(ent->d_name, ".jpg")) continue;
 
         snprintf(full_path, sizeof(full_path)-1, "%s/%s", dir_path, ent->d_name);
@@ -108,28 +129,32 @@ static void img_storage_clean_old_files(const char *dir_path) {
     }
     closedir(dir);
 
+    // Delete oldest file if over max limit
     if (file_cnt >= IMG_MAX_CAPTURE_FILES && strlen(oldest_file) > 0) {
         remove(oldest_file);
-        LOG_I("[IMG_STORAGE] 超过最大数量，删除旧文件: %s", oldest_file);
+        LOG_I("[IMG_STORAGE] Max limit reached, deleted old file: %s", oldest_file);
     }
 }
 
 // ==============================================
-// 公共API：原有接口完整保留，无SD卡强依赖
+// Public API Implementation (Lifecycle Order)
 // ==============================================
+/**
+ * @copydoc img_storage_init
+ */
 ImgStorage_t *img_storage_init(void)
 {
-    // 2. 分配内存
+    // Allocate module instance memory
     ImgStorage_t *self = (ImgStorage_t *)mem_calloc(1, sizeof(ImgStorage_t));
     if (!self) return NULL;
 
-    // 3. 初始化线程互斥锁
+    // Initialize thread mutex for thread safety
     if (pthread_mutex_init(&self->mutex, NULL) != 0) {
         mem_free(self);
         return NULL;
     }
 
-    // 4. 初始化TurboJPEG编码器（业务核心，保留）
+    // Initialize TurboJPEG compressor (core encoding component)
     self->tj_handle = tjInitCompress();
     if (!self->tj_handle) {
         pthread_mutex_destroy(&self->mutex);
@@ -137,7 +162,7 @@ ImgStorage_t *img_storage_init(void)
         return NULL;
     }
 
-    // 5. 创建图片存储目录（业务逻辑，保留）
+    // Create working directory (fail fast if directory creation fails)
     if (img_storage_mkdir(IMG_STORAGE_DIR) != 0) {
         tjDestroy(self->tj_handle);
         pthread_mutex_destroy(&self->mutex);
@@ -145,31 +170,39 @@ ImgStorage_t *img_storage_init(void)
         return NULL;
     }
 
-    // 6. 初始化参数
+    // Initialize runtime parameters
     strncpy(self->work_dir, IMG_STORAGE_DIR, sizeof(self->work_dir)-1);
     self->jpeg_quality = 50;
     self->is_initialized = true;
 
+    LOG_I("[IMG_STORAGE] Initialization completed");
     return self;
 }
 
+/**
+ * @copydoc img_storage_deinit
+ */
 void img_storage_deinit(ImgStorage_t *self) {
     if (!self || !self->is_initialized) return;
 
     pthread_mutex_lock(&self->mutex);
-    // 释放JPEG编码器
+    // Release TurboJPEG encoder resource
     if (self->tj_handle) {
         tjDestroy(self->tj_handle);
         self->tj_handle = NULL;
     }
     pthread_mutex_unlock(&self->mutex);
 
+    // Release system resources
     pthread_mutex_destroy(&self->mutex);
     mem_free(self);
 
-    LOG_I("[IMG_STORAGE] 反初始化完成");
+    LOG_I("[IMG_STORAGE] De-initialization completed");
 }
 
+/**
+ * @copydoc img_storage_save_rgb
+ */
 int img_storage_save_rgb(ImgStorage_t *self, const uint8_t *rgb_buf) {
     if (!self || !self->is_initialized || !rgb_buf) return IMG_STORAGE_ERR_PARAM;
 
@@ -179,11 +212,14 @@ int img_storage_save_rgb(ImgStorage_t *self, const uint8_t *rgb_buf) {
     char fullpath[256] = {0};
     FILE *fp = NULL;
 
+    // Generate unique file name
     img_storage_gen_rgb_filename(filename, sizeof(filename));
     snprintf(fullpath, sizeof(fullpath)-1, "%s/%s", self->work_dir, filename);
 
+    // Clean up old files before writing
     img_storage_clean_old_files(self->work_dir);
 
+    // Write raw RGB data
     fp = fopen(fullpath, "wb");
     if (!fp) goto exit;
 
@@ -194,18 +230,21 @@ int img_storage_save_rgb(ImgStorage_t *self, const uint8_t *rgb_buf) {
         goto exit;
     }
 
-    // 强制同步磁盘，NFS实时可见
+    // Force disk sync for NFS real-time visibility
     fflush(fp);
     fsync(fileno(fp));
     fclose(fp);
     ret = IMG_STORAGE_OK;
-    LOG_D("[IMG_STORAGE] RGB保存成功: %s", filename);
+    LOG_D("[IMG_STORAGE] RGB saved successfully: %s", filename);
 
 exit:
     pthread_mutex_unlock(&self->mutex);
     return ret;
 }
 
+/**
+ * @copydoc img_storage_read_rgb
+ */
 int img_storage_read_rgb(ImgStorage_t *self, const char *filename, uint8_t *out_buf, size_t buf_size) {
     if (!self || !self->is_initialized || !filename || !out_buf) return IMG_STORAGE_ERR_PARAM;
     if (buf_size < IMG_RGB_IMAGE_SIZE) return IMG_STORAGE_ERR_NO_MEM;
@@ -228,6 +267,9 @@ exit:
     return ret;
 }
 
+/**
+ * @copydoc img_storage_get_free_space_mb
+ */
 long long img_storage_get_free_space_mb(void) {
     uint64_t free_bytes = 0;
     FILE *fp = popen("df -B1 /mnt/test | tail -1 | awk '{print $4}'", "r");
@@ -238,9 +280,9 @@ long long img_storage_get_free_space_mb(void) {
     return (long long)(free_bytes / 1024 / 1024);
 }
 
-// ==============================================
-// 新增API：标准JPEG保存（复用推流编码逻辑）
-// ==============================================
+/**
+ * @copydoc img_storage_save_jpeg
+ */
 int img_storage_save_jpeg(ImgStorage_t *self, const uint8_t *rgb_buf) {
     if (!self || !self->is_initialized || !rgb_buf) return IMG_STORAGE_ERR_PARAM;
 
@@ -252,14 +294,14 @@ int img_storage_save_jpeg(ImgStorage_t *self, const uint8_t *rgb_buf) {
     uint8_t *jpeg_buf = NULL;
     unsigned long jpeg_size = 0;
 
-    // 生成标准JPG文件名
+    // Generate JPEG file name
     img_storage_gen_jpeg_filename(filename, sizeof(filename));
     snprintf(fullpath, sizeof(fullpath)-1, "%s/%s", self->work_dir, filename);
 
-    // 自动清理旧文件
+    // Auto cleanup old files
     img_storage_clean_old_files(self->work_dir);
 
-    // TurboJPEG编码（和net_push_srv.c完全一致）
+    // TurboJPEG compression (same logic as stream encoder)
     int tj_ret = tjCompress2(self->tj_handle,
                           (unsigned char *)rgb_buf,
                           IMG_INPUT_WIDTH,
@@ -273,11 +315,11 @@ int img_storage_save_jpeg(ImgStorage_t *self, const uint8_t *rgb_buf) {
                           TJFLAG_FASTDCT);
 
     if (tj_ret != 0 || jpeg_size == 0) {
-        LOG_E("[IMG_STORAGE] JPEG编码失败: %s", filename);
+        LOG_E("[IMG_STORAGE] JPEG encode failed: %s", filename);
         goto exit;
     }
 
-    // 写入文件
+    // Write JPEG data to file
     fp = fopen(fullpath, "wb");
     if (!fp) goto exit;
 
@@ -287,16 +329,18 @@ int img_storage_save_jpeg(ImgStorage_t *self, const uint8_t *rgb_buf) {
         remove(fullpath);
         goto exit;
     }
-    fchmod(fileno(fp), 0666);  // 关键：设置文件为全局可读写删除
-    // 磁盘同步，NFS实时可见
+    // Set global read/write permission for network sharing
+    fchmod(fileno(fp), 0666);
+    // Disk sync for NFS real-time preview
     fflush(fp);
     fsync(fileno(fp));
     fclose(fp);
 
     ret = IMG_STORAGE_OK;
-    LOG_I("[IMG_STORAGE] JPG保存成功: %s | 大小:%lu Bytes", filename, jpeg_size);
+    LOG_I("[IMG_STORAGE] JPG saved: %s | Size:%lu Bytes", filename, jpeg_size);
 
 exit:
+    // Release TurboJPEG internal buffer
     if (jpeg_buf) tjFree(jpeg_buf);
     pthread_mutex_unlock(&self->mutex);
     return ret;

@@ -14,7 +14,7 @@
 | [OpenH264](https://github.com/cisco/openh264) | - | BSD 2-clause | H.264视频编解码 |
 | [libyuv](https://github.com/lemenkov/libyuv) | - | BSD 3-clause | YUV格式转换与缩放 |
 还有tlsf
-
+韦东山老师:https://github.com/100askTeam
 ### 工具与参考
 - GDB 12.1（调试工具）
   - 源码包：https://ftp.gnu.org/gnu/gdb/gdb-12.1.tar.xz

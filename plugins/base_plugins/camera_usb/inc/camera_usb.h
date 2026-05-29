@@ -1,3 +1,22 @@
+/**
+ * @file    camera_usb.h
+ * @brief   USB Camera Subclass Driver (V3.0 Encapsulated)
+ * @details Inherits from camera_base class, implements V4L2-based USB camera driver.
+ *          Fully encapsulated private implementation, only 2 standard public interfaces exposed.
+ *          Hardware buffer management is internal, upper layer does not care about low-level details.
+ *          Optimized for embedded Linux (IMX6ULL) platform.
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @note    Global rules:
+ *          1. All functions are NOT thread-safe.
+ *          2. Call sequence: create → init → start_capture → get_frame → stop_capture → deinit → destroy.
+ *          3. Device path format: /dev/video0, /dev/video1, etc.
+ */
 #ifndef __CAMERA_USB_H__
 #define __CAMERA_USB_H__
 
@@ -8,25 +27,20 @@ extern "C" {
 #endif
 
 /**
- * @file camera_usb.h
- * @brief USB摄像头子类头文件（V3.0 封装版）
- * @details 继承camera_base基类，实现USB摄像头专用驱动
- *          私有实现完全封装，对外仅暴露2个标准接口
- *          硬件缓冲区管理内部闭环，上层无需要关心底层细节
- * @version 3.0
- * @date 2026
- */
-
-/**
- * @brief USB摄像头实例创建（唯一对外构造接口）
- * @param dev_path 设备节点路径（如：/dev/video0）
- * @param width 期望图像宽度
- * @param height 期望图像高度
- * @param fmt 像素格式（V4L2_PIX_FMT_YUYV/MJPEG等）
- * @param fps 期望帧率
- * @return camera_base_t* 成功返回基类指针，失败返回NULL
- * @note 内部完成子类内存分配、基类初始化、参数配置
- *       无需关心底层私有实现
+ * @brief   Create USB camera instance (public constructor)
+ * @details Allocate subclass memory, initialize base class and hardware parameters.
+ *          Low-level initialization is executed in the init() virtual function.
+ * @param   dev_path    Linux V4L2 device node path (e.g., /dev/video0)
+ * @param   width       Desired image width
+ * @param   height      Desired image height
+ * @param   fmt         Pixel format (V4L2_PIX_FMT_YUYV, V4L2_PIX_FMT_MJPEG, etc.)
+ * @param   fps         Desired frame rate
+ * @return  camera_base_t* Pointer to camera base handle on success; NULL on failure
+ *
+ * @pre     None (first interface to call)
+ * @post    Camera instance allocated, in IDLE state (not initialized)
+ * @warning Do not call capture APIs before initialization
+ * @thread_safety No
  */
 camera_base_t *camera_usb_create(const char *dev_path,
                                  int width,
@@ -35,10 +49,16 @@ camera_base_t *camera_usb_create(const char *dev_path,
                                  uint32_t fps);
 
 /**
- * @brief 销毁USB摄像头实例（唯一对外析构接口）
- * @param base_me 摄像头基类指针
- * @details 自动执行：停止采集 → 反初始化 → 释放内存
- *          上层调用后，指针置空，避免野指针
+ * @brief   Destroy USB camera instance (public destructor)
+ * @details Auto execution flow: stop capture → deinitialize → release memory.
+ *          Set pointer to NULL after calling to avoid dangling pointer.
+ * @param   base_me     Pointer to camera base handle
+ * @return  void
+ *
+ * @pre     Instance must be created by camera_usb_create
+ * @post    All hardware/software resources released, handle invalid
+ * @note    Must be called to prevent resource leaks
+ * @thread_safety No
  */
 void camera_usb_destroy(camera_base_t *base_me);
 

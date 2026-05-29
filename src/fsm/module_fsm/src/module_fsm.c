@@ -1,17 +1,19 @@
-/* SPDX-License-Identifier: MIT */
 /**
- ******************************************************************************
- * @file           module_fsm.c
- * @brief          Universal Base Module FSM Implementation
- * @details
- *  1. Thread-safe mutex protection for state transition
- *  2. Configurable state transition table
- *  3. Lock-free callback execution (avoid deadlock)
- *  4. Full null pointer & parameter validation
- *  5. Seamless connection with Global FSM
- * @author luo
- * @date 2026
- ******************************************************************************
+ * @file    module_fsm.c
+ * @brief   Universal Base Module FSM Implementation
+ * @details Internal implementation features:
+ *          1. Thread-safe state transitions using pthread mutex
+ *          2. Lock-free callback execution to eliminate deadlock risks
+ *          3. Linear traversal for state transition validation
+ *          4. Full parameter and null pointer validation
+ *          5. Atomic state update with mutex protection
+ *          6. Dynamic memory allocation for FSM context
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
  */
 #include "module_fsm.h"
 #include "log.h"
@@ -22,25 +24,32 @@
 // ==========================================================================
 // Internal Configuration Macros
 // ==========================================================================
+/** Maximum length of module name string */
 #define MODULE_NAME_MAX_LEN    32
 
 // ==========================================================================
 // Internal FSM Context (Encapsulated, opaque to upper layer)
 // ==========================================================================
+/**
+ * @brief   Internal FSM context structure (private implementation)
+ * @details Stores all runtime data for FSM instance
+ * @note    External code cannot access members directly
+ */
 typedef struct {
-    char                    module_name[MODULE_NAME_MAX_LEN];
-    module_state_t          current_state;
-    const module_state_trans_t *trans_table;
-    uint32_t                trans_table_len;
-    module_event_handler_t  event_handler;
-    module_state_change_cb_t state_cb;
-    void                    *user_data;
-    pthread_mutex_t         lock;       /**< Thread-safe mutex */
+    char                    module_name[MODULE_NAME_MAX_LEN];  /**< Module unique name */
+    module_state_t          current_state;                     /**< Current FSM state */
+    const module_state_trans_t *trans_table;                   /**< State transition rules */
+    uint32_t                trans_table_len;                    /**< Transition table size */
+    module_event_handler_t  event_handler;                     /**< Business logic handler */
+    module_state_change_cb_t state_cb;                          /**< State change callback */
+    void                    *user_data;                        /**< User private data */
+    pthread_mutex_t         lock;                              /**< Thread safety mutex */
 } module_fsm_context_t;
 
 // ==========================================================================
 // String Mapping Tables (For Log Printing)
 // ==========================================================================
+/** String mapping table for module state logging */
 static const char* g_module_state_str[] = {
     [MODULE_STATE_INVALID]       = "INVALID",
     [MODULE_STATE_IDLE]          = "IDLE",
@@ -56,6 +65,7 @@ static const char* g_module_state_str[] = {
     [MODULE_STATE_DEINIT]        = "DEINIT",
 };
 
+/** String mapping table for module event logging */
 static const char* g_module_event_str[] = {
     [MODULE_EVENT_INVALID]       = "INVALID",
     [MODULE_EVENT_INIT]          = "INIT",
@@ -79,17 +89,28 @@ static const char* g_module_event_str[] = {
 // ==========================================================================
 // Internal Helper Functions Declaration
 // ==========================================================================
+/**
+ * @brief   Validate if a state transition is allowed
+ *
+ * @param   ctx             Pointer to FSM internal context
+ * @param   event           Input trigger event
+ * @param   out_next_state  Pointer to store valid next state
+ * @return  true = valid transition, false = invalid or null pointer
+ *
+ * Workflow:
+ * 1. Validate input pointers
+ * 2. Traverse transition table to find matching rule
+ * 3. Return result and target state
+ *
+ * @note    Called exclusively under mutex lock protection
+ */
 static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
                                      module_event_t event,
                                      module_state_t *out_next_state);
 
 // ==========================================================================
-// Public API Implementation
+// Public API Implementation (Lifecycle Order: Create → Operate → Destroy)
 // ==========================================================================
-
-/**
- * @brief Create module FSM instance
- */
 int module_fsm_create(const module_fsm_config_t *config,
                       module_fsm_handle_t *out_handle)
 {
@@ -111,7 +132,7 @@ int module_fsm_create(const module_fsm_config_t *config,
     }
     memset(ctx, 0, sizeof(module_fsm_context_t));
 
-    // Copy configuration
+    // Copy user configuration
     strncpy(ctx->module_name, config->module_name, MODULE_NAME_MAX_LEN - 1);
     ctx->trans_table       = config->trans_table;
     ctx->trans_table_len   = config->trans_table_len;
@@ -119,10 +140,10 @@ int module_fsm_create(const module_fsm_config_t *config,
     ctx->state_cb          = config->state_cb;
     ctx->user_data         = config->user_data;
 
-    // Initial state: IDLE
+    // Set initial state to IDLE
     ctx->current_state     = MODULE_STATE_IDLE;
 
-    // Initialize thread-safe mutex
+    // Initialize thread safety mutex
     if (pthread_mutex_init(&ctx->lock, NULL) != 0) {
         LOG_E("Module FSM: Mutex init failed");
         free(ctx);
@@ -135,9 +156,6 @@ int module_fsm_create(const module_fsm_config_t *config,
     return 0;
 }
 
-/**
- * @brief Post event to drive state transition
- */
 int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
 {
     // Parameter validation
@@ -154,7 +172,7 @@ int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
           module_event_to_str(event), 
           module_state_to_str(ctx->current_state));
 
-    // Step 1: Check if state transition is valid
+    // Check if state transition is valid
     module_state_t next_state = MODULE_STATE_INVALID;
     if (!_module_fsm_check_trans(ctx, event, &next_state)) {
         LOG_W("Module FSM: [%s] invalid trans: %s + %s", 
@@ -165,7 +183,7 @@ int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
         return -1;
     }
 
-    // Step 2: Execute business event handler (if exists)
+    // Execute business event handler
     int ret = 0;
     if (ctx->event_handler != NULL) {
         ret = ctx->event_handler(event, ctx->user_data);
@@ -177,7 +195,10 @@ int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
         }
     }
 
-    // Step 3: Atomic state transition
+    /* Atomic state transition:
+     * Update state atomically under mutex protection to ensure thread safety
+     * Old state is stored for callback notification
+     */
     module_state_t old_state = ctx->current_state;
     ctx->current_state = next_state;
 
@@ -188,7 +209,10 @@ int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
 
     pthread_mutex_unlock(&ctx->lock);
 
-    // Step 4: Notify upper layer (OUT OF LOCK, avoid deadlock)
+    /* Lock-free callback execution:
+     * Execute state change callback outside mutex to avoid deadlock
+     * Critical design for system stability
+     */
     if (ctx->state_cb != NULL) {
         ctx->state_cb(ctx->module_name, old_state, next_state, ctx->user_data);
     }
@@ -196,9 +220,6 @@ int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event)
     return 0;
 }
 
-/**
- * @brief Get current module state
- */
 module_state_t module_fsm_get_state(module_fsm_handle_t handle)
 {
     if (handle == NULL) {
@@ -206,6 +227,7 @@ module_state_t module_fsm_get_state(module_fsm_handle_t handle)
     }
     module_fsm_context_t *ctx = (module_fsm_context_t*)handle;
 
+    // Thread-safe state read with short lock hold time
     pthread_mutex_lock(&ctx->lock);
     module_state_t state = ctx->current_state;
     pthread_mutex_unlock(&ctx->lock);
@@ -213,9 +235,6 @@ module_state_t module_fsm_get_state(module_fsm_handle_t handle)
     return state;
 }
 
-/**
- * @brief Get module name
- */
 const char* module_fsm_get_name(module_fsm_handle_t handle)
 {
     if (handle == NULL) {
@@ -225,9 +244,6 @@ const char* module_fsm_get_name(module_fsm_handle_t handle)
     return ctx->module_name;
 }
 
-/**
- * @brief Destroy module FSM
- */
 int module_fsm_destroy(module_fsm_handle_t handle)
 {
     if (handle == NULL) {
@@ -235,11 +251,12 @@ int module_fsm_destroy(module_fsm_handle_t handle)
     }
     module_fsm_context_t *ctx = (module_fsm_context_t*)handle;
 
+    // Set final state before resource release
     pthread_mutex_lock(&ctx->lock);
     ctx->current_state = MODULE_STATE_DEINIT;
     pthread_mutex_unlock(&ctx->lock);
 
-    // Release resources
+    // Release system resources
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
 
@@ -247,9 +264,6 @@ int module_fsm_destroy(module_fsm_handle_t handle)
     return 0;
 }
 
-/**
- * @brief State to string
- */
 const char* module_state_to_str(module_state_t state)
 {
     if (state < MODULE_STATE_INVALID || state >= MODULE_STATE_MAX) {
@@ -258,9 +272,6 @@ const char* module_state_to_str(module_state_t state)
     return g_module_state_str[state];
 }
 
-/**
- * @brief Event to string
- */
 const char* module_event_to_str(module_event_t event)
 {
     if (event < MODULE_EVENT_INVALID || event >= MODULE_EVENT_MAX) {
@@ -270,7 +281,7 @@ const char* module_event_to_str(module_event_t event)
 }
 
 // ==========================================================================
-// Internal Helper: Check State Transition Validity
+// Internal Helper Function Implementation
 // ==========================================================================
 static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
                                      module_event_t event,
@@ -280,7 +291,7 @@ static bool _module_fsm_check_trans(module_fsm_context_t *ctx,
         return false;
     }
 
-    // Traverse transition table to find matching rule
+    // Linear search for valid transition rule
     for (uint32_t i = 0; i < ctx->trans_table_len; i++) {
         const module_state_trans_t *trans = &ctx->trans_table[i];
         if (trans->current_state == ctx->current_state &&
