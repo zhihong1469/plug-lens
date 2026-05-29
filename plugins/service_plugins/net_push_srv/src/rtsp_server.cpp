@@ -1,36 +1,52 @@
-/* SPDX-License-Identifier: MIT */
+/**
+ * @file    rtsp_server.cpp
+ * @brief   RTSP Server Implementation (Live554 + DataBus V4.0 Zero-Copy H.264)
+ * @details Core features:
+ *          - Live555 based RTSP server for i.MX6ULL
+ *          - Zero-copy H.264 frame pulling from dedicated DataBus
+ *          - Real-time FIFO thread scheduling (priority 85)
+ *          - Client connection count management
+ *          - Automatic sleep when no clients (low-power)
+ *          - SPS/PPS configuration for H.264 streaming
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @relies  http://www.live555.com/liveMedia/
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ */
+
 #include "rtsp_server.h"
 #include "liveMedia.hh"
 #include "BasicUsageEnvironment.hh"
 #include "vision_ai_config.h"
-#include "data_bus.h"  // 🔥 引入数据总线
+#include "data_bus.h"
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <sched.h>
 
 // ==========================================================================
-// 宏控开关
+// Configuration Macros
 // ==========================================================================
 #define ENABLE_RTSP_H264      1
 #define ENABLE_RTSP_JPEG      0
 
-// ==========================================================================
-// RTSP 配置
-// ==========================================================================
 #define RTSP_SERVER_PORT        8554
 #define RTP_MAX_BUFFER_SIZE     (2 * 1024 * 1024)
 #define EST_BITRATE_H264_KBPS   500
 #define H264_PAYLOAD_TYPE       96
 #define MAX_FRAME_SIZE          (2 * 1024 * 1024)
 
-// 🔥 绑定H264数据总线
+/* Bind to dedicated H.264 DataBus */
 #define H264_DATA_BUS_NAME        H264_RTSP_DATA_BUS_NAME
 
 // ==========================================================================
-// 前置声明
+// Forward Declarations
 // ==========================================================================
 #if ENABLE_RTSP_H264
 class H264MemorySource;
@@ -39,7 +55,7 @@ class H264MemorySource;
 extern "C" bool rtsp_has_clients(void);
 
 // ==========================================================================
-// 全局变量（🔥 全部删除静态H264缓存）
+// Global Variables (Thread-Safe, DataBus Integrated)
 // ==========================================================================
 #if ENABLE_RTSP_H264
 static H264MemorySource* g_h264_source = nullptr;
@@ -53,7 +69,7 @@ static uint32_t        g_jpeg_size = 0;
 static pthread_mutex_t g_jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-// RTSP核心全局对象
+/* RTSP Core Global Objects */
 static TaskScheduler*      scheduler = nullptr;
 static UsageEnvironment*   env = nullptr;
 static RTSPServer*         rtspServer = nullptr;
@@ -62,16 +78,19 @@ static pthread_t           rtsp_thread;
 static volatile bool       rtsp_running = false;
 static EventLoopWatchVariable stop_watch;
 
-// ==========================================================================
-// 客户端计数
-// ==========================================================================
+/* RTSP Client Counter (Thread-Safe) */
 static volatile uint32_t g_rtsp_client_count = 0;
 static pthread_mutex_t   g_client_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // ==========================================================================
-// 🔥 革命核心：H264内存数据源（从数据总线拉取）
+// H.264 Memory Source (Pull from DataBus, Zero-Copy)
 // ==========================================================================
 #if ENABLE_RTSP_H264
+/**
+ * @class   H264MemorySource
+ * @brief   Framed source for Live555, pulls H.264 frames from DataBus V4.0
+ * @note    Zero-copy design, automatic SPS/PPS sending, low-power idle
+ */
 class H264MemorySource : public FramedSource {
 public:
     static H264MemorySource* createNew(UsageEnvironment& env) {
@@ -100,13 +119,13 @@ private:
     }
 
     virtual void doGetNextFrame() override {
-        // 无客户端休眠
+        // Low-power sleep when no clients
         if (!rtsp_has_clients()) {
             fScheduleId = envir().taskScheduler().scheduleDelayedTask(10000, deliverFrame, this);
             return;
         }
 
-        // 1. 首次发送SPS/PPS
+        // Send SPS/PPS on first frame
         if (fNeedSendSPSPPS && g_sps_pps_len > 0) {
             memcpy(fTo, g_sps_pps_buf, g_sps_pps_len);
             fFrameSize = g_sps_pps_len;
@@ -115,14 +134,14 @@ private:
             return;
         }
 
-        // 🔥 2. 从数据总线拉取最新H264帧（零拷贝）
+        // Pull latest H.264 frame from dedicated DataBus
         data_bus_item_handle_t h264_item = NULL;
         if (data_bus_pull_latest(H264_DATA_BUS_NAME, DATA_TYPE_H264, &h264_item) != DATA_BUS_OK) {
             fScheduleId = envir().taskScheduler().scheduleDelayedTask(500, deliverFrame, this);
             return;
         }
 
-        // 3. 读取总线数据
+        // Read frame data from DataBus
         const uint8_t* h264_data = (const uint8_t*)data_bus_get_readonly_ptr(h264_item);
         size_t h264_size = data_bus_get_item_size(h264_item);
 
@@ -134,7 +153,7 @@ private:
             fFrameSize = 0;
         }
 
-        // 4. 释放总线引用
+        // Release DataBus reference (strict compliance)
         data_bus_release(h264_item);
 
         if (fFrameSize == 0) {
@@ -150,9 +169,10 @@ private:
     TaskToken fScheduleId;
 };
 
-// ==========================================================================
-// 自定义H264会话
-// ==========================================================================
+/**
+ * @class   CustomH264Subsession
+ * @brief   RTSP subsession for H.264 streaming, client connection management
+ */
 class CustomH264Subsession : public OnDemandServerMediaSubsession {
 public:
     static CustomH264Subsession* createNew(UsageEnvironment& env, Boolean reuseFirstSource) {
@@ -171,7 +191,7 @@ protected:
         pthread_mutex_lock(&g_client_mutex);
         g_rtsp_client_count++;
         pthread_mutex_unlock(&g_client_mutex);
-        printf("[RTSP] 客户端连接 | 在线数: %u\n", g_rtsp_client_count);
+        fprintf(stdout, "[RTSP] Client Connected | Online: %u\n", g_rtsp_client_count);
 
         OnDemandServerMediaSubsession::startStream(clientSessionId, streamToken,
                     rtcpRRHandler, rtcpRRHandlerClientData,
@@ -183,7 +203,7 @@ protected:
         pthread_mutex_lock(&g_client_mutex);
         if (g_rtsp_client_count > 0) g_rtsp_client_count--;
         pthread_mutex_unlock(&g_client_mutex);
-        printf("[RTSP] 客户端断开 | 在线数: %u\n", g_rtsp_client_count);
+        fprintf(stdout, "[RTSP] Client Disconnected | Online: %u\n", g_rtsp_client_count);
 
         OnDemandServerMediaSubsession::deleteStream(clientSessionId, streamToken);
     }
@@ -203,7 +223,7 @@ protected:
 #endif
 
 // ==========================================================================
-// JPEG 模块
+// JPEG Streaming Module (Disabled by Default)
 // ==========================================================================
 #if ENABLE_RTSP_JPEG
 class LiveJPEGSource : public JPEGVideoSource {
@@ -265,15 +285,20 @@ protected:
 #endif
 
 // ==========================================================================
-// RTSP 服务线程
+// RTSP Server Thread (Real-Time Priority)
 // ==========================================================================
+/**
+ * @brief   RTSP server worker thread (SCHED_FIFO, priority 85)
+ * @param   arg  Unused thread argument
+ * @return  NULL
+ */
 static void* rtsp_server_thread(void* arg) {
     (void)arg;
     rtsp_running = true;
     stop_watch = 0;
     g_rtsp_client_count = 0;
 
-    // 设置实时优先级
+    // Set real-time FIFO scheduling priority
     struct sched_param param;
     param.sched_priority = 85;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
@@ -301,8 +326,8 @@ static void* rtsp_server_thread(void* arg) {
     rtspServer->addServerMediaSession(g_rtsp_sms);
     char* url = rtspServer->rtspURL(g_rtsp_sms);
     *env << "=====================================\n";
-    *env << "RTSP 服务启动成功\n";
-    *env << "播放地址: " << url << "\n";
+    *env << "RTSP Service Started Successfully\n";
+    *env << "Stream URL: " << url << "\n";
     *env << "=====================================\n";
     delete[] url;
 
@@ -314,7 +339,7 @@ static void* rtsp_server_thread(void* arg) {
 }
 
 // ==========================================================================
-// 对外 C 接口
+// Public C Language Interface
 // ==========================================================================
 extern "C" void rtsp_set_sps_pps(const uint8_t* sps_pps, uint32_t len) {
 #if ENABLE_RTSP_H264
@@ -333,9 +358,8 @@ extern "C" bool rtsp_is_running(void) {
     return rtsp_running;
 }
 
-// 🔥 废弃：删除原推流接口（数据总线替代）
+// Legacy interface, replaced by DataBus
 extern "C" void rtsp_server_push(const uint8_t* buf, uint32_t size) {
-    // 空实现，兼容旧代码
     (void)buf; (void)size;
 }
 
@@ -362,6 +386,7 @@ extern "C" int rtsp_server_stop(void) {
     g_sps_pps_len = 0;
 #endif
 
+    // Release Live555 resources
     if (rtspServer)  Medium::close(rtspServer);
     if (env)         env->reclaim();
     if (scheduler)   delete scheduler;
