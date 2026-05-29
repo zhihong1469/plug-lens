@@ -37,13 +37,6 @@ TARGET := $(OUTPUTDIR)/$(TARGET_NAME)
 
 all: $(TARGET)
 
-# 依赖规则：可执行文件依赖静态库生成，静态库仅依赖目标文件
-ifeq ($(TARGET_TYPE), LIB)
-$(TARGET): $(OBJS)
-else
-$(TARGET): $(OBJS) $(OUTPUTDIR)/libcom.a $(OUTPUTDIR)/libplug.a
-endif
-
 # 【核心优雅修复】可执行文件链接：
 # 1. 链接脚本放在最开头：-T custom_sections.lds
 # 2. 强制保留 libcom.a + libplug.a 所有符号（initcall 所在库）

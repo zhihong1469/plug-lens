@@ -289,7 +289,7 @@ static void *face_work_thread(void *arg)
                                       srv->faces,
                                       AI_MAX_FACES,
                                       &srv->face_num,
-                                      INPUT_FORMAT);
+                                      INPUT_FORMAT_YUYV);
 
         /* 推理失败：直接释放资源 */
         if (ret != MNN_FACE_OK)

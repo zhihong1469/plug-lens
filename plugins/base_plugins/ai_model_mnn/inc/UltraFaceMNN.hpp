@@ -1,3 +1,28 @@
+/**
+ * @file    UltraFaceMNN.hpp
+ * @brief   Ultra-Light Face Detector based on MNN Inference Engine
+ * @details Core features:
+ *          1. No OpenCV dependency, uses libyuv for image processing
+ *          2. Optimized for NXP i.MX6ULL embedded Linux platform
+ *          3. Supports dual input formats: YUYV (raw camera) and MJPEG
+ *          4. Lightweight anchor-based detection with NMS suppression
+ *          5. Static memory management for embedded stability
+ *
+ * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
+ *
+ * @relies  https://github.com/alibaba/MNN
+ *          https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB
+ *
+ * @note    Global rules:
+ *          1. Single instance recommended for embedded systems.
+ *          2. Call init() before detect(), deinit() on exit.
+ *          3. All functions are NOT thread-safe.
+ */
+
 #ifndef ULTRA_FACE_MNN_HPP
 #define ULTRA_FACE_MNN_HPP
 
@@ -9,67 +34,108 @@
 #include "ImageProcess.hpp"
 
 /**
- * @defgroup ultra_face_mnn MNN UltraFace 人脸检测模块
- * @brief UltraFace人脸检测算法MNN实现，无OpenCV依赖
- * @note 适配IMX6ULL嵌入式平台，支持YUYV/MJPEG双输入格式
+ * @defgroup ultra_face_mnn UltraFace MNN Face Detection Module
+ * @brief Lightweight face detection implementation using MNN,
+ *        optimized for embedded Linux devices without OpenCV.
  * @{
  */
 
-// ==========================
-// 错误码定义（项目通用对齐）
-// ==========================
+// ==============================================================================
+// Universal Error Code Definitions
+// ==============================================================================
+/** Operation completed successfully */
 #define MNN_FACE_OK             0
+/** Module initialization failure */
 #define MNN_FACE_ERR_INIT       -1
+/** Invalid or corrupted MNN model file */
 #define MNN_FACE_ERR_MODEL      -2
+/** Invalid input parameters or null pointer */
 #define MNN_FACE_ERR_INPUT      -3
+/** MNN inference runtime error */
 #define MNN_FACE_ERR_INFER      -4
-#define MNN_FACE_ERR_JPEG       -5  // JPEG解码错误
+/** MJPEG/JPEG decoding failure */
+#define MNN_FACE_ERR_JPEG       -5
 
-// ==========================
-// 输入图像格式枚举
-// ==========================
+// ==============================================================================
+// Input Image Format Enumeration
+// ==============================================================================
+/**
+ * @brief   Supported input image formats for face detection
+ * @details Matches camera output formats for embedded systems
+ */
 typedef enum {
-    IMAGE_FORMAT_YUYV   = 0,    // YUYV格式（摄像头原始输出）
-    IMAGE_FORMAT_MJPEG  = 1     // MJPEG压缩格式
+    IMAGE_FORMAT_YUYV   = 0,    /**< Raw camera format: YUYV 4:2:2 */
+    IMAGE_FORMAT_MJPEG  = 1     /**< Compressed format: MJPEG */
 } ImageFormat;
 
-// ==========================
-// 嵌入式平台默认配置
-// ==========================
+// ==============================================================================
+// Embedded Platform Default Configuration
+// ==============================================================================
+/** Default model input width (optimized for i.MX6ULL) */
 #define DEFAULT_AI_W            320
+/** Default model input height (optimized for i.MX6ULL) */
 #define DEFAULT_AI_H            240
+/** Default inference thread count (single thread for embedded CPU) */
 #define DEFAULT_NUM_THREAD      1
+/** Default face confidence threshold */
 #define DEFAULT_SCORE_THRESH    0.65f
+/** Default NMS (Non-Maximum Suppression) threshold */
 #define DEFAULT_IOU_THRESH      0.3f
 
-// ==========================
-// 人脸检测结果结构体
-// ==========================
+// ==============================================================================
+// Face Detection Result Structure
+// ==============================================================================
+/**
+ * @brief   Face detection output structure (raw model coordinates)
+ * @details Stores bounding box and confidence score for detected faces
+ * @note    Coordinates are relative to model input resolution
+ */
 typedef struct {
-    float x1;
-    float y1;
-    float x2;
-    float y2;
-    float score;
+    float x1;      /**< Top-left x coordinate of face bounding box */
+    float y1;      /**< Top-left y coordinate of face bounding box */
+    float x2;      /**< Bottom-right x coordinate of face bounding box */
+    float y2;      /**< Bottom-right y coordinate of face bounding box */
+    float score;   /**< Detection confidence score (0.0 ~ 1.0) */
 } FaceInfo_MNN;
 
+// ==============================================================================
+// UltraFace MNN Core Class
+// ==============================================================================
 /**
- * @brief UltraFace MNN 人脸检测核心类
- * @details 基于libyuv+MNN实现，无OpenCV依赖，适配嵌入式平台
+ * @brief   MNN-based UltraFace lightweight face detector
+ * @details Embedded-optimized face detection class:
+ *          - libyuv for image conversion & scaling
+ *          - No third-party GUI dependencies
+ *          - Fixed-point inference for low-power CPUs
  */
 class UltraFaceMNN {
 public:
+    /**
+     * @brief   Class constructor
+     * @details Initialize default parameters and anchor box settings
+     * @thread_safety No
+     */
     UltraFaceMNN();
+
+    /**
+     * @brief   Class destructor
+     * @details Auto-release MNN resources and memory
+     * @thread_safety No
+     */
     ~UltraFaceMNN();
 
     /**
-     * @brief 初始化模型与参数
-     * @param model_path MNN模型文件路径
-     * @param ai_w 模型输入宽度
-     * @param ai_h 模型输入高度
-     * @param score_threshold 置信度阈值
-     * @param iou_threshold NMS非极大值抑制阈值
-     * @return 0成功/负数失败
+     * @brief   Initialize MNN model and detection parameters
+     * @param   model_path      File path of MNN model file
+     * @param   ai_w            Model input width
+     * @param   ai_h            Model input height
+     * @param   score_threshold Confidence threshold for valid faces
+     * @param   iou_threshold   IOU threshold for NMS suppression
+     * @return  MNN_FACE_OK on success, negative error code on failure
+     * @pre     Model file must exist and be readable
+     * @post    Module enters ready state if initialization succeeds
+     * @warning Do not call this function multiple times
+     * @thread_safety No
      */
     int init(const char* model_path, 
             int ai_w, 
@@ -78,14 +144,19 @@ public:
             float iou_threshold = DEFAULT_IOU_THRESH);
 
     /**
-     * @brief 人脸检测推理接口
-     * @param input_data 原始图像数据(YUYV/MJPEG)
-     * @param cam_w 原始图像宽度
-     * @param cam_h 原始图像高度
-     * @param external_rgb_buf 外部RGB缓冲区(格式转换专用)
-     * @param face_list 人脸检测结果输出
-     * @param format 输入图像格式
-     * @return 0成功/负数失败
+     * @brief   Run face detection inference
+     * @param   input_data      Pointer to raw input image data
+     * @param   cam_w           Original camera/image width
+     * @param   cam_h           Original camera/image height
+     * @param   external_rgb_buf External RGB buffer for format conversion
+     * @param   face_list       Output list of detected faces
+     * @param   format          Input image format (YUYV/MJPEG)
+     * @return  MNN_FACE_OK on success, negative error code on failure
+     * @pre     Module must be initialized (is_ready() == true)
+     * @pre     All input buffers must be valid and non-null
+     * @post    face_list contains valid detection results
+     * @note    Uses libyuv for hardware-accelerated image processing
+     * @thread_safety No
      */
     int detect(const uint8_t* input_data, 
                int cam_w, 
@@ -95,49 +166,79 @@ public:
                ImageFormat format = IMAGE_FORMAT_YUYV);
 
     /**
-     * @brief 将AI输出坐标映射回原始图像坐标
+     * @brief   Map model coordinates to original image resolution
+     * @param   face    Face result to be mapped
+     * @param   ai_w    Model input width
+     * @param   ai_h    Model input height
+     * @param   cam_w   Original image width
+     * @param   cam_h   Original image height
+     * @return  None
+     * @note    Static utility function, no instance dependency
+     * @thread_safety Yes
      */
     static void map_face_to_original(FaceInfo_MNN& face, int ai_w, int ai_h, int cam_w, int cam_h);
 
     /**
-     * @brief 反初始化，释放资源
+     * @brief   Release all MNN and memory resources
+     * @return  None
+     * @pre     Module must be initialized
+     * @post    Module enters non-ready state, all resources freed
+     * @thread_safety No
      */
     void deinit();
     
     /**
-     * @brief 获取模块初始化状态
+     * @brief   Check module initialization status
+     * @return  True = ready for inference, False = not initialized
+     * @thread_safety Yes
      */
     bool is_ready() const { return m_ready; }
 
 private:
-    // 生成候选框
+    /**
+     * @brief   Generate candidate bounding boxes from model output
+     * @param   bbox_collection  Output list of raw candidate boxes
+     * @param   scores            MNN tensor for confidence scores
+     * @param   boxes             MNN tensor for bounding box coordinates
+     * @return  None
+     * @details Decode model output using anchor boxes and variance parameters
+     */
     void generate_bbox(std::vector<FaceInfo_MNN>& bbox_collection, MNN::Tensor* scores, MNN::Tensor* boxes);
-    // 非极大值抑制
+
+    /**
+     * @brief   Non-Maximum Suppression (NMS) for redundant box removal
+     * @param   input   Raw candidate face boxes
+     * @param   output  Final filtered face results
+     * @return  None
+     * @details Sort boxes by score and suppress overlapping boxes
+     */
     void nms(std::vector<FaceInfo_MNN>& input, std::vector<FaceInfo_MNN>& output);
 
 private:
-    std::shared_ptr<MNN::Interpreter> m_interpreter;
-    MNN::Session* m_session;
-    MNN::Tensor* m_input_tensor;
+    // MNN Core Resources
+    std::shared_ptr<MNN::Interpreter> m_interpreter;  /**< MNN model interpreter */
+    MNN::Session* m_session;                          /**< MNN inference session */
+    MNN::Tensor* m_input_tensor;                      /**< MNN input image tensor */
 
-    int m_ai_w;
-    int m_ai_h;
-    int m_num_thread;
-    float m_score_thresh;
-    float m_iou_thresh;
-    bool m_ready;
+    // Model Configuration
+    int m_ai_w;                /**< Model input width */
+    int m_ai_h;                /**< Model input height */
+    int m_num_thread;          /**< Inference thread count */
+    float m_score_thresh;      /**< Face confidence threshold */
+    float m_iou_thresh;        /**< NMS IOU threshold */
+    bool m_ready;              /**< Module ready flag */
 
-    // 图像预处理参数
-    const float m_mean_vals[3]  = {127, 127, 127};
-    const float m_norm_vals[3] = {1.0f / 128, 1.0f / 128, 1.0f / 128};
+    // Image Preprocessing Parameters
+    const float m_mean_vals[3];    /**< RGB mean normalization values */
+    const float m_norm_vals[3];    /**< RGB scale normalization values */
     
-    // 模型锚框参数
-    const float m_center_variance = 0.1f;
-    const float m_size_variance   = 0.2f;
-    std::vector<std::vector<float>> m_min_boxes;
-    std::vector<float> m_strides;
-    std::vector<std::vector<float>> m_priors;
-    int m_num_anchors;
+    // Anchor Box Parameters (UltraFace Algorithm)
+    const float m_center_variance; /**< Center coordinate variance */
+    const float m_size_variance;   /**< Box size variance */
+    std::vector<std::vector<float>> m_min_boxes;  /**< Anchor box sizes */
+    std::vector<float> m_strides;                /**< Feature map strides */
+    std::vector<std::vector<float>> m_priors;     /**< Precomputed anchor priors */
+    int m_num_anchors;                            /**< Total anchor count */
 };
 
 /** @} */
