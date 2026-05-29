@@ -69,7 +69,7 @@
 #include "vision_ai_config.h"
 #include "ai_model_mnn.hpp"
 #include "initcall.h"
-#include "sd_storage.h"
+#include "img_storage.h"
 #include "thread.h"   // 新增：引入通用线程组件
 #include <stdlib.h>
 #include <string.h>
@@ -101,7 +101,7 @@ typedef struct {
     int                           face_num;              /* 检测到人脸数量 */
 
     /* SD卡存储 */
-    SdStorage_t                  *sd_storage;            /* SD卡存储句柄 */
+    ImgStorage_t                  *img_storage;            /* SD卡存储句柄 */
 
     /* 帧率控制：新增帧计数器 */
     uint32_t                      frame_sample_cnt;       /* 事件采样计数器 */
@@ -324,9 +324,9 @@ static void *face_work_thread(void *arg)
                                             result_rgb_data) )
             {
                 // SD卡保存
-                if (srv->sd_storage) 
+                if (srv->img_storage) 
                 {
-                    if(SdStorage_SaveJpeg(srv->sd_storage, result_rgb_data) == SD_STORAGE_OK)
+                    if(img_storage_save_jpeg(srv->img_storage, result_rgb_data) == IMG_STORAGE_OK)
                     {
                         
                     }
@@ -450,9 +450,9 @@ static void face_srv_cleanup(void)
     data_bus_deinit(FACE_RESULT_RGB_DATA_BUS);
 
     /* 释放SD卡 */
-    if (srv->sd_storage) {
-        SdStorage_Deinit(srv->sd_storage);
-        srv->sd_storage = NULL;
+    if (srv->img_storage) {
+        SdStorage_Deinit(srv->img_storage);
+        srv->img_storage = NULL;
     }
 
     led_base_turn_off(srv->s_led);
@@ -551,8 +551,8 @@ static int face_srv_init(void)
     }
 
     /* 初始化SD卡 */
-    srv->sd_storage = SdStorage_Init();
-    if (srv->sd_storage) {
+    srv->img_storage = img_storage_init();
+    if (srv->img_storage) {
         LOG_I(MODULE_TAG "SD卡存储初始化成功");
     } else {
         LOG_W(MODULE_TAG "SD卡存储初始化失败，将无法保存人脸图片");

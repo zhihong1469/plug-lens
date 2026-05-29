@@ -207,6 +207,8 @@ cd /root
 
 # 一键停止：优雅关闭看门狗、业务进程（防僵尸进程）
 ./run_on_board/auto/app_stop.sh
+
+tail -f /mnt/test/log/app.log
 ```
 
 ### 5.2 方案二：开机全自动自启（量产/无人值守）
