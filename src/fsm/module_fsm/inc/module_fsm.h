@@ -1,4 +1,66 @@
-// src/fsm/module_fsm/inc/module_fsm.h
+/* SPDX-License-Identifier: MIT */
+/**
+ ******************************************************************************
+ * @file           module_fsm.h
+ * @brief          Universal Base Finite State Machine for All Sub-Modules
+ * @defgroup       MODULE_FSM
+ * @details
+ * 【Module FSM Iron Rules】
+ *  1. Pure base class, NO specific business logic
+ *  2. State transition table & event handler provided by upper business layer
+ *  3. Full atomic state transition, thread-safe design
+ *  4. Opaque handle, fully encapsulated internal implementation
+ *  5. Callback decoupling: State change notify for Global FSM/Event Bus
+ *
+ * 【Core Features】
+ *  1. Universal state/event definition for all sub-modules
+ *  2. Configurable state transition table (business-defined)
+ *  3. Thread-safe event post & state query
+ *  4. State change callback (seamless connect to Global FSM)
+ *  5. Lock-free callback execution to avoid deadlock
+ *
+ * @example
+ *  // ========== 1. Define Business State Transition Table ==========
+ *  static const module_state_trans_t g_capture_trans[] = {
+ *      {MODULE_STATE_IDLE,    MODULE_EVENT_INIT,    MODULE_STATE_INITIALIZING},
+ *      {MODULE_STATE_INITIALIZING, MODULE_EVENT_INIT_OK, MODULE_STATE_READY},
+ *      {MODULE_STATE_READY,   MODULE_EVENT_START,   MODULE_STATE_RUNNING},
+ *      {MODULE_STATE_RUNNING, MODULE_EVENT_STOP,    MODULE_STATE_IDLE},
+ *      {MODULE_STATE_RUNNING, MODULE_EVENT_ERROR,   MODULE_STATE_ERROR},
+ *  };
+ * 
+ *  // ========== 2. Business Event Handler ==========
+ *  int capture_event_handler(module_event_t event, void *user_data) {
+ *      // Execute business logic here (non-blocking)
+ *      return 0; // 0=allow transition, non-0=reject
+ *  }
+ * 
+ *  // ========== 3. Create Module FSM ==========
+ *  module_fsm_handle_t capture_fsm;
+ *  module_fsm_config_t cfg = {
+ *      .module_name    = "CAPTURE",
+ *      .trans_table    = g_capture_trans,
+ *      .trans_table_len = sizeof(g_capture_trans)/sizeof(module_state_trans_t),
+ *      .event_handler  = capture_event_handler,
+ *      .state_cb       = global_fsm_on_module_state_change, // Bind to Global FSM
+ *      .user_data      = global_fsm_handle,
+ *  };
+ *  module_fsm_create(&cfg, &capture_fsm);
+ * 
+ *  // ========== 4. Post Event to Drive State ==========
+ *  module_fsm_post_event(capture_fsm, MODULE_EVENT_INIT);
+ * 
+ *  // ========== 5. Get State/Name ==========
+ *  module_state_t state = module_fsm_get_state(capture_fsm);
+ *  const char *name = module_fsm_get_name(capture_fsm);
+ * 
+ *  // ========== 6. Destroy FSM ==========
+ *  module_fsm_destroy(capture_fsm);
+ * 
+ * @author         luo
+ * @date           2026
+ ******************************************************************************
+ */
 #ifndef MODULE_FSM_H
 #define MODULE_FSM_H
 
@@ -7,80 +69,70 @@
 #include <pthread.h>
 
 // ==========================================================================
-// 【Module FSM 铁律】
-// 1. 纯基类，不包含任何具体业务逻辑
-// 2. 具体业务逻辑（迁移表、事件处理）由上层通过配置传入
-// 3. 状态迁移全程原子性，线程安全
-// ==========================================================================
-
-// ==========================================================================
-// 1. 不透明句柄（内部实现完全封装）
+// Opaque Handle (Fully encapsulated internal implementation)
 // ==========================================================================
 typedef void* module_fsm_handle_t;
 
 // ==========================================================================
-// 2. 通用模块状态枚举（所有子模块共用）
+// Universal Module States (Shared by ALL sub-modules)
 // ==========================================================================
 typedef enum {
     MODULE_STATE_INVALID = 0,
-    MODULE_STATE_IDLE,           // 空闲（已创建，未初始化）
-    MODULE_STATE_INITIALIZING,   // 初始化中
-    MODULE_STATE_READY,          // 就绪（等待启动指令）
-    MODULE_STATE_STARTING,       // 启动中
-    MODULE_STATE_RUNNING,        // 运行中
-    MODULE_STATE_PAUSING,        // 暂停中
-    MODULE_STATE_PAUSED,         // 已暂停
-    MODULE_STATE_STOPPING,       // 停止中
-    MODULE_STATE_ERROR,          // 异常
-    MODULE_STATE_DEINITIALIZING, // 销毁中
-    MODULE_STATE_DEINIT,         // 已销毁
+    MODULE_STATE_IDLE,           /**< Idle (created, not initialized) */
+    MODULE_STATE_INITIALIZING,   /**< Initializing */
+    MODULE_STATE_READY,          /**< Ready (wait for start command) */
+    MODULE_STATE_STARTING,       /**< Starting */
+    MODULE_STATE_RUNNING,        /**< Running */
+    MODULE_STATE_PAUSING,        /**< Pausing */
+    MODULE_STATE_PAUSED,         /**< Paused */
+    MODULE_STATE_STOPPING,       /**< Stopping */
+    MODULE_STATE_ERROR,          /**< Error state */
+    MODULE_STATE_DEINITIALIZING, /**< De-initializing */
+    MODULE_STATE_DEINIT,         /**< De-initialized */
     MODULE_STATE_MAX
 } module_state_t;
 
 // ==========================================================================
-// 3. 通用模块事件枚举（驱动状态流转）
+// Universal Module Events (Drive state transition)
 // ==========================================================================
 typedef enum {
     MODULE_EVENT_INVALID = 0,
-    MODULE_EVENT_INIT,           // 初始化指令
-    MODULE_EVENT_INIT_OK,        // 初始化完成
-    MODULE_EVENT_INIT_FAIL,      // 初始化失败
-    MODULE_EVENT_START,          // 启动指令
-    MODULE_EVENT_START_OK,       // 启动完成
-    MODULE_EVENT_START_FAIL,     // 启动失败
-    MODULE_EVENT_PAUSE,          // 暂停指令
-    MODULE_EVENT_PAUSE_OK,       // 暂停完成
-    MODULE_EVENT_RESUME,         // 恢复指令
-    MODULE_EVENT_RESUME_OK,      // 恢复完成
-    MODULE_EVENT_STOP,           // 停止指令
-    MODULE_EVENT_STOP_OK,        // 停止完成
-    MODULE_EVENT_ERROR,          // 异常上报
-    MODULE_EVENT_ERROR_CLEAR,    // 异常清除
-    MODULE_EVENT_DEINIT,         // 销毁指令
-    MODULE_EVENT_DEINIT_OK,      // 销毁完成
+    MODULE_EVENT_INIT,           /**< Init command */
+    MODULE_EVENT_INIT_OK,        /**< Init success */
+    MODULE_EVENT_INIT_FAIL,      /**< Init failed */
+    MODULE_EVENT_START,          /**< Start command */
+    MODULE_EVENT_START_OK,       /**< Start success */
+    MODULE_EVENT_START_FAIL,     /**< Start failed */
+    MODULE_EVENT_PAUSE,          /**< Pause command */
+    MODULE_EVENT_PAUSE_OK,       /**< Pause success */
+    MODULE_EVENT_RESUME,         /**< Resume command */
+    MODULE_EVENT_RESUME_OK,      /**< Resume success */
+    MODULE_EVENT_STOP,           /**< Stop command */
+    MODULE_EVENT_STOP_OK,        /**< Stop success */
+    MODULE_EVENT_ERROR,          /**< Error report */
+    MODULE_EVENT_ERROR_CLEAR,    /**< Error clear */
+    MODULE_EVENT_DEINIT,         /**< Deinit command */
+    MODULE_EVENT_DEINIT_OK,      /**< Deinit success */
     MODULE_EVENT_MAX
 } module_event_t;
 
 // ==========================================================================
-// 4. 状态迁移规则结构体（由具体业务层定义）
+// State Transition Rule (Defined by business layer)
 // ==========================================================================
 typedef struct {
-    module_state_t current_state; // 当前状态
-    module_event_t event;          // 触发事件
-    module_state_t next_state;     // 目标状态
+    module_state_t current_state; /**< Current state */
+    module_event_t  event;         /**< Trigger event */
+    module_state_t next_state;     /**< Target state */
 } module_state_trans_t;
 
 // ==========================================================================
-// 5. 事件处理回调（由具体业务层实现，执行业务逻辑）
-// 
-// 返回值：
-//   0  - 允许状态迁移
-//   非0 - 禁止状态迁移（业务逻辑执行失败）
+// Business Event Handler (Implemented by business layer)
+// Return: 0=allow transition, non-0=reject transition
 // ==========================================================================
 typedef int (*module_event_handler_t)(module_event_t event, void *user_data);
 
 // ==========================================================================
-// 6. 状态变化通知回调（由上层绑定，用于通知 Global FSM 或 Event Bus）
+// State Change Callback (Notify Global FSM/Event Bus)
 // ==========================================================================
 typedef void (*module_state_change_cb_t)(const char *module_name,
                                           module_state_t old_state,
@@ -88,70 +140,70 @@ typedef void (*module_state_change_cb_t)(const char *module_name,
                                           void *user_data);
 
 // ==========================================================================
-// 7. Module FSM 配置结构体
+// Module FSM Configuration
 // ==========================================================================
 typedef struct {
-    const char *module_name;                // 模块名称（唯一标识）
-    const module_state_trans_t *trans_table; // 状态迁移表（由业务层提供）
-    uint32_t trans_table_len;                // 迁移表长度
-    module_event_handler_t event_handler;    // 事件处理回调（业务逻辑）
-    module_state_change_cb_t state_cb;       // 状态变化通知回调（上层）
-    void *user_data;                          // 用户数据（透传）
+    const char               *module_name;        /**< Unique module name */
+    const module_state_trans_t *trans_table;      /**< State transition table */
+    uint32_t                  trans_table_len;     /**< Transition table length */
+    module_event_handler_t    event_handler;       /**< Business event handler */
+    module_state_change_cb_t  state_cb;            /**< State change notify cb */
+    void                     *user_data;           /**< Private user data */
 } module_fsm_config_t;
 
 // ==========================================================================
-// 8. 【核心】通用接口
+// Public Core APIs
 // ==========================================================================
 
 /**
- * @brief 创建模块状态机
- * @param config 配置（包含业务层提供的迁移表和回调）
- * @param out_handle 输出句柄
- * @return 0成功，非0失败
+ * @brief  Create module FSM instance
+ * @param  config     FSM configuration (business-defined)
+ * @param  out_handle Output FSM handle
+ * @return 0=success, negative=failure
  */
 int module_fsm_create(const module_fsm_config_t *config,
                       module_fsm_handle_t *out_handle);
 
 /**
- * @brief 投递事件（驱动状态流转的唯一入口）
- * @param handle 句柄
- * @param event 事件
- * @return 0成功（允许迁移），非0失败（禁止迁移或参数错误）
+ * @brief  Post event to drive state transition (ONLY entry)
+ * @param  handle  Module FSM handle
+ * @param  event   Trigger event
+ * @return 0=success(allow trans), non-0=failure(reject trans)
  */
 int module_fsm_post_event(module_fsm_handle_t handle, module_event_t event);
 
 /**
- * @brief 获取当前状态
- * @param handle 句柄
- * @return 当前状态
+ * @brief  Get current module state
+ * @param  handle  Module FSM handle
+ * @return Current state
  */
 module_state_t module_fsm_get_state(module_fsm_handle_t handle);
 
 /**
- * @brief 获取模块名称
- * @param handle 句柄
- * @return 模块名称
+ * @brief  Get module unique name
+ * @param  handle  Module FSM handle
+ * @return Module name string
  */
 const char* module_fsm_get_name(module_fsm_handle_t handle);
 
 /**
- * @brief 销毁模块状态机
- * @param handle 句柄
- * @return 0成功，非0失败
+ * @brief  Destroy module FSM, release resources
+ * @param  handle  Module FSM handle
+ * @return 0=success, negative=failure
  */
 int module_fsm_destroy(module_fsm_handle_t handle);
 
 /**
- * @brief 【辅助】状态转字符串
- * @param state 状态
- * @return 字符串
+ * @brief  Convert module state to string (for log)
+ * @param  state  Module state enum
+ * @return State name string
  */
 const char* module_state_to_str(module_state_t state);
 
 /**
- * @brief 【辅助】事件转字符串
- * @param event 事件
- * @return 字符串
+ * @brief  Convert module event to string (for log)
+ * @param  event  Module event enum
+ * @return Event name string
  */
 const char* module_event_to_str(module_event_t event);
 

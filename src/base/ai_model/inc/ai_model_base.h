@@ -1,10 +1,20 @@
-/*
-1. AI 模块生命周期
-create：仅创建句柄、分配内存不加载模型
-init：真正加载模型、初始化硬件、赋值全局指针（核心步骤）
-infer：执行推理
-deinit：释放资源
-*/
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    ai_model_base.h
+ * @brief   AI Model Universal Abstract Base Class
+ * @details Cross-inference engine unified abstract interface (MNN/RKNN/TFLite),
+ *          C-OOP polymorphic design, business layer is unaware of inference engine differences
+ * @author  LuoZhihong
+ * @date    2026-05-31
+ *
+ * @note
+ * 1. AI Module Lifecycle
+ *    create: Allocate handle & memory only, NO model loading
+ *    init:   Load model, initialize hardware, assign global pointers (CORE STEP)
+ *    infer:  Run model inference
+ *    deinit: Release all resources
+ */
+
 #ifndef __AI_MODEL_BASE_H
 #define __AI_MODEL_BASE_H
 
@@ -13,141 +23,141 @@ deinit：释放资源
 #include <stddef.h>
 
 /**
- * @defgroup ai_model_base AI模型通用抽象基类
- * @brief 跨推理库统一抽象接口（MNN/RKNN/TFLite），C-OOP多态设计
- * @note  纯C接口，上层业务无感知推理库差异
+ * @defgroup ai_model_base AI Model Universal Abstract Base Class
+ * @brief Cross-inference library unified abstract interface (MNN/RKNN/TFLite), C-OOP polymorphic design
+ * @note  Pure C interface, upper business layer has no perception of inference library differences
  * @{
  */
 
 // ==========================
-// 统一错误码（所有AI模型通用）
+// Universal Error Code (All AI Models)
 // ==========================
 /**
- * @brief AI模型通用错误码
+ * @brief AI model universal error code
  */
 typedef enum {
-    AI_MODEL_OK        = 0,    /**< 操作成功 */
-    AI_MODEL_ERR_PARAM = -1,   /**< 输入参数错误 */
-    AI_MODEL_ERR_INIT  = -2,   /**< 模块初始化失败 */
-    AI_MODEL_ERR_LOAD  = -3,   /**< 模型文件加载失败 */
-    AI_MODEL_ERR_INFER = -4,   /**< 推理执行失败 */
-    AI_MODEL_ERR_NO_MEM = -5,  /**< 内存分配失败 */
+    AI_MODEL_OK        = 0,    /**< Operation successful */
+    AI_MODEL_ERR_PARAM = -1,   /**< Invalid input parameter */
+    AI_MODEL_ERR_INIT  = -2,   /**< Module initialization failed */
+    AI_MODEL_ERR_LOAD  = -3,   /**< Model file loading failed */
+    AI_MODEL_ERR_INFER = -4,   /**< Inference execution failed */
+    AI_MODEL_ERR_NO_MEM = -5,  /**< Memory allocation failed */
 } ai_model_err_t;
 
 // ==========================
-// 统一AI配置（所有模型通用）
+// Universal AI Configuration (All Models)
 // ==========================
 /**
- * @brief AI模型通用配置结构体
- * @note  所有检测模型（人脸/目标）共用配置
+ * @brief AI model universal configuration structure
+ * @note  Shared by all detection models (face/object detection)
  */
 typedef struct {
-    const char      *model_path;       // 模型路径 8/4B
-    uint32_t         input_width;      // 输入宽度 4B
-    uint32_t         input_height;     // 输入高度 4B
-    float            score_thresh;     // 置信度阈值 4B
-    float            iou_thresh;       // NMS阈值 4B
+    const char      *model_path;       /**< Model file path */
+    uint32_t         input_width;      /**< Model input width */
+    uint32_t         input_height;     /**< Model input height */
+    float            score_thresh;     /**< Confidence threshold */
+    float            iou_thresh;       /**< NMS threshold */
 } ai_model_config_t;
 
 // ==========================
-// 统一检测结果结构
+// Universal Detection Result Structure
 // ==========================
 /**
- * @brief AI通用检测结果
- * @note  人脸检测、目标检测通用输出格式
+ * @brief AI universal detection result
+ * @note  Common output format for face/object detection
  */
 typedef struct {
-    float x1, y1, x2, y2;     /**< 检测框坐标（左上角/右下角）*/
-    float score;              /**< 置信度分数 0~1 */
-    int   class_id;           /**< 类别ID（人脸固定为0）*/
+    float x1, y1, x2, y2;     /**< Bounding box coordinates (top-left / bottom-right) */
+    float score;              /**< Confidence score 0~1 */
+    int   class_id;           /**< Class ID (0 for face detection) */
 } ai_model_detect_result_t;
 
-// --------------------- C-OOP 基类核心 ---------------------
-// 前向声明
+// --------------------- C-OOP Base Class Core ---------------------
+// Forward declaration
 typedef struct ai_model_ops ai_model_ops_t;
 
 /**
- * @brief AI模型基类句柄（对外隐藏实现）
- * @note  上层业务仅操作该句柄，无需关心内部实现
+ * @brief AI model base class handle (Implementation hidden externally)
+ * @note  Upper business layer only operates this handle, no internal details required
  */
 typedef struct {
-    const ai_model_ops_t *ops;        /**< 多态操作函数表 */
-    ai_model_config_t config;         /**< 模型配置副本 */
-    void *user_data;                  /**< 子类私有数据（MNN/RKNN内部句柄）*/
+    const ai_model_ops_t *ops;        /**< Polymorphic operation function table */
+    ai_model_config_t config;         /**< Model configuration copy */
+    void *user_data;                  /**< Subclass private data (MNN/RKNN internal handles) */
 } ai_model_handle_t;
 
 /**
- * @brief 通用虚函数表（推理库必须实现）
- * @note  所有AI推理后端的统一接口契约
+ * @brief Universal virtual function table (Must be implemented by inference backends)
+ * @note  Unified interface contract for all AI inference backends
  */
 struct ai_model_ops {
-    /** @brief 初始化模型（加载文件、创建资源）*/
+    /** @brief Initialize model (Load file, create resources) */
     ai_model_err_t (*init)(ai_model_handle_t *handle);
-    /** @brief 输入图像数据（支持YUYV/RGB/NV12）*/
+    /** @brief Input image data (Support YUYV/RGB/NV12) */
     ai_model_err_t (*input)(ai_model_handle_t *handle, uint8_t *data, uint32_t len);
-    /** @brief 执行推理 */
+    /** @brief Run inference */
     ai_model_err_t (*infer)(ai_model_handle_t *handle);
-    /** @brief 获取推理结果 */
+    /** @brief Get inference results */
     ai_model_err_t (*get_result)(ai_model_handle_t *handle, ai_model_detect_result_t *results, uint32_t *result_count);
-    /** @brief 反初始化（释放资源）*/
+    /** @brief Deinitialize (Release resources) */
     ai_model_err_t (*deinit)(ai_model_handle_t *handle);
 };
 
-// --------------------- 对外通用API ---------------------
+// --------------------- Public Universal API ---------------------
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * @brief 创建AI模型实例
- * @param config 模型配置
- * @param ops 子类操作函数表
- * @return 成功返回句柄，失败返回NULL
+ * @brief  Create AI model instance
+ * @param  config  Model configuration
+ * @param  ops     Subclass operation function table
+ * @return Handle on success, NULL on failure
  */
 ai_model_handle_t *ai_model_create(const ai_model_config_t *config, const ai_model_ops_t *ops);
 
 /**
- * @brief 销毁AI模型实例
- * @param handle 模型句柄
+ * @brief  Destroy AI model instance
+ * @param  handle  Model handle
  */
 void ai_model_destroy(ai_model_handle_t *handle);
 
 /**
- * @brief 初始化模型（调用子类init）
- * @param handle 模型句柄
- * @return 错误码
+ * @brief  Initialize model (Call subclass init)
+ * @param  handle  Model handle
+ * @return Error code
  */
 ai_model_err_t ai_model_init(ai_model_handle_t *handle);
 
 /**
- * @brief 输入图像数据
- * @param handle 模型句柄
- * @param data 图像数据指针
- * @param len 数据长度
- * @return 错误码
+ * @brief  Input image data
+ * @param  handle  Model handle
+ * @param  data    Image data pointer
+ * @param  len     Data length
+ * @return Error code
  */
 ai_model_err_t ai_model_input(ai_model_handle_t *handle, uint8_t *data, uint32_t len);
 
 /**
- * @brief 执行推理
- * @param handle 模型句柄
- * @return 错误码
+ * @brief  Run model inference
+ * @param  handle  Model handle
+ * @return Error code
  */
 ai_model_err_t ai_model_infer(ai_model_handle_t *handle);
 
 /**
- * @brief 获取检测结果
- * @param handle 模型句柄
- * @param results 结果数组
- * @param result_count 实际结果数量
- * @return 错误码
+ * @brief  Get detection results
+ * @param  handle        Model handle
+ * @param  results       Result array
+ * @param  result_count  Actual result count
+ * @return Error code
  */
 ai_model_err_t ai_model_get_result(ai_model_handle_t *handle, ai_model_detect_result_t *results, uint32_t *result_count);
 
 /**
- * @brief 反初始化模型
- * @param handle 模型句柄
- * @return 错误码
+ * @brief  Deinitialize model
+ * @param  handle  Model handle
+ * @return Error code
  */
 ai_model_err_t ai_model_deinit(ai_model_handle_t *handle);
 

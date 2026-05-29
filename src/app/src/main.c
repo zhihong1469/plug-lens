@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: MIT */
 /**
- * @file main.c
- * @brief 轻量化系统主入口（纯底层框架，无业务代码）
- * @details 职责：日志/信号/双总线/优雅退出/系统硬件(SD)初始化
- *          业务模块通过事件总线交互，main永久不变
- *          仅处理系统级异常,并通过事件总线发布通知,业务模块自行处理
- *          【边界约定】SD卡挂载/卸载 = 系统级硬件管理 | 图片存储 = 业务逻辑（main不处理）
- * @author Luo
- * @date 2026-05-31
+ * @file    main.c
+ * @brief   Lightweight system main entry (Pure low-level framework, no business code)
+ * @details Responsibilities: Log/Signal/Dual-bus/Graceful exit/System hardware(SD) initialization
+ *          Business modules interact via event bus, main remains unchanged permanently
+ *          Only handle system-level exceptions and publish notifications via event bus,
+ *          business modules handle processing independently
+ *          @b Boundary Convention: SD mount/umount = System hardware management | Image storage = Business logic (Not handled in main)
+ * @author  LuoZhihong
+ * @date    2026-05-31
  */
 
 #include <stdio.h>
@@ -23,9 +24,9 @@
 #include "initcall.h"
 #include "event_bus.h"
 #include "data_bus.h"
-#include "mem_adapter.h"  // 新增：TLSF内存适配层头文件
+#include "mem_adapter.h"  // New: TLSF memory adapter layer header
 #include "daemon.h"  
-// 引入新增组件头文件
+// New component headers
 #include "sd_mount.h"
 #include "config_common.h"
 #include "network_check.h"
@@ -35,44 +36,44 @@
 #define MODULE_TAG                "[MAIN]"
 
 // ==================================================================================
-// 【框架约定】系统级总线固定名称（全局唯一，业务模块统一订阅）
+// @brief Framework Convention: Fixed system-level bus names (Global unique, subscribed by all business modules)
 // ==================================================================================
-#define MAIN_EVENT_BUS_NAME    SYS_EVENT_BUS_NAME    // 系统事件总线名称
+#define MAIN_EVENT_BUS_NAME    SYS_EVENT_BUS_NAME    // System event bus name
 
 // ==================================================================================
-// 【核心新增】TLSF静态内存池配置（嵌入式Linux 生产级大小）
-// 大小规划：256MB = 32帧视频(128MB) + 事件总线/模块内存(64MB) + 冗余余量(64MB)
-// 可根据硬件调整：128MB / 64MB
+// @brief Core New: TLSF static memory pool configuration (Embedded Linux production size)
+//        Size Planning: 256MB = 32 Video Frames(128MB) + Bus/Module Memory(64MB) + Redundancy(64MB)
+//        Adjustable based on hardware: 128MB / 64MB
 // ==================================================================================
-#define MEM_POOL_SIZE         (40 * 1024 * 1024UL)  // x MB 静态内存池
-static uint8_t s_mem_pool[MEM_POOL_SIZE] __attribute__((aligned(8))); // 8字节对齐，TLSF要求
+#define MEM_POOL_SIZE         (40 * 1024 * 1024UL)  // x MB Static memory pool
+static uint8_t s_mem_pool[MEM_POOL_SIZE] __attribute__((aligned(8))); // 8-byte alignment, required by TLSF
 
 // ==================================================================================
-// 全局上下文：仅保留系统底层资源，无任何业务变量 + 无总线句柄（已删除）
-// 对外隐藏，具体共用指针由初始化完成后对应模块执行保留句柄,模块内部API获取句柄，彻底杜绝全局变量滥用
+// @brief Global context: Only retain system low-level resources, NO business variables + NO bus handles (Removed)
+//        Fully hidden externally, module internal APIs get handles, completely eliminate global variable abuse
 // ==================================================================================
 typedef struct {
-    // 系统级优雅退出管道（线程/信号安全）
+    // System-level graceful exit pipe (Thread/Signal safe)
     int                     exit_pipe[2];
 
-    // 终端配置（调试用）
+    // Terminal configuration (Debug use)
     struct termios          old_termios;
     bool                    termios_saved;
 
-    // main内部运行标记
+    // Main internal running flag
     volatile bool           app_running;
 } app_context_t;
 
-// 极简全局上下文（内部静态，对外完全隐藏）
+// Minimal global context (Static internal, fully hidden externally)
 static app_context_t g_app_ctx = {0};
 
 // ==========================================================================
-// 【新增】Main层私有：系统事件统一发布接口（纯底层，无业务逻辑）
-// 遵循V4.0：Main仅发布系统级事件，不感知业务模块 | 适配新总线：按名称发布
+// @brief New: Main private - System event unified publish interface (Pure low-level, no business logic)
+//        Follow V4.0: Main only publishes system events, no perception of business modules | Adapt new bus: Publish by name
 // ==========================================================================
 static void app_publish_sys_event(event_type_t type)
 {
-    // 直接通过总线名称调用，main不持有任何句柄
+    // Call directly by bus name, main holds NO handles
     int ret = event_bus_publish_simple(MAIN_EVENT_BUS_NAME, type, "MAIN");
     if (ret != 0) {
         LOG_E("Main: Failed to publish sys event: %s", event_type_to_str(type));
@@ -82,7 +83,7 @@ static void app_publish_sys_event(event_type_t type)
 }
 
 // ==========================================================================
-// 终端 底层基建（内部使用）
+// @brief Terminal low-level infrastructure (Internal use)
 // ==========================================================================
 static void app_set_terminal_noncanonical(void)
 {
@@ -91,7 +92,7 @@ static void app_set_terminal_noncanonical(void)
         g_app_ctx.termios_saved = true;
         new_termios = g_app_ctx.old_termios;
         
-        // 修复BUG：非规范模式标准配置，移除重复赋值
+        // Bug fix: Standard non-canonical mode config, remove duplicate assignment
         new_termios.c_lflag &= ~(ICANON | ECHO); 
         new_termios.c_cc[VMIN] = 0;
         new_termios.c_cc[VTIME] = 0;
@@ -112,7 +113,7 @@ static void app_restore_terminal_safe(void)
 }
 
 // ==========================================================================
-// 退出Pipe 底层基建（系统级安全退出）
+// @brief Exit pipe low-level infrastructure (System-level safe exit)
 // ==========================================================================
 static int app_exit_pipe_init(void)
 {
@@ -130,7 +131,7 @@ void app_trigger_soft_exit(void)
     (void)write(g_app_ctx.exit_pipe[1], &sig, 1);
     g_app_ctx.app_running = false;
     
-    // 【新增】触发软退出时，广播系统关机事件
+    // New: Broadcast system shutdown event on soft exit
     app_publish_sys_event(EVENT_TYPE_SYS_SHUTDOWN);
 }
 
@@ -142,12 +143,12 @@ static void app_exit_pipe_deinit(void)
 }
 
 // ==========================================================================
-// 信号处理（Ctrl+C / 崩溃 安全处理）
+// @brief Signal handling (Ctrl+C / Crash safe processing)
 // ==========================================================================
 static void _signal_handler(int sig)
 {
     (void)sig;
-    // 【新增】普通信号退出，发布系统关机事件
+    // New: Normal signal exit, publish system shutdown event
     app_publish_sys_event(EVENT_TYPE_SYS_SHUTDOWN);
     app_trigger_soft_exit();
 }
@@ -158,7 +159,7 @@ static void _crash_signal_handler(int sig)
     const char *msg = "\n[Fatal] System crash, cleaning up...\n";
     (void)write(STDERR_FILENO, msg, strlen(msg));
     
-    // 【新增】系统崩溃，发布致命错误事件（最高优先级系统通知）
+    // New: System crash, publish fatal error event (Highest priority system notification)
     app_publish_sys_event(EVENT_TYPE_SYS_ERROR);
     
     app_trigger_soft_exit();
@@ -174,35 +175,35 @@ static void _init_signal_handling(void)
     sigfillset(&sa.sa_mask);
 
     // ==============================================
-    // 【模式1：调试模式（前台运行）】
-    // 响应 Ctrl+C + 系统关机，忽略网络断开信号
+    // Mode 1: Debug Mode (Foreground running)
+    // Respond to Ctrl+C + System shutdown, ignore network disconnect signals
     // ==============================================
 #if !RUN_PRODUCT_MODE
-    sigaction(SIGINT, &sa, NULL);   // 支持 Ctrl+C 退出
-    sigaction(SIGTERM, &sa, NULL);  // 支持系统关机优雅退出
+    sigaction(SIGINT, &sa, NULL);   // Support Ctrl+C exit
+    sigaction(SIGTERM, &sa, NULL);  // Support system shutdown graceful exit
 
-    // 【必加】忽略网络断开信号，防止RTSP客户端断开导致程序崩溃
+    // Mandatory: Ignore network disconnect signal, prevent crash on RTSP client disconnect
     signal(SIGPIPE, SIG_IGN);
 
 // ==============================================
-// 【模式2：产品模式（守护进程/后台运行）】
-    // 忽略所有终端相关信号，仅响应系统关机和崩溃
-    // ==============================================
+// Mode 2: Product Mode (Daemon/Background running)
+// Ignore all terminal signals, only respond to system shutdown and crash
+// ==============================================
 #else
-    // 【核心修复】忽略终端挂断信号（根治后台运行被杀死）
+    // Core fix: Ignore terminal hangup signal (Permanently fix background kill issue)
     signal(SIGHUP, SIG_IGN);
     
-    // 忽略 Ctrl+C（守护进程无终端，永远收不到）
+    // Ignore Ctrl+C (Daemon has no terminal, never receives)
     signal(SIGINT, SIG_IGN);
     
-    // 忽略网络断开信号
+    // Ignore network disconnect signal
     signal(SIGPIPE, SIG_IGN);
     
-    // 仅保留系统关机信号（reboot/halt 时优雅退出）
+    // Only retain system shutdown signal (Graceful exit on reboot/halt)
     sigaction(SIGTERM, &sa, NULL);
 #endif
 
-    // 崩溃信号：两种模式都必须处理
+    // Crash signals: Must be handled in both modes
     struct sigaction sa_crash;
     sa_crash.sa_handler = _crash_signal_handler;
     sa_crash.sa_flags = 0;
@@ -215,7 +216,8 @@ static void _init_signal_handling(void)
 }
 
 // ==========================================================================
-// 双总线初始化（事件+数据，核心底层）| 适配新API：按名称初始化，无句柄存储
+// @brief Dual bus initialization (Event + Data, Core low-level)
+//        Adapt new API: Initialize by name, NO handle storage
 // ==========================================================================
 static int _main_init_buses(void)
 {
@@ -236,23 +238,23 @@ static int _main_init_buses(void)
 }
 
 // ==========================================================================
-// 统一资源清理（系统级安全退出）
+// @brief Unified resource cleanup (System-level safe exit)
 // ==========================================================================
 static void _cleanup_resources(void)
 {
     LOG_I("Main: Starting resource cleanup...");
 
-    // ===================== 系统级安全操作：磁盘同步 =====================
-    // 作用：刷新所有文件系统缓存，防止数据损坏（工业级必需，非业务操作）
+    // ===================== System-level safe operation: Disk sync =====================
+    // Function: Flush all filesystem cache, prevent data corruption (Industrial mandatory, non-business operation)
     sync();
-    // ===================== 系统级硬件清理：SD卡安全卸载 =====================
-    // 边界：仅卸载SD卡介质，业务层存储模块已通过SYS_SHUTDOWN事件自行清理
+    // ===================== System-level hardware cleanup: SD card safe umount =====================
+    // Boundary: Only unmount SD media, business storage modules have self-cleaned via SYS_SHUTDOWN event
 #if USE_SD
     SdMount_Deinit();
 #endif
     app_restore_terminal_safe();
     
-    // 优化：清理顺序与初始化严格反向（事件总线 → 数据总线）
+    // Optimization: Cleanup order strictly reversed from initialization (Event bus → Data bus)
     event_bus_deinit(MAIN_EVENT_BUS_NAME);
     app_exit_pipe_deinit();
 
@@ -260,17 +262,17 @@ static void _cleanup_resources(void)
 }
 
 // ==========================================================================
-// 主函数：纯底层框架，零业务代码
+// @brief Main function: Pure low-level framework, ZERO business code
 // ==========================================================================
 int main(int argc, char **argv)
 {
     memset(&g_app_ctx, 0, sizeof(g_app_ctx));
     g_app_ctx.app_running = true;
 
-    // 1. 日志初始化（第一步，必须最先）
+    // 1. Log initialization (First step, mandatory)
     log_init(LOG_LEVEL_INFO);
 
-    // 系统级硬件初始化：SD卡自动挂载
+    // System-level hardware initialization: SD auto mount
 #if USE_SD
     sd_state_t sd_state = SdMount_Init();
     if (sd_state == SD_MOUNTED) {
@@ -285,29 +287,29 @@ int main(int argc, char **argv)
     LOG_I("Main: ========================================");
 
 // ==============================================
-// 【模式切换】产品模式才开启守护进程
+// Mode Switch: Enable daemon only in product mode
 // ==============================================
 #if USE_SH == 0
     #if RUN_PRODUCT_MODE
         LOG_I("Main: Creating daemon...");
-        // ===================== 【修复3】调用顺序：先创建守护进程 =====================
+        // ===================== Fix 3: Call order: Create daemon first =====================
         if (create_daemon() < 0) {
             LOG_E("Main: Failed to create daemon");
             return -1;
         }
-        // ===================== 【修复4】后开启日志守护模式 =====================
-        log_set_daemon_mode(1);  // 守护进程创建完成后，再设置仅写文件
+        // ===================== Fix 4: Enable log daemon mode after =====================
+        log_set_daemon_mode(1);  // Set file-only log after daemon creation
     #else
-        LOG_I("Main: 调试模式 - 前台运行，支持键盘控制");
+        LOG_I("Main: Debug mode - Foreground running, keyboard control supported");
     #endif
 #endif
 
-    // 2. 初始化TLSF静态内存池
+    // 2. Initialize TLSF static memory pool
     LOG_I("Main: Initializing TLSF static memory pool (Size: %zu MB)", MEM_POOL_SIZE / 1024 / 1024);
     mem_init(s_mem_pool, MEM_POOL_SIZE);
     LOG_I("Main: TLSF memory pool init success!");
 
-// ===================== 网络 + 时间同步逻辑 =====================
+// ===================== Network + Time Sync Logic =====================
 #if USE_NET_CHECK
     LOG_I("Main: Start network status check...");
 
@@ -355,27 +357,28 @@ int main(int argc, char **argv)
 #endif
 #endif
 
-    // 3. 系统底层初始化 【重要】信号初始化必须在守护进程创建之后
-    // 原因：fork() 会继承父进程的信号处理，守护进程需要自己独立的信号策略
+    // 3. System low-level initialization
+    // Important: Signal initialization MUST be after daemon creation
+    // Reason: fork() inherits parent signal handling, daemon needs independent signal strategy
     _init_signal_handling();
     if(app_exit_pipe_init() < 0) goto error_exit;
     app_set_terminal_noncanonical();
 
-    // 4. 核心总线初始化
+    // 4. Core bus initialization
     if (_main_init_buses() != 0) goto error_exit;
 
     app_publish_sys_event(EVENT_TYPE_SYS_CORE_READY);
 
-    // 5. 自动加载所有业务模块
+    // 5. Auto-load all business modules
     do_initcalls();
 
-    // 6. 主循环
+    // 6. Main loop
     LOG_I("Main: System running, waiting for exit signal...");
     while (g_app_ctx.app_running) {
-        pause(); // 零CPU占用
+        pause(); // Zero CPU usage
     }
 
-    // 正常退出
+    // Normal exit
     LOG_I("Main: Application exited normally");
     _cleanup_resources();
     log_deinit();

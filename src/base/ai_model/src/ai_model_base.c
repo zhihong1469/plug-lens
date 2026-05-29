@@ -1,8 +1,19 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    ai_model_base.c
+ * @brief   AI Model Base Class Implementation
+ * @details Universal base logic for C-OOP polymorphic AI models
+ * @author  LuoZhihong
+ */
+
 #include "ai_model_base.h"
 #include "mem_adapter.h"
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief Create AI model instance (Base class implementation)
+ */
 ai_model_handle_t *ai_model_create(const ai_model_config_t *config,
                                    const ai_model_ops_t *ops)
 {
@@ -18,6 +29,9 @@ ai_model_handle_t *ai_model_create(const ai_model_config_t *config,
     return handle;
 }
 
+/**
+ * @brief Destroy AI model instance (Auto deinit before free)
+ */
 void ai_model_destroy(ai_model_handle_t *handle)
 {
     if (handle) {
@@ -26,6 +40,9 @@ void ai_model_destroy(ai_model_handle_t *handle)
     }
 }
 
+/**
+ * @brief Polymorphic wrapper: Call subclass init function
+ */
 ai_model_err_t ai_model_init(ai_model_handle_t *handle)
 {
     if (!handle || !handle->ops || !handle->ops->init)
@@ -33,6 +50,9 @@ ai_model_err_t ai_model_init(ai_model_handle_t *handle)
     return handle->ops->init(handle);
 }
 
+/**
+ * @brief Polymorphic wrapper: Call subclass input function
+ */
 ai_model_err_t ai_model_input(ai_model_handle_t *handle, uint8_t *data, uint32_t len)
 {
     if (!handle || !handle->ops || !handle->ops->input)
@@ -40,6 +60,9 @@ ai_model_err_t ai_model_input(ai_model_handle_t *handle, uint8_t *data, uint32_t
     return handle->ops->input(handle, data, len);
 }
 
+/**
+ * @brief Polymorphic wrapper: Call subclass infer function
+ */
 ai_model_err_t ai_model_infer(ai_model_handle_t *handle)
 {
     if (!handle || !handle->ops || !handle->ops->infer)
@@ -47,6 +70,9 @@ ai_model_err_t ai_model_infer(ai_model_handle_t *handle)
     return handle->ops->infer(handle);
 }
 
+/**
+ * @brief Polymorphic wrapper: Call subclass get_result function
+ */
 ai_model_err_t ai_model_get_result(ai_model_handle_t *handle,
                                    ai_model_detect_result_t *results,
                                    uint32_t *result_count)
@@ -56,6 +82,9 @@ ai_model_err_t ai_model_get_result(ai_model_handle_t *handle,
     return handle->ops->get_result(handle, results, result_count);
 }
 
+/**
+ * @brief Polymorphic wrapper: Call subclass deinit function
+ */
 ai_model_err_t ai_model_deinit(ai_model_handle_t *handle)
 {
     if (!handle || !handle->ops || !handle->ops->deinit)

@@ -1,7 +1,21 @@
+/* SPDX-License-Identifier: MIT */
+/**
+ * @file    led_base.c
+ * @brief   LED Abstract Base Class Implementation
+ * @details Polymorphic interface dispatch, state machine management,
+ *          pure base class logic, no hardware-specific code.
+ * @author  LuoZhihong
+ */
+
 #include "led_base.h"
 #include <stdio.h>
 #include <errno.h>
 
+/**
+ * @brief  Check if LED base class handle is valid
+ * @param  self  LED base class pointer
+ * @return true=valid, false=invalid
+ */
 static inline bool led_base_is_valid(led_base_t *self)
 {
     return self && self->ops;
