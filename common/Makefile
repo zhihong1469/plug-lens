@@ -1,8 +1,14 @@
 # ==========================================================================
-# common/Makefile：公共组件库
+# common/Makefile
+# @brief  Common component static library build configuration
+# @details Build libcom.a (all common modules: log, queue, thread, utils, etc.)
+# @author LuoZhihong
+# @license MIT License
 # ==========================================================================
 
-# 1. 源文件（相对于 common/ 目录，直接写子路径）
+# ===================== Source Files Configuration =====================
+# @brief  Source files (relative path to common/ directory)
+# @note   Include all core common modules and third-party TLSF memory allocator
 SRC_FILES := \
 	log/src/log.c \
 	queue/src/queue.c \
@@ -19,16 +25,20 @@ SRC_FILES := \
 	sys_time/src/sys_time_sync.c \
 	network/src/network_check.c \
 
-# 模块私有路径（common 无独有路径，留空）
+# ===================== Include Path Configuration =====================
+# @brief  Local private include paths (empty for common module)
 LOCAL_INC :=
 
-# 最终编译路径 = 全局公共路径 + 模块私有路径
+# @brief  Final include flags (global common includes + local private includes)
 INC_FLAGS := $(GLOBAL_INC) $(LOCAL_INC)
 
-
-# 3. 生成静态库
+# ===================== Build Target Configuration =====================
+# @brief  Output static library name
 TARGET_NAME := libcom.a
+# @brief  Build target type (LIB = static library)
 TARGET_TYPE := LIB
 
+# ===================== Linker Flags =====================
+# @brief  pthread library for multi-thread support
 LDFLAGS := \
 	-pthread \

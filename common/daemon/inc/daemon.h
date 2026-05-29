@@ -2,11 +2,10 @@
 /**
  * @file    daemon.h
  * @brief   Standard Linux daemon process management interface
- *          标准Linux守护进程管理接口
- * @details 模块核心能力：
- *          1. 实现嵌入式Linux标准双fork守护进程创建逻辑
- *          2. 脱离终端控制，后台静默运行，支持产品级部署
- *          3. 适配plug-lens视觉AI终端后台服务托管
+ * @details Core module capabilities:
+ *          1. Implements embedded Linux standard double-fork daemon creation logic
+ *          2. Detaches from terminal control, runs silently in background for production deployment
+ *          3. Adapts to plug-lens Vision AI terminal background service hosting
  *
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
@@ -14,10 +13,10 @@
  * @version v1.0.0
  * @license MIT License
  *
- * @note    全局使用规范：
- *          1. 必须在程序初始化最早期调用，优先于所有业务逻辑
- *          2. 仅支持产品模式(RUN_PRODUCT_MODE=1)下调用
- *          3. 调用后标准输入/输出/错误重定向至/dev/null
+ * @note    Global usage rules:
+ *          1. Must be called at the earliest stage of program initialization, before all business logic
+ *          2. Only supported in product mode (RUN_PRODUCT_MODE=1)
+ *          3. Standard input/output/error are redirected to /dev/null after calling
  */
 #ifndef DAEMON_H
 #define DAEMON_H
@@ -27,46 +26,44 @@ extern "C" {
 #endif
 
 /**
- * @brief   Create standard Linux daemon process
- *          创建标准Linux守护进程（双fork模式）
- * @return  0 on success, -1 on failure
- *          返回值：0=创建成功，-1=创建失败（系统调用错误）
+ * @brief   Create standard Linux daemon process with double-fork mode
+ * @return  0 on success, -1 on failure (system call error)
  *
- * @pre     前置条件：
- *          1. 程序处于初始化阶段，未启动任何业务线程/服务
- *          2. 产品模式(RUN_PRODUCT_MODE=1)使能，调试模式禁止调用
- *          3. 进程拥有足够的系统权限创建子进程
+ * @pre     Preconditions:
+ *          1. Program is in initialization phase, no business threads/services started
+ *          2. Product mode (RUN_PRODUCT_MODE=1) enabled, forbidden in debug mode
+ *          3. Process has sufficient system permissions to create child processes
  *
- * @post    后置条件：
- *          1. 父进程退出，子进程成为1号进程子节点
- *          2. 脱离控制终端，无标准输入输出
- *          3. 工作目录切换至根目录/指定目录
- *          4. 文件掩码重置，关闭无用文件描述符
+ * @post    Postconditions:
+ *          1. Parent process exits, child process becomes a child of init process (PID 1)
+ *          2. Detached from controlling terminal, no standard I/O available
+ *          3. Working directory switched to root directory
+ *          4. File mode mask reset, unused file descriptors closed
  *
- * @note    注意事项：
- *          1. 采用工业级标准双fork机制，避免获取控制终端
- *          2. 自动重定向stdin/stdout/stderr到/dev/null
- *          3. 守护进程生命周期与系统同步，支持开机自启
+ * @note    Usage notes:
+ *          1. Adopts industrial-grade double-fork mechanism to avoid acquiring controlling terminal
+ *          2. Automatically redirects stdin/stdout/stderr to /dev/null
+ *          3. Daemon lifecycle synchronized with system, supports auto-start on boot
  *
- * @warning 警告信息：
- *          - 禁止在调试模式、线程上下文、信号处理函数中调用
- *          - 调用后禁止使用printf/scanf等终端IO函数
- *          - 失败后需立即退出程序，禁止继续执行业务逻辑
+ * @warning Warnings:
+ *          - Forbidden to call in debug mode, thread context, or signal handler
+ *          - Forbidden to use terminal I/O functions (printf/scanf) after calling
+ *          - Exit program immediately on failure, do not continue business logic
  *
- * @thread_safety 线程安全：否
- *                单例初始化接口，仅允许主线程在启动时调用一次
+ * @thread_safety No
+ *                Singleton initialization API, only allowed to be called once by main thread at startup
  *
- * @example 使用示例：
+ * @example Usage example:
  * @code
- * // 产品模式下初始化守护进程
+ * // Initialize daemon in product mode
  * #if RUN_PRODUCT_MODE
  * if (create_daemon() != 0) {
- *     // 守护进程创建失败，退出程序
+ *     // Daemon creation failed, exit program
  *     return -1;
  * }
  * #endif
  *
- * // 后续启动业务逻辑（视觉采集、AI推理、推流服务）
+ * // Start business logic later (vision capture, AI inference, streaming service)
  * @endcode
  */
 int create_daemon(void);
