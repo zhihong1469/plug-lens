@@ -2,9 +2,18 @@
 /**
  * @file    camera_base.c
  * @brief   Camera Abstract Base Class Implementation
- * @details V4L2 thin encapsulation and base class interface dispatch,
- *          pure hardware layer logic, no business code.
+ * @details Internal implementation:
+ *          - Industrial-grade V4L2 kernel interface thin encapsulation
+ *          - C-OOP polymorphic interface dispatch
+ *          - State machine management for camera lifecycle
+ *          - Closed-loop buffer management (auto recycle)
+ *          - Pure hardware layer logic, no business code
+ *
  * @author  LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ * @license MIT License
  */
 #include "camera_base.h"
 #include <stdio.h>
@@ -18,11 +27,12 @@
 /* ============================================================================
  * V4L2 System Call Thin Encapsulation
  * V3.0 Device Layer Rule: Only encapsulate kernel interfaces, NO business logic.
- * Integrated industrial-grade self-test logic from legacy code.
+ * Industrial-grade implementation with read-back verification and error handling.
  * ========================================================================== */
 
 /**
- * @brief  Open device (blocking mode, optimal capture solution)
+ * @brief   Open V4L2 device in blocking read-write mode
+ * @details Optimal mode for embedded video capture
  */
 int v4l2_open(const char *dev_path)
 {
@@ -31,7 +41,7 @@ int v4l2_open(const char *dev_path)
 }
 
 /**
- * @brief  Close device
+ * @brief   Safely close V4L2 device file descriptor
  */
 void v4l2_close(int fd)
 {
@@ -40,7 +50,7 @@ void v4l2_close(int fd)
 }
 
 /**
- * @brief  Stream on/off control
+ * @brief   Control V4L2 video stream state (ON/OFF)
  */
 int v4l2_stream_ctrl(int fd, bool on)
 {
@@ -48,9 +58,10 @@ int v4l2_stream_ctrl(int fd, bool on)
     return ioctl(fd, on ? VIDIOC_STREAMON : VIDIOC_STREAMOFF, &type) < 0 ? -errno : 0;
 }
 
-/* ====================== Core Self-Test Functions ====================== */
+/* ====================== Core Device Self-Test Functions ====================== */
 /**
- * @brief  Query device basic capability (from legacy _video_usb_open)
+ * @brief   Query and validate core V4L2 device capabilities
+ * @details Verify capture and streaming support, fill device info
  */
 int v4l2_query_capability(int fd, camera_capability_t *cap)
 {
@@ -60,13 +71,13 @@ int v4l2_query_capability(int fd, camera_capability_t *cap)
     if (ioctl(fd, VIDIOC_QUERYCAP, &v4l2_cap) < 0)
         return -errno;
 
-    /* Must support video capture and streaming */
+    /* Mandatory: Device must support video capture and streaming */
     if (!(v4l2_cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) ||
         !(v4l2_cap.capabilities & V4L2_CAP_STREAMING)) {
         return -ENODEV;
     }
 
-    /* Fill capability info */
+    /* Copy device information safely */
     strncpy(cap->device_name, (char *)v4l2_cap.card, sizeof(cap->device_name) - 1);
     strncpy(cap->bus_info, (char *)v4l2_cap.bus_info, sizeof(cap->bus_info) - 1);
 
@@ -75,7 +86,7 @@ int v4l2_query_capability(int fd, camera_capability_t *cap)
 }
 
 /**
- * @brief  Check if a single control item is supported (from legacy _video_usb_check_control_support)
+ * @brief   Check if a V4L2 control is supported and enabled
  */
 int v4l2_check_control_support(int fd, uint32_t cid)
 {
@@ -93,7 +104,8 @@ int v4l2_check_control_support(int fd, uint32_t cid)
 }
 
 /**
- * @brief  Enumerate all supported pixel formats (from legacy _video_usb_detect_capability)
+ * @brief   Enumerate all pixel formats and control capabilities
+ * @details Auto-detect supported formats and hardware controls
  */
 int v4l2_enum_formats(int fd, camera_capability_t *cap)
 {
@@ -104,12 +116,13 @@ int v4l2_enum_formats(int fd, camera_capability_t *cap)
 
     while (1) {
         memset(&fmtdesc, 0, sizeof(fmtdesc));
-        fmtdesc.index = index;
+        fmtdesc.index = index++;
         fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
         if (ioctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) < 0)
             break;
 
+        /* Mark supported pixel formats */
         switch (fmtdesc.pixelformat) {
             case V4L2_PIX_FMT_YUYV:
                 cap->support_yuyv = true;
@@ -121,10 +134,9 @@ int v4l2_enum_formats(int fd, camera_capability_t *cap)
                 cap->support_nv12 = true;
                 break;
         }
-        index++;
     }
 
-    /* Check AI control support */
+    /* Detect AI-related control support */
     cap->support_exposure = v4l2_check_control_support(fd, V4L2_CID_EXPOSURE_AUTO);
     cap->support_white_balance = v4l2_check_control_support(fd, V4L2_CID_AUTO_WHITE_BALANCE);
     cap->support_gain = v4l2_check_control_support(fd, V4L2_CID_AUTOGAIN);
@@ -141,9 +153,10 @@ int v4l2_enum_formats(int fd, camera_capability_t *cap)
     return 0;
 }
 
-/* ====================== Format & Parameter Operations ====================== */
+/* ====================== Format & Parameter Configuration ====================== */
 /**
- * @brief  Set video format + read-back verification (from legacy _video_usb_set_format)
+ * @brief   Set video format with hardware read-back verification
+ * @details Critical for embedded systems: Confirm actual hardware-supported resolution
  */
 int v4l2_set_format(int fd, int *width, int *height, uint32_t pixelformat)
 {
@@ -151,23 +164,22 @@ int v4l2_set_format(int fd, int *width, int *height, uint32_t pixelformat)
     memset(&fmt, 0, sizeof(fmt));
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-    /* Configure target parameters */
+    /* Set target format parameters */
     fmt.fmt.pix.width = *width;
     fmt.fmt.pix.height = *height;
     fmt.fmt.pix.pixelformat = pixelformat;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
-    /* Try to set format */
     if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0)
         return -errno;
 
-    /* Critical: Read-back verification, get actual effective parameters */
+    /* Read back actual hardware configuration */
     memset(&fmt, 0, sizeof(fmt));
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(fd, VIDIOC_G_FMT, &fmt) < 0)
         return -errno;
 
-    /* Update to actual effective parameters */
+    /* Update to real effective values */
     *width = fmt.fmt.pix.width;
     *height = fmt.fmt.pix.height;
 
@@ -182,7 +194,7 @@ int v4l2_set_format(int fd, int *width, int *height, uint32_t pixelformat)
 }
 
 /**
- * @brief  Get current video format
+ * @brief   Get current active video format from hardware
  */
 int v4l2_get_format(int fd, int *width, int *height, uint32_t *pixelformat)
 {
@@ -201,7 +213,7 @@ int v4l2_get_format(int fd, int *width, int *height, uint32_t *pixelformat)
 }
 
 /**
- * @brief  Set FPS + read-back verification (from legacy _video_usb_set_fps)
+ * @brief   Set frame rate with hardware read-back verification
  */
 int v4l2_set_fps(int fd, uint32_t *fps)
 {
@@ -209,18 +221,17 @@ int v4l2_set_fps(int fd, uint32_t *fps)
     memset(&parm, 0, sizeof(parm));
     parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-    /* Get current parameters */
     if (ioctl(fd, VIDIOC_G_PARM, &parm) < 0)
         return -errno;
 
-    /* Set target FPS */
+    /* Configure target frame rate */
     parm.parm.capture.timeperframe.numerator = 1;
     parm.parm.capture.timeperframe.denominator = *fps;
 
     if (ioctl(fd, VIDIOC_S_PARM, &parm) < 0)
         return -errno;
 
-    /* Read back actual effective FPS */
+    /* Get actual supported FPS */
     *fps = parm.parm.capture.timeperframe.denominator /
            parm.parm.capture.timeperframe.numerator;
 
@@ -228,9 +239,9 @@ int v4l2_set_fps(int fd, uint32_t *fps)
     return 0;
 }
 
-/* ====================== Buffer Operations ====================== */
+/* ====================== Buffer Management Operations ====================== */
 /**
- * @brief  Request buffers + return actual allocated count
+ * @brief   Request MMAP buffers from V4L2 kernel
  */
 int v4l2_reqbufs(int fd, int *buf_cnt)
 {
@@ -249,7 +260,7 @@ int v4l2_reqbufs(int fd, int *buf_cnt)
 }
 
 /**
- * @brief  Query buffer information
+ * @brief   Query kernel buffer metadata
  */
 int v4l2_querybuf(int fd, struct v4l2_buffer *buf)
 {
@@ -257,7 +268,7 @@ int v4l2_querybuf(int fd, struct v4l2_buffer *buf)
 }
 
 /**
- * @brief  Enqueue buffer
+ * @brief   Enqueue buffer to kernel driver
  */
 int v4l2_qbuf(int fd, struct v4l2_buffer *buf)
 {
@@ -265,7 +276,7 @@ int v4l2_qbuf(int fd, struct v4l2_buffer *buf)
 }
 
 /**
- * @brief  Dequeue buffer
+ * @brief   Dequeue filled buffer from kernel driver
  */
 int v4l2_dqbuf(int fd, struct v4l2_buffer *buf)
 {
@@ -273,7 +284,7 @@ int v4l2_dqbuf(int fd, struct v4l2_buffer *buf)
 }
 
 /**
- * @brief  Memory map
+ * @brief   Map kernel buffer to user space
  */
 void *v4l2_mmap(int fd, size_t length, off_t offset)
 {
@@ -281,7 +292,7 @@ void *v4l2_mmap(int fd, size_t length, off_t offset)
 }
 
 /**
- * @brief  Unmap memory
+ * @brief   Unmap user-space buffer safely
  */
 void v4l2_munmap(void *addr, size_t length)
 {
@@ -291,7 +302,7 @@ void v4l2_munmap(void *addr, size_t length)
 
 /* ====================== Control Parameter Operations ====================== */
 /**
- * @brief  Set control parameter
+ * @brief   Set V4L2 device control register
  */
 int v4l2_set_ctrl(int fd, uint32_t cid, int value)
 {
@@ -304,7 +315,7 @@ int v4l2_set_ctrl(int fd, uint32_t cid, int value)
 }
 
 /**
- * @brief  Get control parameter
+ * @brief   Get V4L2 device control register value
  */
 int v4l2_get_ctrl(int fd, uint32_t cid, int *value)
 {
@@ -320,9 +331,14 @@ int v4l2_get_ctrl(int fd, uint32_t cid, int *value)
 }
 
 /* ============================================================================
- * Unified External Interface Implementation
+ * Unified Public API Implementation
  * V3.0 Mandatory Rule: NULL check + OPS validation + State management + Single dispatch
- * ========================================================================== */
+ * ============================================================================ */
+
+/**
+ * @brief   Public API: Initialize camera instance
+ * @details Validate pointer/ops, prevent re-initialization, update state machine
+ */
 int camera_init(camera_base_t *me)
 {
     if (!me || !me->ops || !me->ops->init)
@@ -338,6 +354,10 @@ int camera_init(camera_base_t *me)
     return ret;
 }
 
+/**
+ * @brief   Public API: De-initialize camera instance
+ * @details Call subclass deinit, reset state to uninitialized
+ */
 int camera_deinit(camera_base_t *me)
 {
     if (!me || !me->ops || !me->ops->deinit)
@@ -350,6 +370,10 @@ int camera_deinit(camera_base_t *me)
     return ret;
 }
 
+/**
+ * @brief   Public API: Start video capture
+ * @details Validate state, prevent duplicate start, update running flag
+ */
 int camera_start_capture(camera_base_t *me)
 {
     if (!me || !me->ops || !me->ops->start_capture)
@@ -365,6 +389,10 @@ int camera_start_capture(camera_base_t *me)
     return ret;
 }
 
+/**
+ * @brief   Public API: Stop video capture
+ * @details Call subclass stop, update running state
+ */
 int camera_stop_capture(camera_base_t *me)
 {
     if (!me || !me->ops || !me->ops->stop_capture)
@@ -377,6 +405,10 @@ int camera_stop_capture(camera_base_t *me)
     return ret;
 }
 
+/**
+ * @brief   Public API: Get video frame data
+ * @details Strict parameter validation, dispatch to subclass implementation
+ */
 int camera_get_frame(camera_base_t *me, void **frame, size_t *len)
 {
     if (!me || !frame || !len || !me->ops || !me->ops->get_frame)
@@ -385,6 +417,10 @@ int camera_get_frame(camera_base_t *me, void **frame, size_t *len)
     return me->ops->get_frame(me, frame, len);
 }
 
+/**
+ * @brief   Public API: Set camera parameters
+ * @details Validate input, support unimplemented interfaces
+ */
 int camera_set_param(camera_base_t *me, int cmd, void *arg)
 {
     if (!me || !arg || !me->ops)
@@ -396,6 +432,10 @@ int camera_set_param(camera_base_t *me, int cmd, void *arg)
     return -ENOSYS;
 }
 
+/**
+ * @brief   Public API: Get device capabilities
+ * @details Validate pointers, dispatch to subclass implementation
+ */
 int camera_get_capability(camera_base_t *me, camera_capability_t *cap)
 {
     if (!me || !cap || !me->ops || !me->ops->get_capability)

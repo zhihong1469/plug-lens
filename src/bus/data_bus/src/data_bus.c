@@ -3,6 +3,11 @@
  ******************************************************************************
  * @file           data_bus.c
  * @brief          High-Performance Zero-Copy Data Bus for Embedded Linux [V4.0 Standard]
+ * @author         LuoZhihong
+ * @github  https://github.com/zhihong1469/plug-lens
+ * @date    2026-05-29
+ * @version v1.0.0
+ *
  * @details
  *  Strictly follow V4.0 Development Rules:
  *  1. 4-Layer Architecture: Dual-bus middle layer, depends only on Main basic components
@@ -11,8 +16,6 @@
  *  4. Defensive Programming: Full parameter check, magic verify, safe refcount
  *  5. Thread-Safe: Fine-grained lock + atomic operations, no concurrency race
  *
- * @author         luo
- * @date           2026
  ******************************************************************************
  */
 
@@ -31,79 +34,79 @@
 // ==========================================================================
 
 #ifdef __x86_64__
-#define MEM_ALIGN_MASK  7  // 64-bit: 8-byte alignment
+#define MEM_ALIGN_MASK  7  /**< 64-bit system: 8-byte memory alignment */
 #else
-#define MEM_ALIGN_MASK  3  // 32-bit: 4-byte alignment
+#define MEM_ALIGN_MASK  3  /**< 32-bit system: 4-byte memory alignment */
 #endif
-#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK)
+#define ALIGN_UP(size)   (((size) + MEM_ALIGN_MASK) & ~MEM_ALIGN_MASK) /**< Align size up */
 
-#define MAX_DATA_BUS            4
-#define BUS_NAME_MAX_LEN        16
-#define DATA_BUS_MAGIC          0xA55A5AA5u  /**< Bus magic number */
-#define DATA_BUS_ITEM_MAGIC     0x5AA5A55Au  /**< Data item magic number */
+#define MAX_DATA_BUS            4           /**< Max supported bus instances */
+#define BUS_NAME_MAX_LEN        16          /**< Max length of bus name */
+#define DATA_BUS_MAGIC          0xA55A5AA5u  /**< Bus instance magic number (safety check) */
+#define DATA_BUS_ITEM_MAGIC     0x5AA5A55Au  /**< Data item magic number (safety check) */
 
-// Default Configuration
-#define DATA_BUS_MAX_ITEMS_DEFAULT         32
-#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT     (4*1024*1024)
-#define DATA_BUS_MAX_SUBSCRIBERS_DEFAULT   16
+// Default Configuration Parameters
+#define DATA_BUS_MAX_ITEMS_DEFAULT         32                  /**< Default max items */
+#define DATA_BUS_MAX_ITEM_SIZE_DEFAULT     (4*1024*1024)       /**< Default max item size (4MB) */
+#define DATA_BUS_MAX_SUBSCRIBERS_DEFAULT   16                  /**< Default max subscribers */
 
 // ==========================================================================
-// Internal Data Structures (Fully Private)
+// Internal Data Structures (Fully Private, Encapsulated)
 // ==========================================================================
 
 /**
  * @brief Data Meta Information Structure
  */
 struct data_bus_item_info {
-    data_type_t type;
-    uint64_t timestamp;
-    uint32_t data_size;
-    atomic_uint ref_count;    /**< C11 Atomic refcount */
-    const char *producer;
+    data_type_t type;                /**< Data type */
+    uint64_t timestamp;              /**< Monotonic timestamp (us) */
+    uint32_t data_size;              /**< Valid data size */
+    atomic_uint ref_count;           /**< C11 Atomic reference count */
+    const char *producer;            /**< Producer ID string */
 };
 
 /**
- * @brief Data Item Structure
+ * @brief Data Item Core Structure (Private)
  */
 typedef struct data_bus_item_t {
-    void                 *data_ptr;      /**< Data pointer */
-    struct data_bus_item_info  info;     /**< Meta info */
-    uint32_t              magic;         /**< Magic for safety check */
-    bool                  in_use;        /**< In-use flag */
-    bool                  published;     /**< Published flag */
+    void                 *data_ptr;      /**< Pointer to data buffer */
+    struct data_bus_item_info  info;     /**< Meta information */
+    uint32_t              magic;         /**< Magic number for safety check */
+    bool                  in_use;        /**< Item in-use flag */
+    bool                  published;     /**< Item published flag */
 } data_item_t;
 
 /**
- * @brief Subscriber Structure
+ * @brief Subscriber Structure (Private)
  */
 typedef struct data_bus_subscription_t {
-    data_bus_callback_t cb;
-    data_type_t type;
-    void *user_data;
-    bool valid;
+    data_bus_callback_t cb;            /**< Callback function */
+    data_type_t type;                   /**< Subscribed data type */
+    void *user_data;                    /**< Private user data */
+    bool valid;                         /**< Valid subscriber flag */
 } data_subscriber_t;
 
 /**
- * @brief Bus Context Structure (Fully Private)
+ * @brief Bus Context Structure (Fully Private, Core)
  */
 typedef struct data_bus_t {
     data_item_t *items;             /**< Data item array */
     data_subscriber_t *subscribers; /**< Subscriber array */
-    void *memory_pool;              /**< Memory pool base address */
+    void *memory_pool;              /**< TLSF memory pool base address */
     data_item_t *latest_item_held;  /**< Pull-mode latest item (bus holds ref) */
-    data_bus_config_t config;       /**< Bus config */
+    data_bus_config_t config;       /**< User configuration */
     pthread_mutex_t pool_lock;      /**< Pool lock: protect items & allocation */
     pthread_mutex_t sub_lock;       /**< Sub lock: protect subscribers */
     pthread_mutex_t publish_lock;   /**< Publish lock: protect publish & latest update */
     pthread_rwlock_t rwlock;        /**< Rwlock: protect latest item read */
-    size_t max_item_size;           /**< Max data size */
+    size_t max_item_size;           /**< Max single data size */
     uint32_t max_items;             /**< Max item count */
     uint32_t max_subscribers;       /**< Max subscriber count */
     uint32_t magic;                 /**< Bus magic number */
 } data_bus_context_t;
 
 /**
- * @brief Bus Instance Table Entry
+ * @brief Bus Instance Table Entry (Private)
  */
 typedef struct {
     data_bus_context_t *bus;
@@ -117,6 +120,9 @@ typedef struct {
 static data_bus_entry_t s_bus_table[MAX_DATA_BUS] = {0};
 static pthread_mutex_t  s_table_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/**
+ * @brief Data type to string mapping table (log use)
+ */
 static const char* g_data_type_str[] = {
     [DATA_TYPE_INVALID] = "INVALID",
     [DATA_TYPE_VIDEO] = "VIDEO_FRAME",
@@ -125,7 +131,7 @@ static const char* g_data_type_str[] = {
 };
 
 // ==========================================================================
-// Internal Helper Functions (All Static)
+// Internal Helper Functions (All Static, Private)
 // ==========================================================================
 static uint64_t _data_bus_get_timestamp_us(void);
 static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx);
@@ -144,8 +150,8 @@ static void _data_bus_destroy_locks(data_bus_context_t *ctx);
 // ==========================================================================
 
 /**
- * @brief  Get microsecond timestamp (monotonic clock)
- * @return Microsecond timestamp
+ * @brief  Get system monotonic timestamp (microseconds)
+ * @return 64-bit timestamp value
  */
 static uint64_t _data_bus_get_timestamp_us(void) {
     struct timespec ts;
@@ -154,10 +160,10 @@ static uint64_t _data_bus_get_timestamp_us(void) {
 }
 
 /**
- * @brief  Find free data item
- * @param  ctx: Bus context
- * @return Free item pointer, NULL if none
- * @note   MUST hold pool_lock before call
+ * @brief  Find free data item from pool
+ * @param  ctx  Bus context pointer
+ * @return Free item pointer, NULL if pool full
+ * @note   MUST hold pool_lock before calling this function
  */
 static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx) {
     for (uint32_t i = 0; i < ctx->max_items; i++) {
@@ -172,7 +178,7 @@ static data_item_t* _data_bus_find_free_item(data_bus_context_t *ctx) {
 
 /**
  * @brief  Reset data item to initial state
- * @param  item: Data item pointer
+ * @param  item  Data item pointer
  */
 static void _data_bus_reset_item(data_item_t *item) {
     if (!item || item->magic != DATA_BUS_ITEM_MAGIC) {
@@ -185,9 +191,9 @@ static void _data_bus_reset_item(data_item_t *item) {
 }
 
 /**
- * @brief  Safely release data item (underflow protection)
- * @param  item: Data item pointer
- * @return DATA_BUS_OK on success, negative on failure
+ * @brief  Safely release data item (refcount underflow protection)
+ * @param  item  Data item pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_release_item_safe(data_item_t *item) {
     if (!item || item->magic != DATA_BUS_ITEM_MAGIC) {
@@ -204,7 +210,7 @@ static int _data_bus_release_item_safe(data_item_t *item) {
     // Atomic decrement, get old value
     unsigned int old_ref = atomic_fetch_sub(&item->info.ref_count, 1);
 
-    // Reset if ref becomes 0
+    // Reset item if refcount reaches 0
     if (old_ref == 1) {
         _data_bus_reset_item(item);
     }
@@ -213,16 +219,16 @@ static int _data_bus_release_item_safe(data_item_t *item) {
 }
 
 /**
- * @brief  Notify all subscribers (Push Mode)
- * @param  ctx: Bus context
- * @param  item: Data item pointer
- * @note   MUST hold publish_lock before call
+ * @brief  Notify all valid subscribers (Push Mode)
+ * @param  ctx   Bus context pointer
+ * @param  item  Data item pointer
+ * @note   MUST hold publish_lock before calling this function
  */
 static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *item) {
-    data_subscriber_t *temp_sub[16]; /**< Stack temp queue */
+    data_subscriber_t *temp_sub[16]; /**< Stack temp queue for subscribers */
     uint32_t temp_cnt = 0;
 
-    // 🔒 Step1: Hold lock only to collect subscribers (very fast)
+    // Lock only for fast subscriber collection (minimize critical section)
     pthread_mutex_lock(&ctx->sub_lock);
     for (uint32_t i = 0; i < ctx->max_subscribers && temp_cnt < 16; i++) {
         data_subscriber_t *s = &ctx->subscribers[i];
@@ -231,9 +237,8 @@ static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *i
         }
     }
     pthread_mutex_unlock(&ctx->sub_lock);
-    // 🔓 Lock released, safe to run callbacks
 
-    // Step2: Run callbacks without lock
+    // Execute callbacks without lock (safe for async processing)
     for (uint32_t i = 0; i < temp_cnt; i++) {
         data_subscriber_t *s = temp_sub[i];
         s->cb((data_bus_item_handle_t)item, s->user_data);
@@ -242,13 +247,13 @@ static void _data_bus_notify_subscribers(data_bus_context_t *ctx, data_item_t *i
 
 /**
  * @brief  Update Pull-Mode latest data item
- * @param  ctx: Bus context
- * @param  new_item: New data item pointer
+ * @param  ctx       Bus context pointer
+ * @param  new_item  New data item pointer
  * @return DATA_BUS_OK on success
- * @note   MUST hold publish_lock before call
+ * @note   MUST hold publish_lock before calling this function
  */
 static int _data_bus_update_latest_item(data_bus_context_t *ctx, data_item_t *new_item) {
-    // Release old latest item
+    // Release old latest item reference
     if (ctx->latest_item_held) {
         int ret = _data_bus_release_item_safe(ctx->latest_item_held);
         if (ret != DATA_BUS_OK) {
@@ -257,7 +262,7 @@ static int _data_bus_update_latest_item(data_bus_context_t *ctx, data_item_t *ne
         ctx->latest_item_held = NULL;
     }
 
-    // Add ref for new item (bus holds)
+    // Add reference for new item (bus holds ownership)
     atomic_fetch_add(&new_item->info.ref_count, 1);
     ctx->latest_item_held = new_item;
 
@@ -265,9 +270,9 @@ static int _data_bus_update_latest_item(data_bus_context_t *ctx, data_item_t *ne
 }
 
 /**
- * @brief  Find bus instance
- * @param  name: Bus name
- * @return Bus context pointer, NULL if not exist
+ * @brief  Find bus instance by name
+ * @param  name  Bus instance name
+ * @return Bus context pointer, NULL if not found
  */
 static data_bus_context_t* _data_bus_find_ctx(const char *name) {
     if (!name) {
@@ -288,9 +293,9 @@ static data_bus_context_t* _data_bus_find_ctx(const char *name) {
 }
 
 /**
- * @brief  Allocate bus context
- * @param  out_ctx: Output bus context pointer
- * @return DATA_BUS_OK on success, negative on failure
+ * @brief  Allocate bus context memory
+ * @param  out_ctx  Output bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_alloc_context(data_bus_context_t **out_ctx) {
     if (!out_ctx) {
@@ -308,9 +313,9 @@ static int _data_bus_alloc_context(data_bus_context_t **out_ctx) {
 }
 
 /**
- * @brief  Initialize memory pool
- * @param  ctx: Bus context
- * @return DATA_BUS_OK on success, negative on failure
+ * @brief  Initialize TLSF memory pool and arrays
+ * @param  ctx  Bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_init_memory_pool(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
@@ -341,7 +346,7 @@ static int _data_bus_init_memory_pool(data_bus_context_t *ctx) {
         return DATA_BUS_ERR_MEM;
     }
 
-    // Initialize items
+    // Initialize item magic and data pointer
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         ctx->items[i].magic = DATA_BUS_ITEM_MAGIC;
         ctx->items[i].data_ptr = (uint8_t*)ctx->memory_pool + i * ctx->max_item_size;
@@ -351,9 +356,9 @@ static int _data_bus_init_memory_pool(data_bus_context_t *ctx) {
 }
 
 /**
- * @brief  Initialize all locks
- * @param  ctx: Bus context
- * @return DATA_BUS_OK on success, negative on failure
+ * @brief  Initialize all synchronization locks
+ * @param  ctx  Bus context pointer
+ * @return DATA_BUS_OK on success, negative error code on failure
  */
 static int _data_bus_init_locks(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
@@ -396,8 +401,8 @@ static int _data_bus_init_locks(data_bus_context_t *ctx) {
 }
 
 /**
- * @brief  Destroy all locks
- * @param  ctx: Bus context
+ * @brief  Destroy all synchronization locks
+ * @param  ctx  Bus context pointer
  */
 static void _data_bus_destroy_locks(data_bus_context_t *ctx) {
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
@@ -419,7 +424,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Check if bus exists
+    // Check if bus instance already exists
     if (_data_bus_find_ctx(config->name)) {
         LOG_E("Data Bus[%s]: Already exists", config->name);
         return DATA_BUS_ERR_EXIST;
@@ -449,7 +454,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // Load config
+    // Load user configuration
     ctx->config = *config;
     ctx->max_items = config->max_items ? config->max_items : DATA_BUS_MAX_ITEMS_DEFAULT;
     ctx->max_item_size = config->max_item_size ? config->max_item_size : DATA_BUS_MAX_ITEM_SIZE_DEFAULT;
@@ -457,7 +462,7 @@ int data_bus_init(const data_bus_config_t *config) {
     ctx->max_subscribers = config->max_subscribers ? config->max_subscribers : DATA_BUS_MAX_SUBSCRIBERS_DEFAULT;
     ctx->latest_item_held = NULL;
 
-    // Init memory pool
+    // Initialize memory pool
     ret = _data_bus_init_memory_pool(ctx);
     if (ret != DATA_BUS_OK) {
         mem_free(ctx);
@@ -465,7 +470,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // Init locks
+    // Initialize synchronization locks
     ret = _data_bus_init_locks(ctx);
     if (ret != DATA_BUS_OK) {
         mem_free(ctx->memory_pool);
@@ -476,7 +481,7 @@ int data_bus_init(const data_bus_config_t *config) {
         return ret;
     }
 
-    // Register instance
+    // Register bus instance to global table
     strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
     s_bus_table[free_idx].name[BUS_NAME_MAX_LEN-1] = '\0';
     ctx->config.name = s_bus_table[free_idx].name;
@@ -496,28 +501,28 @@ int data_bus_alloc(const char *name,
                    size_t size,
                    const char *producer,
                    data_bus_item_handle_t *out_item) {
-    // Parameter check
+    // Parameter validity check
     if (!name || !out_item || type == DATA_TYPE_INVALID) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Find bus
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // Check data size
+    // Check data size limit
     if (size > ctx->max_item_size) {
         LOG_E("[BUS ALLOC] Data size exceeds limit: %zu > %zu", size, ctx->max_item_size);
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Allocate free item
+    // Allocate free item from pool
     pthread_mutex_lock(&ctx->pool_lock);
     data_item_t *item = _data_bus_find_free_item(ctx);
     if (!item) {
-        // Pool full, print debug info
+        // Debug: print pool status when full
         LOG_E("[BUS ALLOC] Memory pool full! Bus: %s", name);
         for (uint32_t i = 0; i < ctx->max_items; i++) {
             data_item_t *it = &ctx->items[i];
@@ -528,13 +533,13 @@ int data_bus_alloc(const char *name,
         return DATA_BUS_ERR_FULL;
     }
 
-    // Initialize item
+    // Initialize item metadata
     _data_bus_reset_item(item);
     item->info.type = type;
     item->info.data_size = size;
     item->info.timestamp = _data_bus_get_timestamp_us();
     item->info.producer = producer;
-    atomic_init(&item->info.ref_count, 1);  // Producer initial ref
+    atomic_init(&item->info.ref_count, 1);  // Producer initial reference
     item->in_use = true;
     item->published = false;
 
@@ -554,11 +559,11 @@ void* data_bus_get_writable_ptr(data_bus_item_handle_t item) {
 
 int data_bus_set_item_size(data_bus_item_handle_t item, size_t actual_size) {
     data_item_t *ditem = (data_item_t *)item;
-    // Safety check
+    // Safety validation
     if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC || ditem->published) {
         return DATA_BUS_ERR_PARAM;
     }
-    // Actual size cannot exceed allocated max
+    // Size limit check
     if (actual_size > ditem->info.data_size) {
         return DATA_BUS_ERR_PARAM;
     }
@@ -573,13 +578,13 @@ int data_bus_push(const char *name, data_bus_item_handle_t item) {
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Find bus
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // Check item
+    // Validate data item
     data_item_t *ditem = (data_item_t *)item;
     if (ditem->magic != DATA_BUS_ITEM_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -587,20 +592,20 @@ int data_bus_push(const char *name, data_bus_item_handle_t item) {
 
     pthread_mutex_lock(&ctx->publish_lock);
 
-    // Check state
+    // State validation
     if (!ditem->in_use || ditem->published) {
         pthread_mutex_unlock(&ctx->publish_lock);
         LOG_E("[BUS PUSH] State error: in_use=%d, published=%d", ditem->in_use, ditem->published);
         return DATA_BUS_ERR_STATE;
     }
 
-    // Mark as published
+    // Mark item as published (read-only)
     ditem->published = true;
 
-    // 1. Push Mode: Notify subscribers
+    // Push Mode: notify all subscribers
     _data_bus_notify_subscribers(ctx, ditem);
 
-    // 2. Pull Mode: Update latest item
+    // Pull Mode: update latest data item
     _data_bus_update_latest_item(ctx, ditem);
 
     pthread_mutex_unlock(&ctx->publish_lock);
@@ -608,7 +613,7 @@ int data_bus_push(const char *name, data_bus_item_handle_t item) {
     return DATA_BUS_OK;
 }
 
-// Push Mode Only: Refcount +1
+// Push Mode Only: Atomic refcount increment
 int data_bus_push_acquire(data_bus_item_handle_t item)
 {
     data_item_t *ditem = (data_item_t *)item;
@@ -632,7 +637,7 @@ int data_bus_subscribe(const char *name, data_type_t type,
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Find bus
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -665,7 +670,7 @@ int data_bus_unsubscribe(const char *name, data_bus_subscription_handle_t *sub) 
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Find bus
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
@@ -690,13 +695,13 @@ int data_bus_pull_latest(const char *name,
         return DATA_BUS_ERR_PARAM;
     }
 
-    // Find bus
+    // Find valid bus context
     data_bus_context_t *ctx = _data_bus_find_ctx(name);
     if (!ctx || ctx->magic != DATA_BUS_MAGIC) {
         return DATA_BUS_ERR_MAGIC;
     }
 
-    // Read lock for latest item
+    // Read lock for concurrent access
     pthread_rwlock_rdlock(&ctx->rwlock);
 
     if (!ctx->latest_item_held) {
@@ -706,13 +711,13 @@ int data_bus_pull_latest(const char *name,
 
     data_item_t *item = ctx->latest_item_held;
 
-    // Check data type
+    // Data type filter check
     if (type != DATA_TYPE_INVALID && item->info.type != type) {
         pthread_rwlock_unlock(&ctx->rwlock);
         return DATA_BUS_ERR_TYPE;
     }
 
-    // Increment refcount
+    // Increment reference count
     atomic_fetch_add(&item->info.ref_count, 1);
 
     pthread_rwlock_unlock(&ctx->rwlock);
@@ -735,7 +740,6 @@ size_t data_bus_get_item_size(data_bus_item_handle_t item) {
     if (!ditem || ditem->magic != DATA_BUS_ITEM_MAGIC) {
         return 0;
     }
-    // Return actual valid data size
     return ditem->info.data_size;
 }
 
@@ -760,31 +764,31 @@ int data_bus_deinit(const char *name) {
     // Write lock to prevent concurrent access
     pthread_rwlock_wrlock(&ctx->rwlock);
 
-    // Release latest item
+    // Release latest item reference
     if (ctx->latest_item_held) {
         _data_bus_release_item_safe(ctx->latest_item_held);
         ctx->latest_item_held = NULL;
     }
 
-    // Release all items (force reset)
+    // Force reset all items
     for (uint32_t i = 0; i < ctx->max_items; i++) {
         _data_bus_reset_item(&ctx->items[i]);
     }
 
-    // Free memory
+    // Free all allocated memory
     mem_free(ctx->memory_pool);
     mem_free(ctx->items);
     mem_free(ctx->subscribers);
 
     pthread_rwlock_unlock(&ctx->rwlock);
 
-    // Destroy locks
+    // Destroy synchronization locks
     _data_bus_destroy_locks(ctx);
 
-    // Free context
+    // Free bus context
     mem_free(ctx);
 
-    // Clear instance table
+    // Clear global instance table
     pthread_mutex_lock(&s_table_lock);
     for (int i = 0; i < MAX_DATA_BUS; i++) {
         if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {

@@ -3,15 +3,17 @@
  ******************************************************************************
  * @file           event_bus.c
  * @brief          High-Performance Asynchronous Event Bus Implementation [V2.0 Optimized]
+ * @author         Luo
+ * @date           2026
+ * @version        V2.0
+ *
  * @details
  *  1. TLSF Static Memory Pool: Zero fragmentation for long-running embedded Linux
  *  2. Fine-Grained Lock: Separate sub/queue locks, no concurrency competition
  *  3. C11 Atomic Stats: Lock-free event/drop count update
  *  4. Magic Number Safety: Block illegal pointers, prevent crash
  *  5. Full API Compatibility: Non-intrusive upgrade
- * 
- * @author Luo
- * @date 2026
+ *
  ******************************************************************************
  */
 
@@ -29,14 +31,14 @@
 // ==========================================================================
 // Global Configuration + Safety Macros
 // ==========================================================================
-#define MAX_EVENT_BUS                    4       /**< Max 4 bus instances */
-#define BUS_NAME_MAX_LEN                 16      /**< Max bus name length */
+#define MAX_EVENT_BUS                    4       /**< Max supported bus instances */
+#define BUS_NAME_MAX_LEN                 16      /**< Max length of bus name */
 #define EVENT_BUS_MAX_SUBSCRIBERS_DEFAULT 32     /**< Default max subscribers */
 #define EVENT_BUS_MAX_QUEUE_EVENTS       256     /**< Max event queue capacity */
 #define MAX_TEMP_CALLBACKS               32      /**< Max callbacks per dispatch */
 
-#define EVENT_BUS_MAGIC          0xA55A5AA5u  /**< Bus instance magic number */
-#define EVENT_BUS_SUB_MAGIC      0x5AA5A55Au  /**< Subscriber magic number */
+#define EVENT_BUS_MAGIC          0xA55A5AA5u  /**< Bus instance magic number (safety check) */
+#define EVENT_BUS_SUB_MAGIC      0x5AA5A55Au  /**< Subscriber magic number (safety check) */
 
 // ==========================================================================
 // Internal Type Definitions
@@ -52,40 +54,40 @@ typedef struct {
 } event_bus_entry_t;
 
 /**
- * @brief Internal Subscriber Entry (with magic number)
+ * @brief Internal Subscriber Entry (with safety magic number)
  */
 typedef struct {
     uint32_t            magic;                  /**< Safety magic number */
-    int                 id;
-    event_type_t        event_type;
-    event_callback_t    callback;
-    void               *user_data;
-    bool                valid;
-    bool                skip_self_published;
-    const char         *subscriber_id;
+    int                 id;                     /**< Subscription unique ID */
+    event_type_t        event_type;             /**< Subscribed event type */
+    event_callback_t    callback;               /**< Event callback */
+    void               *user_data;              /**< Callback private data */
+    bool                valid;                  /**< Valid subscription flag */
+    bool                skip_self_published;    /**< Self-publish filter flag */
+    const char         *subscriber_id;          /**< Custom subscriber ID */
 } subscriber_entry_t;
 
 /**
- * @brief Event Bus Context (Core Optimized)
+ * @brief Event Bus Context (Core Optimized V2.0)
  */
 typedef struct event_bus_t {
-    uint32_t            magic;                  /**< Safety magic number */
-    event_bus_config_t  config;
-    subscriber_entry_t *subscribers;
-    uint32_t            subscriber_count;
-    uint32_t            max_subscribers;
-    int                 next_subscription_id;
+    uint32_t            magic;                  /**< Bus instance magic number */
+    event_bus_config_t  config;                 /**< User configuration */
+    subscriber_entry_t *subscribers;            /**< Subscriber array */
+    uint32_t            subscriber_count;       /**< Active subscriber count */
+    uint32_t            max_subscribers;        /**< Max subscriber limit */
+    int                 next_subscription_id;   /**< Auto-increment subscription ID */
 
-    // Fine-Grained Locks (Core Optimization)
-    pthread_mutex_t     queue_lock;     /**< Protect event queue */
-    pthread_rwlock_t    sub_rwlock;     /**< Protect subscriber list */
+    // Fine-Grained Locks (Core Optimization V2.0)
+    pthread_mutex_t     queue_lock;     /**< Mutex for event queue protection */
+    pthread_rwlock_t    sub_rwlock;     /**< Rwlock for subscriber list protection */
 
     int                 pipefd[2];      /**< Pipe for main thread wakeup */
-    Queue_t             event_queue;    /**< Async event queue */
+    Queue_t             event_queue;    /**< Asynchronous event queue */
     void               *queue_buffer[EVENT_BUS_MAX_QUEUE_EVENTS];
 
-    atomic_uint         event_count;    /**< Atomic total event count */
-    atomic_uint         drop_count;     /**< Atomic dropped event count */
+    atomic_uint         event_count;    /**< Atomic: total published events */
+    atomic_uint         drop_count;     /**< Atomic: dropped events count */
 } event_bus_context_t;
 
 // ==========================================================================
@@ -143,9 +145,9 @@ static bool _event_bus_should_skip_subscriber(const subscriber_entry_t *sub, con
 // ==========================================================================
 
 /**
- * @brief  Find event bus context by name
- * @param  name Bus name
- * @return Bus context pointer, NULL=not found
+ * @brief  Find event bus context by instance name
+ * @param  name  Bus instance name
+ * @return Valid bus context pointer=success, NULL=not found/invalid
  */
 static event_bus_context_t* _event_bus_find_ctx(const char *name) {
     if (!name) return NULL;
@@ -155,7 +157,7 @@ static event_bus_context_t* _event_bus_find_ctx(const char *name) {
     for (int i = 0; i < MAX_EVENT_BUS; i++) {
         if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {
             ctx = s_bus_table[i].bus;
-            // Magic number safety check
+            // Magic number safety verification
             if (ctx && ctx->magic != EVENT_BUS_MAGIC) ctx = NULL;
             break;
         }
@@ -165,16 +167,16 @@ static event_bus_context_t* _event_bus_find_ctx(const char *name) {
 }
 
 /**
- * @brief  Check if subscriber should skip this event
- * @param  sub Subscriber entry
- * @param  event Event pointer
- * @return true=skip, false=process
+ * @brief  Check if subscriber should skip current event
+ * @param  sub    Pointer to subscriber entry
+ * @param  event  Pointer to event
+ * @return true=skip event, false=process event
  */
 static bool _event_bus_should_skip_subscriber(const subscriber_entry_t *sub, const event_t *event) {
     if (!sub || sub->magic != EVENT_BUS_SUB_MAGIC || !sub->valid) return true;
     if (sub->event_type != EVENT_TYPE_INVALID && sub->event_type != event->type) return true;
 
-    // Self-publish filter logic
+    // Self-published event filter logic
     if (sub->skip_self_published && event->source && sub->subscriber_id) {
         if (strcmp(sub->subscriber_id, event->source) == 0) return true;
     }
@@ -182,8 +184,8 @@ static bool _event_bus_should_skip_subscriber(const subscriber_entry_t *sub, con
 }
 
 /**
- * @brief  Get monotonic timestamp in microseconds
- * @return Us-level timestamp
+ * @brief  Get system monotonic timestamp (microseconds)
+ * @return 64-bit timestamp value
  */
 static uint64_t _event_bus_get_timestamp_us(void) {
     struct timespec ts;
@@ -192,8 +194,8 @@ static uint64_t _event_bus_get_timestamp_us(void) {
 }
 
 /**
- * @brief  Free event memory (TLSF)
- * @param  event Event pointer
+ * @brief  Free event memory using TLSF memory adapter
+ * @param  event  Pointer to event to free
  */
 static void _event_bus_free_event(event_t *event) {
     if (event) mem_free(event);
@@ -204,9 +206,9 @@ static void _event_bus_free_event(event_t *event) {
 // ==========================================================================
 
 /**
- * @brief  Convert event type to string
- * @param  type Event type
- * @return String name
+ * @brief  Convert event type to human-readable string
+ * @param  type  Event type ID
+ * @return Event name string
  */
 const char* event_type_to_str(event_type_t type) {
     if (type < sizeof(g_event_type_str)/sizeof(char*) && g_event_type_str[type])
@@ -220,18 +222,18 @@ const char* event_type_to_str(event_type_t type) {
 }
 
 /**
- * @brief  Get event source name
- * @param  event Event pointer
- * @return Source string
+ * @brief  Get event publisher source name
+ * @param  event  Pointer to event struct
+ * @return Source module name string
  */
 const char* event_get_source(const event_t *event) {
     return event ? event->source : "UNKNOWN";
 }
 
 /**
- * @brief  Initialize event bus
- * @param  config Bus configuration
- * @return 0=success
+ * @brief  Initialize event bus instance
+ * @param  config  Pointer to bus configuration
+ * @return 0=success, negative value=failure
  */
 int event_bus_init(const event_bus_config_t *config) {
     if (!config || !config->name || strlen(config->name) >= BUS_NAME_MAX_LEN) return -1;
@@ -251,7 +253,7 @@ int event_bus_init(const event_bus_config_t *config) {
         return -1;
     }
 
-    // Allocate context with TLSF
+    // Allocate context with TLSF memory pool
     event_bus_context_t *ctx = mem_calloc(1, sizeof(event_bus_context_t));
     if (!ctx) { pthread_mutex_unlock(&s_table_lock); return -1; }
 
@@ -260,18 +262,18 @@ int event_bus_init(const event_bus_config_t *config) {
     ctx->max_subscribers = config->max_subscribers > 0 ? config->max_subscribers : EVENT_BUS_MAX_SUBSCRIBERS_DEFAULT;
     ctx->next_subscription_id = 1;
 
-    // Allocate subscriber array + init magic number
+    // Allocate subscriber array and initialize magic number
     ctx->subscribers = mem_calloc(ctx->max_subscribers, sizeof(subscriber_entry_t));
     if (!ctx->subscribers) { mem_free(ctx); pthread_mutex_unlock(&s_table_lock); return -1; }
     for (uint32_t i = 0; i < ctx->max_subscribers; i++) {
         ctx->subscribers[i].magic = EVENT_BUS_SUB_MAGIC;
     }
 
-    // Initialize fine-grained locks
+    // Initialize fine-grained synchronization locks
     pthread_mutex_init(&ctx->queue_lock, NULL);
     pthread_rwlock_init(&ctx->sub_rwlock, NULL);
 
-    // Create pipe for main thread wakeup
+    // Create pipe for main thread event wakeup
     if (pipe(ctx->pipefd) != 0) {
         LOG_E("Event Bus: Pipe create failed");
         mem_free(ctx->subscribers); mem_free(ctx);
@@ -279,12 +281,12 @@ int event_bus_init(const event_bus_config_t *config) {
         return -1;
     }
 
-    // Initialize event queue
+    // Initialize event queue and atomic counters
     Queue_Init(&ctx->event_queue, ctx->queue_buffer, EVENT_BUS_MAX_QUEUE_EVENTS);
     atomic_init(&ctx->event_count, 0);
     atomic_init(&ctx->drop_count, 0);
 
-    // Register bus instance
+    // Register bus instance to global table
     strncpy(s_bus_table[free_idx].name, config->name, BUS_NAME_MAX_LEN-1);
     s_bus_table[free_idx].name[BUS_NAME_MAX_LEN-1] = '\0';
     ctx->config.name = s_bus_table[free_idx].name;
@@ -297,11 +299,11 @@ int event_bus_init(const event_bus_config_t *config) {
 }
 
 /**
- * @brief  Extended subscribe function
- * @param  name Bus name
- * @param  subscriber Subscriber config
- * @param  subscriber_id Custom subscriber ID
- * @return Subscription ID
+ * @brief  Extended subscribe function with custom subscriber ID
+ * @param  name            Bus instance name
+ * @param  subscriber      Pointer to subscriber configuration
+ * @param  subscriber_id   Custom unique subscriber ID
+ * @return Valid subscription ID=success, negative value=failure
  */
 int event_bus_subscribe_ex(const char *name, const event_subscriber_t *subscriber, const char *subscriber_id) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
@@ -332,10 +334,10 @@ int event_bus_subscribe_ex(const char *name, const event_subscriber_t *subscribe
 }
 
 /**
- * @brief  Standard subscribe function
- * @param  name Bus name
- * @param  subscriber Subscriber config
- * @return Subscription ID
+ * @brief  Standard subscription function (default subscriber ID)
+ * @param  name        Bus instance name
+ * @param  subscriber  Pointer to subscriber configuration
+ * @return Valid subscription ID=success, negative value=failure
  */
 int event_bus_subscribe(const char *name, const event_subscriber_t *subscriber) {
     event_subscriber_t sub = *subscriber;
@@ -343,10 +345,10 @@ int event_bus_subscribe(const char *name, const event_subscriber_t *subscriber) 
 }
 
 /**
- * @brief  Unsubscribe event
- * @param  name Bus name
- * @param  subscription_id Sub ID
- * @return 0=success
+ * @brief  Unsubscribe event notification
+ * @param  name              Bus instance name
+ * @param  subscription_id   Subscription ID
+ * @return 0=success, negative value=failure
  */
 int event_bus_unsubscribe(const char *name, int subscription_id) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
@@ -369,16 +371,16 @@ int event_bus_unsubscribe(const char *name, int subscription_id) {
 }
 
 /**
- * @brief  Publish event
- * @param  name Bus name
- * @param  event Event pointer
- * @return 0=success
+ * @brief  Publish asynchronous event to bus
+ * @param  name   Bus instance name
+ * @param  event  Pointer to event struct
+ * @return 0=success, negative value=failure
  */
 int event_bus_publish(const char *name, const event_t *event) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
     if (!ctx || !event || event->type == EVENT_TYPE_INVALID) return -1;
 
-    // Allocate event copy with TLSF
+    // Allocate and copy event with TLSF memory pool
     event_t *ev_copy = mem_alloc(sizeof(event_t));
     if (!ev_copy) {
         LOG_E("Bus[%s] Memory alloc failed", name);
@@ -387,16 +389,16 @@ int event_bus_publish(const char *name, const event_t *event) {
     }
     memcpy(ev_copy, event, sizeof(event_t));
 
-    // Auto fill timestamp
+    // Auto fill timestamp if not set
     if (ev_copy->timestamp == 0)
         ev_copy->timestamp = _event_bus_get_timestamp_us();
 
-    // Queue operation with fine-grained lock
+    // Thread-safe queue operation
     pthread_mutex_lock(&ctx->queue_lock);
     int ret = Queue_Put(&ctx->event_queue, ev_copy);
     pthread_mutex_unlock(&ctx->queue_lock);
 
-    // Queue full, drop event
+    // Drop event if queue is full
     if (ret != QUEUE_OK) {
         LOG_W("Bus[%s] Queue full, drop event: %s", name, event_type_to_str(event->type));
         mem_free(ev_copy);
@@ -404,7 +406,7 @@ int event_bus_publish(const char *name, const event_t *event) {
         return -1;
     }
 
-    // Wake up main thread
+    // Wake up main thread via pipe
     char wake = 0x01;
     write(ctx->pipefd[1], &wake, 1);
     atomic_fetch_add(&ctx->event_count, 1);
@@ -412,11 +414,11 @@ int event_bus_publish(const char *name, const event_t *event) {
 }
 
 /**
- * @brief  Fast publish simple event
- * @param  name Bus name
- * @param  type Event type
- * @param  source Publisher name
- * @return 0=success
+ * @brief  Fast publish simple event (no data payload)
+ * @param  name    Bus instance name
+ * @param  type    Event type ID
+ * @param  source  Publisher module name
+ * @return 0=success, negative value=failure
  */
 int event_bus_publish_simple(const char *name, event_type_t type, const char *source) {
     event_t evt = {0};
@@ -427,9 +429,9 @@ int event_bus_publish_simple(const char *name, event_type_t type, const char *so
 }
 
 /**
- * @brief  Get monitor FD for select/poll
- * @param  name Bus name
- * @return Read FD of pipe
+ * @brief  Get event bus monitor file descriptor
+ * @param  name  Bus instance name
+ * @return Pipe read FD=success, negative value=failure
  */
 int event_bus_get_wait_fd(const char *name) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
@@ -437,15 +439,15 @@ int event_bus_get_wait_fd(const char *name) {
 }
 
 /**
- * @brief  Dispatch events in main thread
- * @param  name Bus name
- * @return 0=success
+ * @brief  Dispatch all queued events (main thread only)
+ * @param  name  Bus instance name
+ * @return 0=success, negative value=failure
  */
 int event_bus_dispatch(const char *name) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
     if (!ctx) return -1;
 
-    // Read 1-byte wake signal
+    // Read pipe wake signal
     char wake;
     read(ctx->pipefd[0], &wake, 1);
 
@@ -458,14 +460,14 @@ int event_bus_dispatch(const char *name) {
 
         if (ret != QUEUE_OK || !event) break;
 
-        // Callback cache (execute outside lock)
+        // Callback cache: execute outside lock to avoid deadlock
         struct {
             event_callback_t cb;
             void *user_data;
         } temp_cb[MAX_TEMP_CALLBACKS];
         int cb_count = 0;
 
-        // Collect valid callbacks (read lock)
+        // Collect valid callbacks with read lock
         pthread_rwlock_rdlock(&ctx->sub_rwlock);
         for (uint32_t i = 0; i < ctx->max_subscribers && cb_count < MAX_TEMP_CALLBACKS; i++) {
             if (!_event_bus_should_skip_subscriber(&ctx->subscribers[i], event)) {
@@ -482,7 +484,7 @@ int event_bus_dispatch(const char *name) {
                 temp_cb[i].cb(event, temp_cb[i].user_data);
         }
 
-        // Free event memory
+        // Auto free event memory
         _event_bus_free_event(event);
     }
 
@@ -490,38 +492,38 @@ int event_bus_dispatch(const char *name) {
 }
 
 /**
- * @brief  Deinitialize event bus
- * @param  name Bus name
- * @return 0=success
+ * @brief  Deinitialize event bus and release all resources
+ * @param  name  Bus instance name
+ * @return 0=success, negative value=failure
  */
 int event_bus_deinit(const char *name) {
     event_bus_context_t *ctx = _event_bus_find_ctx(name);
     if (!ctx) return -1;
 
-    // Close pipe
+    // Close pipe file descriptors
     close(ctx->pipefd[0]);
     close(ctx->pipefd[1]);
 
-    // Free all events in queue
+    // Free all remaining events in queue
     event_t *ev;
     while (Queue_Get(&ctx->event_queue, (void**)&ev) == QUEUE_OK)
         _event_bus_free_event(ev);
 
-    // Print runtime stats
+    // Print bus runtime statistics
     LOG_I("Bus[%s] Stats: Total=%u, Dropped=%u",
           name, atomic_load(&ctx->event_count), atomic_load(&ctx->drop_count));
 
-    // Release resources
+    // Release subscriber memory
     pthread_rwlock_wrlock(&ctx->sub_rwlock);
     mem_free(ctx->subscribers);
     pthread_rwlock_unlock(&ctx->sub_rwlock);
 
-    // Destroy locks
+    // Destroy synchronization locks
     pthread_rwlock_destroy(&ctx->sub_rwlock);
     pthread_mutex_destroy(&ctx->queue_lock);
     mem_free(ctx);
 
-    // Clear instance table
+    // Clear global bus instance table
     pthread_mutex_lock(&s_table_lock);
     for (int i = 0; i < MAX_EVENT_BUS; i++) {
         if (s_bus_table[i].used && strcmp(s_bus_table[i].name, name) == 0) {
