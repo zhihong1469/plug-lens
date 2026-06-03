@@ -16,8 +16,7 @@ Thumbs.db
 .cache/
 # 调试过程材料
 third_lib/compile_reference_configuration/
-third_lib/face_detector/imgs
-third_lib/face_detector/model/quant/*.json
+third_lib/6ull/face_detector/model/quant/*.json
 // 个人暂留文件
 *.my
 # ==============================================
@@ -53,9 +52,7 @@ scripts/shell_quick_script/tmp
 # 放行VSCode配置（团队协作必备，包含调试配置）
 !.vscode/ 
 # 放行【预编译的第三方依赖库】（ARM版MNN+OpenCV，用户必备）
-!/third_lib/opencv_lib/lib/**
-!/third_lib/opencv_lib/include/**
-!/third_lib/face_detector/mnn/lib/**
-!/third_lib/face_detector/mnn/include/**
+!/third_lib/6ull/face_detector/mnn/lib/**
+!/third_lib/6ull/face_detector/mnn/include/**
 # 放行AI模型文件（核心资源，必须提交）
 !*.mnn
