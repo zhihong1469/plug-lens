@@ -29,7 +29,7 @@
         
         // 自动设置库路径，消除警告
         { "text": "set sysroot /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot", "ignoreFailures": true },
-        { "text": "set solib-search-path ${workspaceFolder}/third_lib/face_detector/mnn/lib:${workspaceFolder}/third_lib/opencv_lib/lib", "ignoreFailures": true }
+        { "text": "set solib-search-path ${workspaceFolder}/third_lib/6ull/face_detector/mnn/lib:${workspaceFolder}/third_lib/6ull/opencv_lib/lib", "ignoreFailures": true }
       ]
     }
   ]

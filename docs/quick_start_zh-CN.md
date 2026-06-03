@@ -44,19 +44,19 @@ mkdir -p ~/nfs/run_on_board/{mnn,libjpeg,openh264,libyuv,drv}
 # 1. 拷贝主程序
 cp output/vision_ai_app ~/nfs/run_on_board/
 
-cp -rf drv/led_drv/*.ko  ~/nfs/run_on_board/drv
+cp -rf drv/led_drv/*.{ko,dtb}  ~/nfs/run_on_board/drv
 # 2. 拷贝MNN AI模型文件
-cp third_lib/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
+cp third_lib/6ull/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
 
 # 3. 拷贝第三方动态库（按目录分类）
-cp -rf third_lib/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board/mnn
-cp -rf third_lib/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
-cp -rf third_lib/openh264/lib/* ~/nfs/run_on_board/openh264
-cp -rf third_lib/libyuv/lib/*  ~/nfs/run_on_board/libyuv
+cp -rf third_lib/6ull/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board/mnn
+cp -rf third_lib/6ull/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
+cp -rf third_lib/6ull/openh264/lib/* ~/nfs/run_on_board/openh264
+cp -rf third_lib/6ull/libyuv/lib/*  ~/nfs/run_on_board/libyuv
 
 ########################  仅供参考/可选项：########################################
 # 4. OpenCV库（按调试需开启）
-cp third_lib/opencv_lib/lib/*.so.*  ~/nfs/run_on_board/opencv
+cp third_lib/6ull/opencv_lib/lib/*.so.*  ~/nfs/run_on_board/opencv
 # 5. 拷贝SSL/加密依赖库（按需开启）
 cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libcrypto.so.1.1 ~/nfs/run_on_board/
 cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libssl.so.1.1 ~/nfs/run_on_board/
