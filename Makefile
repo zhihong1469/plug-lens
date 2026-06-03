@@ -72,16 +72,16 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \
-	-I$(TOPDIR)/third_lib/6ull/face_detector/mnn/include \
+	-I$(TOPDIR)/third_lib/imx6ull/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/tlsf-master \
-	-I$(TOPDIR)/third_lib/6ull/live555/include/liveMedia \
-	-I$(TOPDIR)/third_lib/6ull/live555/include/groupsock \
-	-I$(TOPDIR)/third_lib/6ull/live555/include/BasicUsageEnvironment \
-	-I$(TOPDIR)/third_lib/6ull/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/6ull/libjpeg_turbo/include \
-	-I$(TOPDIR)/third_lib/6ull/openh264/include/wels \
-	-I$(TOPDIR)/third_lib/6ull/libyuv/include \
-	-I$(TOPDIR)/third_lib/6ull/libyuv/include/libyuv
+	-I$(TOPDIR)/third_lib/imx6ull/live555/include/liveMedia \
+	-I$(TOPDIR)/third_lib/imx6ull/live555/include/groupsock \
+	-I$(TOPDIR)/third_lib/imx6ull/live555/include/BasicUsageEnvironment \
+	-I$(TOPDIR)/third_lib/imx6ull/live555/include/UsageEnvironment \
+	-I$(TOPDIR)/third_lib/imx6ull/libjpeg_turbo/include \
+	-I$(TOPDIR)/third_lib/imx6ull/openh264/include/wels \
+	-I$(TOPDIR)/third_lib/imx6ull/libyuv/include \
+	-I$(TOPDIR)/third_lib/imx6ull/libyuv/include/libyuv
 
 # @brief  Export global includes to all submodules
 export GLOBAL_INC
