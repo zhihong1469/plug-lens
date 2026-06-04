@@ -96,7 +96,7 @@ Detailed compilation, deployment and debugging tutorial: [Quick Start Guide](doc
 ## 📚 Documentation Navigation
 - [Quick Start](docs/quick_start_zh-CN.md): Full process of compilation, deployment and operation
 - [Architecture Description](docs/architecture.md): Project architecture block diagram and design ideas
-- [Agent Scheduling](SKILL.md): AI programming scheduling example (not used yet due to account restrictions)
+- [Agent Scheduling](SKILL.md): AI programming scheduling example
 - [Performance Report](docs/performance_report.md): Detailed project performance evolution report based on actual logs and running data
 - [Contributing](docs/CONTRIBUTING.en.md): If you have optimization ideas, welcome to participate in project co-construction
 > [!TIP]
