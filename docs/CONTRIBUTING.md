@@ -1,37 +1,56 @@
-# Contributing to plug-lens
-First off, thanks for taking the time to contribute! ❤️
+# plug-lens 贡献指南
+[简体中文](CONTRIBUTING.md) | [English](CONTRIBUTING.en.md)
 
-All types of contributions are encouraged and valued. See the table of contents for different ways to help and details about how this project handles them. Please make sure to read the relevant section before making your contribution. It will make it a lot easier for us maintainers and smooth out the experience for all involved.
+首先，非常感谢您愿意抽出时间为项目贡献力量！❤️
 
-## I Want To Contribute
-### Reporting Bugs
-- Use the [Issues](https://github.com/zhihong1469/plug-lens/issues) tab to report bugs
-- Include steps to reproduce the issue, what you expected, and what happened
-- Add relevant logs or screenshots if possible
+我们鼓励并重视所有形式的贡献。本文档将详细说明不同的贡献方式以及项目的处理流程，请在提交贡献前阅读相关章节，这将帮助维护者更高效地处理您的贡献，也能让所有参与者获得更顺畅的协作体验。
 
-### Suggesting Enhancements
-- Use the Issues tab to submit feature requests
-- Explain the use case and why this enhancement would be useful
+---
 
-### Your First Code Contribution
-Good first issues are labeled with `good first issue`. These are tasks that are beginner-friendly and don't require deep knowledge of the codebase:
-- Improving documentation (README, comments)
-- Adding examples or usage guides
-- Fixing minor bugs or typos
-- Testing the project on different hardware platforms
+## 我想参与贡献
+### 🐛 提交 Bug 报告
+- 通过项目 [Issues](https://github.com/zhihong1469/plug-lens/issues) 页面提交 Bug
+- 请包含以下信息：
+  1. 详细的复现步骤（硬件环境、软件版本、操作流程）
+  2. 您预期的运行结果
+  3. 实际发生的错误现象
+- 尽可能附上相关日志、截图或录屏，帮助我们快速定位问题
 
-### Pull Requests
-1. Fork the repository
-2. Create a new branch: `git checkout -b feature/your-feature-name`
-3. Make your changes, following the project's code style
-4. Test your changes
-5. Submit a Pull Request to the `main` branch
-6. Reference any related issues in your PR description
+### 💡 提出功能建议
+- 通过 Issues 页面提交功能增强请求
+- 请清晰说明该功能的**使用场景**以及它能为项目带来的价值
+- 如果有相关的技术实现思路，也欢迎一并提出
 
-## Code Style
-- Follow the existing C/C++ coding style (indentation, naming conventions)
-- Add comments for complex logic
-- Keep commits clean and atomic
+### 🚀 第一次代码贡献
+我们为新手准备了标注为 `good first issue` 的任务，这些任务难度较低，不需要深入了解整个代码库即可完成：
+- 完善文档（README、代码注释、使用教程）
+- 补充示例代码或使用指南
+- 修复拼写错误、格式问题或轻微的逻辑 Bug
+- 在不同硬件平台上测试项目并反馈结果
 
-## Communication
-All discussions happen in the open on GitHub (Issues and Pull Requests). This keeps the conversation transparent and accessible to everyone.
+### 📥 提交拉取请求（PR）
+1. 复刻（Fork）本仓库到您的 GitHub 账号
+2. 从对应硬件的 `release/*` 分支创建新分支：
+   - 功能开发：`git checkout -b feature/[硬件平台]/功能名称`
+   - Bug 修复：`git checkout -b fix/[硬件平台]/问题描述`
+   示例：`feature/v1_6ull/add-audio-support`、`fix/v1_6ull/rtsp-memory-leak`
+3. 按照项目代码规范进行修改
+4. 充分测试您的修改，确保不会引入新的问题
+5. 提交拉取请求到**对应硬件的 `release/*` 分支**（请勿直接提交到 `main` 分支）
+6. 在 PR 描述中关联相关的 Issue（如有），并简要说明修改内容
+
+---
+
+## 📝 代码规范
+- 严格遵循项目现有 C/C++ 编码风格（缩进、命名约定、括号风格等）
+- 为复杂逻辑添加清晰的注释，说明设计思路和注意事项
+- 保持提交（Commit）的原子性：一个提交只做一件事
+- 提交信息使用清晰的描述，格式建议：`[模块名]: 简要描述修改内容`
+  示例：`[rtsp]: 修复无客户端时内存泄漏问题`
+
+---
+
+## 💬 沟通方式
+所有项目相关的讨论都将在 GitHub 上公开进行（Issues 和 Pull Requests）。这种方式可以保证对话的透明性，也能让所有感兴趣的开发者查阅和参与。
+
+如果您有任何疑问或建议，欢迎随时通过 Issues 与我们交流。
