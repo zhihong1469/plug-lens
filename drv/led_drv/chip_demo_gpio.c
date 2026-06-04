@@ -65,7 +65,7 @@ static int imx6ull_led_hw_init(void)
     // 5. 默认熄灭LED
     writel(readl(gpio5_dr_addr) | (1 << 3), gpio5_dr_addr);
 
-    // printk(KERN_INFO "IMX6ULL GPIO5_IO3 init success\n");
+    printk(KERN_INFO "IMX6ULL GPIO5_IO3 init success\n");
     return 0;
 }
 
@@ -88,7 +88,7 @@ static int board_demo_led_init (int which)
     int group = GROUP(g_ledpins[which]);
     int pin = PIN(g_ledpins[which]);
 
-    // printk(KERN_INFO "init led: group=%d, pin=%d\n", group, pin);
+    printk(KERN_INFO "init led: group=%d, pin=%d\n", group, pin);
 
     // 硬件已在probe初始化，这里无需重复操作
     return 0;
@@ -109,8 +109,8 @@ static int board_demo_led_ctl (int which, char status)
         }
     }
 
-    // printk(KERN_INFO "set led %s: group=%d, pin=%d\n",
-    //        status ? "on" : "off", group, pin);
+    printk(KERN_INFO "set led %s: group=%d, pin=%d\n",
+           status ? "on" : "off", group, pin);
     return 0;
 }
 

@@ -7,7 +7,7 @@ SCRIPT_REL_PATH="scripts/shell_quick_script/copy_to.sh"
 
 # 2. 【多个源目录】相对根目录的路径（数组，可增删）
 SOURCE_DIRS=(
-    "boards/imx6ull/drv/led_drv/"
+    "drv/led_drv/"
     # 可添加更多："output/"
 )
 
