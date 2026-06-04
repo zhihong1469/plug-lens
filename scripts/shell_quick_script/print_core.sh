@@ -12,7 +12,7 @@ OUTPUT_REL_PATH="scripts/shell_quick_script/tmp/core_project_code.txt"
 # 3. 需要导出的文件列表（支持 单个文件 / 通配符批量导出）
 EXPORT_FILES=(
     # 应用入口 / 脚本文件（支持通配符）
-    "drv/led_drv/*.c"
+    "boards/imx6ull/drv/led_drv/*.c"
 )
 # ==============================================
 

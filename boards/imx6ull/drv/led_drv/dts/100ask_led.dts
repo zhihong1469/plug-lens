@@ -1,0 +1,8 @@
+/dts-v1/; 
+/ {
+	100ask_led@0 {
+		compatible = "100ask,leddrv";
+		pin = <0x50003>;
+	};
+
+};
