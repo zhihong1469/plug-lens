@@ -1,5 +1,5 @@
-prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/openh264-2.1.1/install
-libdir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/.tool/openh264-2.1.1/install/lib
+prefix=~/linux/6ull/project/plug-lens/.tool/openh264-2.1.1/install
+libdir=~/linux/6ull/project/plug-lens/.tool/openh264-2.1.1/install/lib
 includedir=${prefix}/include
 
 Name: OpenH264

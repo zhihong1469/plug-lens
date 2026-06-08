@@ -1,7 +1,7 @@
-prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
-exec_prefix=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo
-libdir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/lib
-includedir=~/linux/6ull/project/peripheral_vision_ai_acquisition_terminal/third_lib/libjpeg_turbo/include
+prefix=~/linux/6ull/project/plug-lens/third_lib/libjpeg_turbo
+exec_prefix=~/linux/6ull/project/plug-lens/third_lib/libjpeg_turbo
+libdir=~/linux/6ull/project/plug-lens/third_lib/libjpeg_turbo/lib
+includedir=~/linux/6ull/project/plug-lens/third_lib/libjpeg_turbo/include
 
 Name: libturbojpeg
 Description: A SIMD-accelerated JPEG codec that provides the TurboJPEG API
