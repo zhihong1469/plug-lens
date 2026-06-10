@@ -27,8 +27,8 @@ endif
 # 4. 追加头文件路径和编译标志
 CFLAGS   += $(INC_FLAGS) 
 CFLAGS   += $(SYSROOT_CFLAGS) # 自动带上系统头文件路径
-CFLAGS   += -Wall -O0 -g -MMD -MP # 默认开启警告、优化、调试信息、生成依赖 -O2
-CXXFLAGS += $(INC_FLAGS) $(SYSROOT_CFLAGS) -Wall -O0 -g -MMD -MP -std=c++11
+CFLAGS   += -Wall -O0 -g -MMD -MP  -DNO_OPENSSL=1# 默认开启警告、优化、调试信息、生成依赖 -O2
+CXXFLAGS += $(INC_FLAGS) $(SYSROOT_CFLAGS) -Wall -O0 -g -MMD -MP -std=c++11 -DNO_OPENSSL=1
 # 链接自定义脚本（仅可执行文件使用，静态库打包自动忽略）
 LDFLAGS := -T $(TOPDIR)/custom_sections.lds $(LDFLAGS)
 

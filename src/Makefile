@@ -30,22 +30,18 @@ LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
-	-L$(TOPDIR)/third_lib/imx6ull/face_detector/mnn/lib/ \
+	-L$(TOPDIR)/third_lib/aarch64/face_detector/mnn/lib/ \
 	-lMNN \
-	-L$(TOPDIR)/third_lib/imx6ull/live555/lib \
-	-L$(TOPDIR)/third_lib/imx6ull/libjpeg_turbo/lib \
+	-L$(TOPDIR)/third_lib/aarch64/live555/lib \
 	-lliveMedia \
 	-lgroupsock \
 	-lBasicUsageEnvironment \
 	-lUsageEnvironment \
-	-lturbojpeg \
-	-lssl \
-	-lcrypto \
 	-lstdc++ \
 	-pthread \
-	-L$(TOP_DIR)/third_lib/imx6ull/libjpeg_turbo/lib \
+	-L$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/lib \
 	-lturbojpeg \
-	-L$(TOPDIR)/third_lib/imx6ull/openh264/lib \
+	-L$(TOPDIR)/third_lib/aarch64/openh264/lib \
 	-lopenh264 \
-	-L$(TOPDIR)/third_lib/imx6ull/libyuv/lib \
+	-L$(TOPDIR)/third_lib/aarch64/libyuv/lib \
 	-lyuv
