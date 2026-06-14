@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linux 应用调试"
+  short_description: "使用 GDB 调试 Linux 应用程序，支持本地调试和远程调试（如 RK3562）。"
+  default_prompt: "使用 debug-linux-app skill，自动探测调试环境，配置 GDB 会话，设置断点并启动调试。"
