@@ -192,7 +192,7 @@ typedef enum {
 
 // --------------------- 视频采集服务配置 ---------------------
 /** 摄像头设备节点 | 嵌入式Linux V4L2设备路径 */
-#define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
+#define CONFIG_CAPTURE_DEV_PATH "/dev/video18"
 /** 视频采集格式 | 0=YUYV 1=NV12 2=MJPEG */
 #define CONFIG_CAPTURE_FORMAT 0
 /** 视频采集帧率 | 单位：FPS */
