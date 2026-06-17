@@ -13,7 +13,7 @@ OUTPUT_REL_PATH="scripts/shell_quick_script/tmp/catalog_tree.txt"
 #    示例：.trae    ← 扫描 .trae 目录
 #    示例：src      ← 扫描 src 目录
 #    示例：(留空)   ← 扫描整个项目根目录
-TARGET_DIR=".trae"
+TARGET_DIR=""
 # ==============================================
 
 # ===================== 核心：自动计算路径（零报错） =====================
@@ -70,7 +70,7 @@ echo -e "\n\n" >> "$OUTPUT_FILE"
 # 执行tree命令
 # -a: 显示所有文件（包括隐藏文件）
 # -I: 排除不需要的目录和文件类型
-tree -a -I "build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags|third_lib" "$SCAN_TARGET" >> "$OUTPUT_FILE"
+tree  -I "*.h|*.c|*.cpp|*.h|*.c|*.cpp|*.build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags|third_lib" "$SCAN_TARGET" >> "$OUTPUT_FILE"
 
 # ===================== 完成提示（统一风格） =====================
 echo -e "\033[32m==================================================\033[0m"

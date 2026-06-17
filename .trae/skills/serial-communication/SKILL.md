@@ -169,23 +169,23 @@ result = run_login_check(
 ```bash
 # === WSL2/Linux 环境 ===
 # 自动检测串口并执行命令
-python scripts/linux/serial_tool.py login-check --cmd "uname -a"
+python .trae/skills/serial-communication/scripts/linux/serial_tool.py login-check --cmd "uname -a"
 
 # 指定串口和验证命令
-python scripts/linux/serial_tool.py login-check --port /dev/ttyUSB0 --cmd "ls /mnt/nfs"
+python .trae/skills/serial-communication/scripts/linux/serial_tool.py login-check --port /dev/ttyUSB0 --cmd "ls /mnt/nfs"
 
 # 带密码登录
-python scripts/linux/serial_tool.py login-check --port /dev/ttyUSB0 --username root --password 123456 --cmd "./myapp"
+python .trae/skills/serial-communication/scripts/linux/serial_tool.py login-check --port /dev/ttyUSB0 --username root --password 123456 --cmd "./myapp"
 
 # === Windows 环境（USB 转发）===
 # 列出所有 USB 设备（Windows PowerShell）
-python scripts/windows/wsl2_usb_forward.py list
+python .trae/skills/serial-communication/scripts/windows/wsl2_usb_forward.py list
 
 # 自动检测并转发串口设备（需要管理员权限）
-python scripts/windows/wsl2_usb_forward.py auto
+python .trae/skills/serial-communication/scripts/windows/wsl2_usb_forward.py auto
 
 # 手动指定 BUSID 转发
-python scripts/windows/wsl2_usb_forward.py forward --busid 3-3
+python .trae/skills/serial-communication/scripts/windows/wsl2_usb_forward.py forward --busid 3-3
 ```
 
 ## 失败分流
@@ -217,7 +217,7 @@ python scripts/windows/wsl2_usb_forward.py forward --busid 3-3
 
 ## 参考文档
 
-- [scripts/serial_core.py](scripts/serial_core.py) - 串口核心功能
-- [scripts/discovery.py](scripts/discovery.py) - 设备发现逻辑
-- [scripts/login_check.py](scripts/login_check.py) - 自动登录验证
+- [scripts/shared/serial_core.py](scripts/shared/serial_core.py) - 串口核心功能
+- [scripts/shared/discovery.py](scripts/shared/discovery.py) - 设备发现逻辑
+- [scripts/shared/login_check.py](scripts/shared/login_check.py) - 自动登录验证
 - [references/usage.md](references/usage.md) - 详细使用说明
