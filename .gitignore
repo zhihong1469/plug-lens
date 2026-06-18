@@ -5,7 +5,7 @@
 /build/
 .tool/
 output/
-
+.guide/
 # 系统/编辑器缓存
 .idea/
 .DS_Store

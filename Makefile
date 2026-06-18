@@ -72,17 +72,12 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \
-	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/tlsf-master \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/liveMedia \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/groupsock \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/BasicUsageEnvironment \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
-	-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels \
-	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
-	-I$(TOPDIR)/third_lib/aarch64/libyuv/include/libyuv
-
+	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
+	-I$(TOPDIR)/third_lib/rk3562/rkrga/include \
+	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
+	
+		
 # @brief  Export global includes to all submodules
 export GLOBAL_INC
 

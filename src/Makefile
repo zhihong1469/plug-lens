@@ -30,18 +30,9 @@ LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
-	-L$(TOPDIR)/third_lib/aarch64/face_detector/mnn/lib/ \
-	-lMNN \
-	-L$(TOPDIR)/third_lib/aarch64/live555/lib \
-	-lliveMedia \
-	-lgroupsock \
-	-lBasicUsageEnvironment \
-	-lUsageEnvironment \
-	-lstdc++ \
-	-pthread \
-	-L$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/lib \
-	-lturbojpeg \
-	-L$(TOPDIR)/third_lib/aarch64/openh264/lib \
-	-lopenh264 \
-	-L$(TOPDIR)/third_lib/aarch64/libyuv/lib \
-	-lyuv
+	-L$(TOPDIR)/third_lib/rk3562/rkmpp/lib \
+	-lrockchip_mpp \
+	-L$(TOPDIR)/third_lib/rk3562/rkrga/lib \
+	-lrga \
+	-L$(TOPDIR)/third_lib/rk3562/rknn/lib \
+	-lrknnrt
