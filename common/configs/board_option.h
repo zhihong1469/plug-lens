@@ -83,6 +83,18 @@ extern "C" {
 #endif
 
 /* ==========================================================================
+ * Image Processing Engine Selection (Auto-selected based on platform)
+ * ========================================================================== */
+
+#if PLATFORM_RK3562
+    #define IMG_PROC_RGA        1  /* RGA hardware acceleration */
+    #define IMG_PROC_SOFTWARE   0  /* libyuv/libjpeg-turbo CPU processing */
+#else
+    #define IMG_PROC_RGA        0
+    #define IMG_PROC_SOFTWARE   1  /* i.MX6ULL uses libyuv/libjpeg-turbo */
+#endif
+
+/* ==========================================================================
  * Platform-Specific Configuration
  * ========================================================================== */
 

@@ -100,8 +100,8 @@ cp -rf third_lib/aarch64/libyuv/lib/*  ~/nfs/run_on_board_rk3562/libyuv
 2. 开发板执行NFS挂载与文件同步：
 ```bash
 # 挂载PC端NFS共享目录至板端 /mnt
-mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt
-
+# mount -t nfs -o nolock,port=2050 192.168.5.10:/home/luo/nfs /mnt 被别名为mount_nfs_wired
+mount_nfs_wired
 # 将NFS内完整项目文件同步至板端固定目录
 mkdir -p /root/run_on_board_rk3562
 cp -rp /mnt/run_on_board_rk3562/* /root/run_on_board_rk3562/

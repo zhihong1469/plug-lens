@@ -71,6 +71,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/src/base/camera/inc \
 	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/base/img_proc/inc \
 	-I$(TOPDIR)/src/base/led/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
@@ -78,6 +79,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/third_lib/tlsf-master \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
 	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \

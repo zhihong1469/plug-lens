@@ -10,6 +10,10 @@ SRC_FILES := \
 	base/camera/src/camera_factory.c \
  	base/ai_model/src/ai_model_base.cpp \
 	base/ai_model/src/ai_model_factory.c \
+	base/img_proc/src/img_proc_base.c \
+	base/img_proc/src/img_proc_factory.c \
+	base/img_proc/src/img_proc_software.c \
+	base/img_proc/src/img_proc_rga.c \
 	base/led/src/led_base.c \
 	bus/event_bus/src/event_bus.c \
 	bus/data_bus/src/data_bus.c \
