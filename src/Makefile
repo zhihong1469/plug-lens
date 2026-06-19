@@ -39,6 +39,7 @@ LDFLAGS := \
 	-L$(TOPDIR)/third_lib/aarch64/live555/lib -lliveMedia -lgroupsock -lUsageEnvironment -lBasicUsageEnvironment \
 	-L$(TOPDIR)/third_lib/aarch64/openh264/lib -lopenh264 \
 	-L$(TOPDIR)/third_lib/aarch64/libyuv/lib -lyuv \
-	-L$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/lib -ljpeg -lturbojpeg\
+	-L$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/lib -ljpeg -lturbojpeg \
 	-L$(TOPDIR)/third_lib/aarch64/face_detector/mnn/lib -lMNN \
+	-L$(TOPDIR)/third_lib/aarch64/rkrga/lib -lrga \
 	$(PLATFORM_LIBS)

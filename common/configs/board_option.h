@@ -30,11 +30,11 @@ extern "C" {
  * @warning Changing this requires recompilation
  */
 #ifndef PLATFORM_IMX6ULL
-#define PLATFORM_IMX6ULL  1  /* NXP i.MX6ULL - Default platform */
+#define PLATFORM_IMX6ULL  0  /* NXP i.MX6ULL - Default platform */
 #endif
 
 #ifndef PLATFORM_RK3562
-#define PLATFORM_RK3562   0  /* Rockchip RK3562 - Experimental */
+#define PLATFORM_RK3562   1  /* Rockchip RK3562 - Experimental */
 #endif
 
 /* Validate platform selection */
@@ -49,10 +49,13 @@ extern "C" {
 /* ==========================================================================
  * AI Inference Engine Selection (Auto-selected based on platform)
  * ========================================================================== */
-
+/**
+ * @brief RK3562 当前使用 MNN（RKNN 待后续实现）
+ * @note  TODO: 后续实现 RKNN 硬件加速
+ */
 #if PLATFORM_RK3562
-    #define AI_ENGINE_RKNN   1  /* RK3562 NPU hardware acceleration */
-    #define AI_ENGINE_MNN    0  /* CPU-based inference */
+    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration - TODO */
+    #define AI_ENGINE_MNN    1  /* CPU-based inference - 当前使用 */
 #else
     #define AI_ENGINE_RKNN   0
     #define AI_ENGINE_MNN    1  /* i.MX6ULL uses MNN */
@@ -63,8 +66,8 @@ extern "C" {
  * ========================================================================== */
 
 #if PLATFORM_RK3562
-    #define CAMERA_INTERFACE_CSI   1  /* RK3562 CSI camera */
-    #define CAMERA_INTERFACE_USB   0
+    #define CAMERA_INTERFACE_CSI   0  /* RK3562 CSI camera */
+    #define CAMERA_INTERFACE_USB   1
 #else
     #define CAMERA_INTERFACE_CSI   0
     #define CAMERA_INTERFACE_USB   1  /* i.MX6ULL USB camera */
@@ -73,10 +76,13 @@ extern "C" {
 /* ==========================================================================
  * Video Encoder Selection (Auto-selected based on platform)
  * ========================================================================== */
-
+/**
+ * @brief RK3562 当前使用软件编码（MPP 待后续实现）
+ * @note  TODO: 后续实现 MPP 硬件编码
+ */
 #if PLATFORM_RK3562
-    #define VIDEO_ENCODER_MPP   1  /* RKMPP hardware encoding */
-    #define VIDEO_ENCODER_SW    0  /* Software encoding */
+    #define VIDEO_ENCODER_MPP   0  /* RKMPP hardware encoding - TODO */
+    #define VIDEO_ENCODER_SW    1  /* Software encoding - 当前使用 */
 #else
     #define VIDEO_ENCODER_MPP   0
     #define VIDEO_ENCODER_SW    1  /* i.MX6ULL uses openh264/libjpeg-turbo */

@@ -10,6 +10,7 @@ SRC_FILES := \
 	base_plugins/img_storage/src/img_storage.c \
 	base_plugins/img_joint/src/img_joint.cpp \
 	base_plugins/img_joint/src/img_proc_software_ops.cpp \
+	base_plugins/img_rga/src/img_rga.cpp \
 	base_plugins/led_controller/src/led_indicator.c \
 	service_plugins/net_push_srv/src/rtsp_server.cpp \
 	service_plugins/net_push_srv/src/net_push_srv.c \
