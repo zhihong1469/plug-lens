@@ -80,6 +80,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
 	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \

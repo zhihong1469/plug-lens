@@ -4,6 +4,7 @@
  * @brief   Image Processing Factory Implementation
  * @details Factory pattern implementation for image processing module.
  *          Selects backend based on platform configuration macros.
+ *          Links to plugins in plugins/base_plugins/.
  *
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
@@ -16,13 +17,14 @@
 #include "img_proc_base.h"
 #include "board_option.h"
 
-/* Include backend operation tables */
+/* Include backend operation tables from plugins */
 #if IMG_PROC_SOFTWARE
-#include "img_proc_software.h"
+/* Software backend: img_joint plugin */
 extern const img_proc_ops_t img_proc_software_ops;
 #elif IMG_PROC_RGA
-#include "img_proc_rga.h"
-extern const img_proc_ops_t img_proc_rga_ops;
+/* Hardware backend: img_rga plugin */
+#include "img_rga.h"
+extern const img_proc_ops_t img_rga_ops;
 #endif
 
 /**
@@ -37,7 +39,7 @@ img_proc_handle_t *img_proc_factory_create(const img_proc_config_t *config)
 #if IMG_PROC_SOFTWARE
     return img_proc_create(config, &img_proc_software_ops);
 #elif IMG_PROC_RGA
-    return img_proc_create(config, &img_proc_rga_ops);
+    return img_proc_create(config, &img_rga_ops);
 #else
     return NULL;
 #endif

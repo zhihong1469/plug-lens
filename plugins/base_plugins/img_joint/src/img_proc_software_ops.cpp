@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /**
- * @file    img_proc_software.c
+ * @file    img_proc_software_ops.cpp
  * @brief   Software-based Image Processing Backend Implementation
  * @details Wraps existing img_joint.h functions into factory pattern.
  *          Uses libyuv, libjpeg-turbo, and openh264.
+ *          This is a base_plugin that implements the img_proc_base.h interface.
  *
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
@@ -12,7 +13,6 @@
  * @license MIT License
  */
 
-#include "img_proc_software.h"
 #include "img_proc_base.h"
 #include "img_joint.h"
 #include <stdlib.h>
@@ -239,7 +239,8 @@ static void software_bgr_draw_rect(img_proc_handle_t *handle,
  * Operation Table Definition
  * ========================================================================== */
 
-const img_proc_ops_t img_proc_software_ops = {
+extern "C" {
+extern const img_proc_ops_t img_proc_software_ops = {
     /* Lifecycle */
     .init = software_init,
     .deinit = software_deinit,
@@ -265,3 +266,4 @@ const img_proc_ops_t img_proc_software_ops = {
     /* Drawing */
     .bgr_draw_rect = software_bgr_draw_rect
 };
+}
