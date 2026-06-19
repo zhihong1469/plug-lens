@@ -356,7 +356,7 @@ def run_cmake_build(build_dir: Path, target: str | None, parallel: int = 0) -> t
         return False, cmd_str, [f"构建异常: {e}"]
 
 
-def run_make(build_dir: Path, target: str | None, parallel: int = 0) -> tuple[bool, str, list[str]]:
+def run_make(build_dir: Path, target: str | None, parallel: int = 0, env: dict | None = None) -> tuple[bool, str, list[str]]:
     cmd = ["make"]
     if parallel > 0:
         cmd.append(f"-j{parallel}")
@@ -364,7 +364,19 @@ def run_make(build_dir: Path, target: str | None, parallel: int = 0) -> tuple[bo
         cmd.append(target)
     
     cmd_str = " ".join(cmd)
-    print(f"🔨 构建命令: {cmd_str}")
+    
+    # 添加环境变量信息到命令显示
+    env_info = ""
+    if env:
+        env_vars = []
+        if "CROSS_COMPILE" in env:
+            env_vars.append(f"CROSS_COMPILE={env['CROSS_COMPILE']}")
+        if "PLATFORM" in env:
+            env_vars.append(f"PLATFORM={env['PLATFORM']}")
+        if env_vars:
+            env_info = " ".join(env_vars) + " "
+    
+    print(f"🔨 构建命令: {env_info}{cmd_str}")
 
     evidence = []
     try:
@@ -374,6 +386,7 @@ def run_make(build_dir: Path, target: str | None, parallel: int = 0) -> tuple[bo
             capture_output=True,
             text=True,
             timeout=600,
+            env=env,
         )
         evidence.append(f"构建输出:\n{result.stdout}")
         if result.stderr:
@@ -457,8 +470,24 @@ def build_makefile(
     source_dir: Path,
     target: str | None,
     parallel: int,
+    arch: str | None = None,
 ) -> BuildResult:
-    build_ok, build_cmd, evidence = run_make(source_dir, target, parallel)
+    # 设置平台和交叉编译环境变量
+    env = os.environ.copy()
+    
+    if arch == "arm64":
+        # 优先使用环境变量中的交叉编译器前缀
+        cross_prefix = os.environ.get("CROSS_COMPILE", "")
+        if not cross_prefix:
+            # 默认使用 ARM64 交叉编译器
+            cross_prefix = "aarch64-linux-gnu-"
+        env["CROSS_COMPILE"] = cross_prefix
+        env["PLATFORM"] = "rk3562"
+    else:
+        # 默认使用 i.MX6ULL 平台配置
+        env["PLATFORM"] = os.environ.get("PLATFORM", "imx6ull")
+    
+    build_ok, build_cmd, evidence = run_make(source_dir, target, parallel, env)
     
     if not build_ok:
         return BuildResult(
@@ -570,6 +599,7 @@ def main():
             source_dir=source_dir,
             target=args.target,
             parallel=args.parallel,
+            arch=args.arch,
         )
     
     if args.json:

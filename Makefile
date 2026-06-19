@@ -11,6 +11,9 @@
 
 # ===================== Cross-Compiler Toolchain =====================
 # @brief  Toolchain configuration (native for test, cross-compile for embedded)
+# @usage  Before building, select toolchain:
+#         - i.MX6ULL: use_toolchain arm32-linux-hf6ull
+#         - RK3562:   use_toolchain arm64-linux-75
 # CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
 CROSS_COMPILE ?=
 CC 			:= $(CROSS_COMPILE)gcc
@@ -73,11 +76,20 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \
 	-I$(TOPDIR)/third_lib/tlsf-master \
-	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
+	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
+	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
+	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
+	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
+	-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels \
+	-I$(TOPDIR)/third_lib/aarch64/live555/include/liveMedia \
+	-I$(TOPDIR)/third_lib/aarch64/live555/include/groupsock \
+	-I$(TOPDIR)/third_lib/aarch64/live555/include/UsageEnvironment \
+	-I$(TOPDIR)/third_lib/aarch64/live555/include/BasicUsageEnvironment \
+#	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
 	-I$(TOPDIR)/third_lib/rk3562/rkrga/include \
 	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
-	
-		
+
 # @brief  Export global includes to all submodules
 export GLOBAL_INC
 

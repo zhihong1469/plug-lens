@@ -55,6 +55,13 @@ typedef enum {
     AI_MODEL_ERR_NO_MEM = -5,  /**< Memory allocation failure */
 } ai_model_err_t;
 
+/* ==========================================================================
+ * Input Image Format Definitions
+ * ========================================================================== */
+#define INPUT_FORMAT_YUYV       0   /**< Input image format: YUYV 4:2:2 */
+#define INPUT_FORMAT_MJPEG      1   /**< Input image format: MJPEG compressed */
+#define INPUT_FORMAT_NV12       2   /**< Input image format: NV12 semi-planar */
+
 // ==========================
 // Universal AI Configuration (All Models)
 // ==========================
@@ -114,6 +121,22 @@ struct ai_model_ops {
     ai_model_err_t (*infer)(ai_model_handle_t *handle);           /**< Run model inference */
     ai_model_err_t (*get_result)(ai_model_handle_t *handle, ai_model_detect_result_t *results, uint32_t *result_count); /**< Get detection results */
     ai_model_err_t (*deinit)(ai_model_handle_t *handle);          /**< Release model resources */
+    
+    /* Extended interfaces for face detection */
+    ai_model_err_t (*infer_image)(ai_model_handle_t *handle, 
+                                   uint8_t *image_data, 
+                                   int cam_w, int cam_h,
+                                   uint8_t *rgb_buf,
+                                   ai_model_detect_result_t *results,
+                                   int max_faces,
+                                   int *out_face_num,
+                                   int format);                  /**< Inference with image format conversion */
+    int (*map_and_draw_faces)(ai_model_handle_t *handle,
+                               ai_model_detect_result_t *faces,
+                               int face_num,
+                               int cam_w, int cam_h,
+                               const uint8_t *src_frame,
+                               uint8_t *dst_frame);              /**< Map coordinates and draw face boxes */
 };
 
 // --------------------- Public Universal API ---------------------

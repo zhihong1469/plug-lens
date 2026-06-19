@@ -203,15 +203,89 @@ static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
 
     return AI_MODEL_OK;
 }
+
 /**
- * @brief   Model operation virtual function table
+ * @brief   Extended interface: inference with image format conversion
+ * @details Adapter function wrapping ai_model_mnn_infer_image() for ops table
+ * @param   handle      Model handle
+ * @param   image_data  Input camera frame data
+ * @param   cam_w       Camera frame width
+ * @param   cam_h       Camera frame height
+ * @param   rgb_buf     External BGR buffer for preprocessing
+ * @param   results     Output detection results array
+ * @param   max_faces   Maximum faces to detect
+ * @param   out_face_num Output: actual detected face count
+ * @param   format      Input format (INPUT_FORMAT_YUYV/INPUT_FORMAT_MJPEG)
+ * @return  AI_MODEL_OK on success, negative error code on failure
  */
-static const ai_model_ops_t g_mnn_ai_ops = {
+static ai_model_err_t mnn_ai_infer_image(ai_model_handle_t* handle,
+                                          uint8_t* image_data,
+                                          int cam_w, int cam_h,
+                                          uint8_t* rgb_buf,
+                                          ai_model_detect_result_t* results,
+                                          int max_faces,
+                                          int* out_face_num,
+                                          int format)
+{
+    if (!handle || !image_data || !rgb_buf || !results || !out_face_num) {
+        return AI_MODEL_ERR_PARAM;
+    }
+
+    /* Call standalone MNN inference function */
+    int ret = ai_model_mnn_infer_image(
+        image_data, cam_w, cam_h, rgb_buf,
+        (FaceInfo_C*)results, max_faces, out_face_num,
+        (uint8_t)format
+    );
+
+    return (ret == MNN_FACE_OK) ? AI_MODEL_OK : AI_MODEL_ERR_INFER;
+}
+
+/**
+ * @brief   Extended interface: map coordinates and draw face boxes
+ * @details Adapter function wrapping ai_model_mnn_map_and_draw_faces() for ops table
+ * @param   handle      Model handle (unused, uses global g_priv)
+ * @param   faces       Detection results array
+ * @param   face_num    Number of detected faces
+ * @param   cam_w       Camera frame width
+ * @param   cam_h       Camera frame height
+ * @param   src_frame   Source RGB frame buffer
+ * @param   dst_frame   Output RGB frame buffer with boxes drawn
+ * @return  1 = need save image, 0 = no save
+ */
+static int mnn_ai_map_and_draw_faces(ai_model_handle_t* handle,
+                                      ai_model_detect_result_t* faces,
+                                      int face_num,
+                                      int cam_w, int cam_h,
+                                      const uint8_t* src_frame,
+                                      uint8_t* dst_frame)
+{
+    (void)handle;  /* Unused - uses global singleton g_priv */
+
+    if (!faces || face_num <= 0 || !src_frame || !dst_frame) {
+        return 0;
+    }
+
+    /* Call standalone MNN drawing function */
+    return ai_model_mnn_map_and_draw_faces(
+        (FaceInfo_C*)faces, face_num, cam_w, cam_h,
+        src_frame, dst_frame
+    );
+}
+
+/**
+ * @brief   Model operation virtual function table (extern visible for factory)
+ * @note    Removed 'static' to allow factory pattern linking
+ */
+extern "C" const ai_model_ops_t ai_model_mnn_ops = {
     .init       = mnn_ai_init,
     .input      = mnn_ai_input,
     .infer      = mnn_ai_infer,
     .get_result = mnn_ai_get_result,
     .deinit     = mnn_ai_deinit,
+    /* Extended interfaces for face detection */
+    .infer_image = mnn_ai_infer_image,
+    .map_and_draw_faces = mnn_ai_map_and_draw_faces,
 };
 // ==========================
 // Public API Implementations
@@ -221,7 +295,7 @@ static const ai_model_ops_t g_mnn_ai_ops = {
  */
 ai_model_handle_t* ai_model_mnn_create(const ai_model_config_t* config)
 {
-    return ai_model_create(config, &g_mnn_ai_ops);
+    return ai_model_create(config, &ai_model_mnn_ops);
 }
 
 /**
