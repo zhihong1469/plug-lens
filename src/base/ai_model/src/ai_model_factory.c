@@ -5,7 +5,7 @@
 #include "ai_model_mnn.hpp"
 extern const ai_model_ops_t ai_model_mnn_ops;
 #elif AI_ENGINE_RKNN
-#include "ai_model_rknn.h"
+#include "ai_model_rknn.hpp"
 extern const ai_model_ops_t ai_model_rknn_ops;
 #endif
 

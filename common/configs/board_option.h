@@ -50,12 +50,12 @@ extern "C" {
  * AI Inference Engine Selection (Auto-selected based on platform)
  * ========================================================================== */
 /**
- * @brief RK3562 当前使用 MNN（RKNN 待后续实现）
- * @note  TODO: 后续实现 RKNN 硬件加速
+ * @brief RK3562 使用 RKNN NPU 硬件加速
+ * @note  RKNN 已完成实现，支持 INT8 量化模型
  */
 #if PLATFORM_RK3562
-    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration - TODO */
-    #define AI_ENGINE_MNN    1  /* CPU-based inference - 当前使用 */
+    #define AI_ENGINE_RKNN   1  /* RK3562 NPU hardware acceleration - Enabled */
+    #define AI_ENGINE_MNN    0  /* CPU-based inference */
 #else
     #define AI_ENGINE_RKNN   0
     #define AI_ENGINE_MNN    1  /* i.MX6ULL uses MNN */
@@ -77,12 +77,12 @@ extern "C" {
  * Video Encoder Selection (Auto-selected based on platform)
  * ========================================================================== */
 /**
- * @brief RK3562 当前使用软件编码（MPP 待后续实现）
- * @note  TODO: 后续实现 MPP 硬件编码
+ * @brief RK3562 使用 MPP 硬件编码（已集成在 img_rga 插件中）
+ * @note  MPP H.264 硬件编码已实现，支持 NV12 输入
  */
 #if PLATFORM_RK3562
-    #define VIDEO_ENCODER_MPP   0  /* RKMPP hardware encoding - TODO */
-    #define VIDEO_ENCODER_SW    1  /* Software encoding - 当前使用 */
+    #define VIDEO_ENCODER_MPP   1  /* RKMPP hardware encoding - Enabled */
+    #define VIDEO_ENCODER_SW    0  /* Software encoding - Not needed */
 #else
     #define VIDEO_ENCODER_MPP   0
     #define VIDEO_ENCODER_SW    1  /* i.MX6ULL uses openh264/libjpeg-turbo */

@@ -456,7 +456,7 @@ static h264_encoder_t rga_h264_encoder_create(img_proc_handle_t *handle,
     }
 
     /* Create buffer group for frame buffers */
-    ret = mpp_buffer_group_get(&enc_ctx->buf_grp, MPP_BUFFER_TYPE_ION, MPP_BUFFER_INTERNAL);
+    ret = mpp_buffer_group_get(&enc_ctx->buf_grp, MPP_BUFFER_TYPE_ION, MPP_BUFFER_INTERNAL, "img_rga", __func__);
     if (ret != MPP_OK) {
         LOG_W(MODULE_TAG "MPP buffer group create failed: %d, will use malloc buffer", ret);
         enc_ctx->buf_grp = NULL;
@@ -497,7 +497,7 @@ static img_proc_err_t rga_yuyv_to_h264(img_proc_handle_t *handle,
     mpp_encoder_ctx_t *enc_ctx = (mpp_encoder_ctx_t *)encoder;
     if (!enc_ctx->initialized) {
         LOG_E(MODULE_TAG "MPP encoder not initialized");
-        return IMG_PROC_ERR_NOT_INIT;
+        return IMG_PROC_ERR_INIT;
     }
 
     /* Convert YUYV to NV12 (MPP requires NV12 input) */
@@ -524,9 +524,9 @@ static img_proc_err_t rga_yuyv_to_h264(img_proc_handle_t *handle,
 
     /* Create MPP frame */
     MppFrame frame = NULL;
-    MPP_RET ret = mpp_frame_create(&frame);
+    MPP_RET ret = mpp_frame_init(&frame);
     if (ret != MPP_OK) {
-        LOG_E(MODULE_TAG "MPP frame create failed: %d", ret);
+        LOG_E(MODULE_TAG "MPP frame init failed: %d", ret);
         return IMG_PROC_ERR_NO_MEM;
     }
 

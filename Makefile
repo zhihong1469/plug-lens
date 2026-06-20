@@ -9,6 +9,16 @@
 # @license MIT License
 # ==========================================================================
 
+# ===================== Platform Configuration =====================
+# @brief  Platform selection (must match board_option.h)
+# @usage  Set PLATFORM_RK3562=1 for RK3562, or PLATFORM_IMX6ULL=1 for i.MX6ULL
+# @note   Default: RK3562 platform
+PLATFORM_RK3562 ?= 1
+PLATFORM_IMX6ULL ?= 0
+
+# @brief  Export platform configuration to sub-makefiles
+export PLATFORM_RK3562 PLATFORM_IMX6ULL
+
 # ===================== Cross-Compiler Toolchain =====================
 # @brief  Toolchain configuration (native for test, cross-compile for embedded)
 # @usage  Before building, select toolchain:
@@ -79,20 +89,28 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/third_lib/tlsf-master \
 	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	-I$(TOPDIR)/plugins/base_plugins/ai_model_rknn/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
+
+# @brief  RK3562 platform specific includes
+GLOBAL_INC += \
 	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
 	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
 	-I$(TOPDIR)/third_lib/rk3562/rkrga/include \
-# 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
-	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
-	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
-	-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/liveMedia \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/groupsock \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/aarch64/live555/include/BasicUsageEnvironment \
+	-I$(TOPDIR)/third_lib/rk3562/live555/include/liveMedia \
+	-I$(TOPDIR)/third_lib/rk3562/live555/include/groupsock \
+	-I$(TOPDIR)/third_lib/rk3562/live555/include/UsageEnvironment \
+	-I$(TOPDIR)/third_lib/rk3562/live555/include/BasicUsageEnvironment \
+	-I$(TOPDIR)/third_lib/rk3562/libjpeg_turbo/include \
 
+# @brief  Software libraries - only needed for i.MX6ULL (RK3562 uses hardware acceleration)
+ifeq ($(PLATFORM_IMX6ULL),1)
+# 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
+	GLOBAL_INC += \
+		-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
+		-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels
+endif
 
 # @brief  Export global includes to all submodules
 export GLOBAL_INC

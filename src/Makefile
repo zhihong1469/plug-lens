@@ -39,4 +39,6 @@ LDFLAGS := \
 	-L$(TOPDIR)/third_lib/rk3562/rkrga/lib -lrga \
 	-L$(TOPDIR)/third_lib/rk3562/rkmpp/lib -lrockchip_mpp \
 	-L$(TOPDIR)/third_lib/rk3562/rknn/lib -lrknnrt -lmk_api \
+	-L$(TOPDIR)/third_lib/rk3562/libjpeg_turbo/lib -ljpeg -lturbojpeg \
+	-L$(TOPDIR)/third_lib/rk3562/live555/lib -lliveMedia -lgroupsock -lUsageEnvironment -lBasicUsageEnvironment \
 	$(PLATFORM_LIBS)

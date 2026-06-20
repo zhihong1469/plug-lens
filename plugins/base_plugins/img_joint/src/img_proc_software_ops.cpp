@@ -15,6 +15,7 @@
 
 #include "img_proc_base.h"
 #include "img_joint.h"
+#include "board_option.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,7 +25,9 @@ typedef struct {
     int height;
     int fps;
     int jpeg_quality;
+#if VIDEO_ENCODER_SW
     h264_encoder_t h264_encoder;
+#endif
 } img_proc_software_ctx_t;
 
 /* ==========================================================================
@@ -60,11 +63,13 @@ static img_proc_err_t software_deinit(img_proc_handle_t *handle)
 
     img_proc_software_ctx_t *ctx = (img_proc_software_ctx_t *)handle->user_data;
     
-    /* Destroy H264 encoder if created */
+    /* Destroy H264 encoder if created (software encoder only) */
+#if VIDEO_ENCODER_SW
     if (ctx->h264_encoder) {
         h264_encoder_destroy(ctx->h264_encoder);
         ctx->h264_encoder = NULL;
     }
+#endif
 
     free(ctx);
     handle->user_data = NULL;
@@ -75,6 +80,7 @@ static img_proc_err_t software_deinit(img_proc_handle_t *handle)
  * Format Conversion
  * ========================================================================== */
 
+#if IMG_PROC_SOFTWARE
 static img_proc_err_t software_yuyv_to_rgb(img_proc_handle_t *handle,
                                             const uint8_t *yuyv, uint8_t *rgb)
 {
@@ -114,6 +120,7 @@ static img_proc_err_t software_yuyv_to_i420(img_proc_handle_t *handle,
     
     return (ret == IMG_JOINT_OK) ? IMG_PROC_OK : IMG_PROC_ERR_CONVERT;
 }
+#endif
 
 /**
  * @brief   MJPEG to RGB conversion (software backend)
@@ -137,6 +144,7 @@ img_proc_err_t software_mjpeg_to_rgb(img_proc_handle_t *handle,
  * Image Resize
  * ========================================================================== */
 
+#if IMG_PROC_SOFTWARE
 static img_proc_err_t software_rgb_resize(img_proc_handle_t *handle,
                                            const uint8_t *src_rgb, int src_w, int src_h,
                                            uint8_t *dst_rgb, int dst_w, int dst_h)
@@ -148,6 +156,7 @@ static img_proc_err_t software_rgb_resize(img_proc_handle_t *handle,
     int ret = rgb_resize(src_rgb, src_w, src_h, dst_rgb, dst_w, dst_h);
     return (ret == IMG_JOINT_OK) ? IMG_PROC_OK : IMG_PROC_ERR_CONVERT;
 }
+#endif
 
 /* ==========================================================================
  * JPEG Compression
@@ -163,9 +172,9 @@ static img_proc_err_t software_rgb_to_jpeg(img_proc_handle_t *handle,
 }
 
 /* ==========================================================================
- * H.264 Encoding
+ * H.264 Encoding (Software encoder only)
  * ========================================================================== */
-
+#if VIDEO_ENCODER_SW
 static h264_encoder_t software_h264_encoder_create(img_proc_handle_t *handle,
                                                     const h264_enc_config_t *cfg)
 {
@@ -225,6 +234,7 @@ static void software_h264_encoder_destroy(img_proc_handle_t *handle,
         ctx->h264_encoder = NULL;
     }
 }
+#endif
 
 /* ==========================================================================
  * Drawing Utilities
@@ -250,22 +260,39 @@ extern const img_proc_ops_t img_proc_software_ops = {
     .deinit = software_deinit,
     
     /* Format conversion */
+#if IMG_PROC_SOFTWARE
     .yuyv_to_rgb = software_yuyv_to_rgb,
     .yuyv_to_nv12 = software_yuyv_to_nv12,
     .yuyv_to_i420 = software_yuyv_to_i420,
+#else
+    .yuyv_to_rgb = NULL,
+    .yuyv_to_nv12 = NULL,
+    .yuyv_to_i420 = NULL,
+#endif
     .mjpeg_to_rgb = software_mjpeg_to_rgb,
     
     /* Resize */
+#if IMG_PROC_SOFTWARE
     .rgb_resize = software_rgb_resize,
+#else
+    .rgb_resize = NULL,
+#endif
     
     /* JPEG compression */
     .rgb_to_jpeg = software_rgb_to_jpeg,
     
     /* H.264 encoding */
+#if VIDEO_ENCODER_SW
     .h264_encoder_create = software_h264_encoder_create,
     .yuyv_to_h264 = software_yuyv_to_h264,
     .h264_encoder_get_sps_pps = software_h264_encoder_get_sps_pps,
     .h264_encoder_destroy = software_h264_encoder_destroy,
+#else
+    .h264_encoder_create = NULL,
+    .yuyv_to_h264 = NULL,
+    .h264_encoder_get_sps_pps = NULL,
+    .h264_encoder_destroy = NULL,
+#endif
     
     /* Drawing */
     .bgr_draw_rect = software_bgr_draw_rect
