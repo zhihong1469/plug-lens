@@ -115,9 +115,13 @@ static img_proc_err_t software_yuyv_to_i420(img_proc_handle_t *handle,
     return (ret == IMG_JOINT_OK) ? IMG_PROC_OK : IMG_PROC_ERR_CONVERT;
 }
 
-static img_proc_err_t software_mjpeg_to_rgb(img_proc_handle_t *handle,
-                                             const uint8_t *mjpeg, int mjpeg_len,
-                                             uint8_t *rgb)
+/**
+ * @brief   MJPEG to RGB conversion (software backend)
+ * @note    Exported for external fallback use (e.g., RGA doesn't support MJPEG decode)
+ */
+img_proc_err_t software_mjpeg_to_rgb(img_proc_handle_t *handle,
+                                     const uint8_t *mjpeg, int mjpeg_len,
+                                     uint8_t *rgb)
 {
     if (!handle || !mjpeg || !rgb) {
         return IMG_PROC_ERR_PARAM;

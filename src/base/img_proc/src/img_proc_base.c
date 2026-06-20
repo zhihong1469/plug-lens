@@ -7,7 +7,7 @@
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
  * @date    2026-06-19
- * @version v1.0.0
+ * @version v2.0.0
  * @license MIT License
  */
 
@@ -26,16 +26,16 @@ size_t img_proc_calc_buffer_size(img_format_t format, int width, int height)
 
     switch (format) {
         case IMG_FORMAT_YUYV:
-            return width * height * 2;  /* 2 bytes per pixel */
+            return (size_t)width * height * 2;  /* 2 bytes per pixel */
         case IMG_FORMAT_RGB888:
         case IMG_FORMAT_BGR888:
-            return width * height * 3;  /* 3 bytes per pixel */
+            return (size_t)width * height * 3;  /* 3 bytes per pixel */
         case IMG_FORMAT_NV12:
         case IMG_FORMAT_I420:
-            return width * height * 3 / 2;  /* YUV420 */
+            return (size_t)width * height * 3 / 2;  /* YUV420 */
         case IMG_FORMAT_MJPEG:
         case IMG_FORMAT_JPEG:
-            return width * height;  /* Estimate, actual size varies */
+            return (size_t)width * height;  /* Estimate, actual size varies */
         default:
             return 0;
     }
@@ -45,7 +45,8 @@ size_t img_proc_calc_buffer_size(img_format_t format, int width, int height)
  * @brief   Create image processing instance
  */
 img_proc_handle_t *img_proc_create(const img_proc_config_t *config,
-                                    const img_proc_ops_t *ops)
+                                    const img_proc_ops_t *ops,
+                                    img_proc_type_t type)
 {
     if (!config || !ops) {
         return NULL;
@@ -60,7 +61,9 @@ img_proc_handle_t *img_proc_create(const img_proc_config_t *config,
     memset(handle, 0, sizeof(img_proc_handle_t));
     handle->ops = ops;
     handle->config = *config;  /* Copy configuration */
+    handle->type = type;
     handle->user_data = NULL;
+    handle->is_singleton = false;
 
     return handle;
 }
@@ -71,6 +74,11 @@ img_proc_handle_t *img_proc_create(const img_proc_config_t *config,
 void img_proc_destroy(img_proc_handle_t *handle)
 {
     if (!handle) {
+        return;
+    }
+
+    /* Don't destroy singleton instances */
+    if (handle->is_singleton) {
         return;
     }
 
@@ -102,4 +110,41 @@ img_proc_err_t img_proc_deinit(img_proc_handle_t *handle)
         return IMG_PROC_ERR_PARAM;
     }
     return handle->ops->deinit(handle);
+}
+
+/* ==========================================================================
+ * Sub-operation Accessors (for v2.0.0 interface segregation)
+ * ========================================================================== */
+
+/**
+ * @brief   Get convert operations from handle
+ */
+const img_proc_convert_ops_t *img_proc_get_convert_ops(img_proc_handle_t *handle)
+{
+    if (!handle || !handle->ops) {
+        return NULL;
+    }
+    return handle->ops->convert_ops;
+}
+
+/**
+ * @brief   Get codec operations from handle
+ */
+const img_proc_codec_ops_t *img_proc_get_codec_ops(img_proc_handle_t *handle)
+{
+    if (!handle || !handle->ops) {
+        return NULL;
+    }
+    return handle->ops->codec_ops;
+}
+
+/**
+ * @brief   Get draw operations from handle
+ */
+const img_proc_draw_ops_t *img_proc_get_draw_ops(img_proc_handle_t *handle)
+{
+    if (!handle || !handle->ops) {
+        return NULL;
+    }
+    return handle->ops->draw_ops;
 }

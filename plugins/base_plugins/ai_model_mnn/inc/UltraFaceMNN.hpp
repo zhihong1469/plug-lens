@@ -166,6 +166,24 @@ public:
                ImageFormat format = IMAGE_FORMAT_YUYV);
 
     /**
+     * @brief   Run face detection with pre-converted RGB input
+     * @param   rgb_data        Pointer to RGB888 image data (already converted)
+     * @param   cam_w           Image width
+     * @param   cam_h           Image height
+     * @param   face_list       Output list of detected faces
+     * @return  MNN_FACE_OK on success, negative error code on failure
+     * @pre     Module must be initialized (is_ready() == true)
+     * @pre     rgb_data must point to valid RGB888 buffer
+     * @post    face_list contains valid detection results
+     * @note    Used with img_proc_factory backend for hardware acceleration
+     * @thread_safety No
+     */
+    int detect_rgb_only(const uint8_t* rgb_data,
+                       int cam_w,
+                       int cam_h,
+                       std::vector<FaceInfo_MNN>& face_list);
+
+    /**
      * @brief   Map model coordinates to original image resolution
      * @param   face    Face result to be mapped
      * @param   ai_w    Model input width

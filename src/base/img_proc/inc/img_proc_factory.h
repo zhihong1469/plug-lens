@@ -6,10 +6,14 @@
  *          Automatically selects software (libyuv/libjpeg-turbo) or 
  *          hardware (RGA/MPP) backend based on platform configuration.
  *
+ *          Architecture (方案C - 混合方案):
+ *          - img_proc_convert_create: 获取转换/缩放能力（单例共享）
+ *          - img_proc_codec_create: 获取编解码能力（独立创建）
+ *
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
  * @date    2026-06-19
- * @version v1.0.0
+ * @version v2.0.0
  * @license MIT License
  */
 
@@ -23,42 +27,50 @@ extern "C" {
 #endif
 
 /**
- * @brief   Create image processing instance based on platform configuration
- * @details Automatically selects the appropriate backend (software/hardware)
- *          based on the BOARD_OPTION_H settings.
- * @param   config  Pointer to image processing configuration structure
+ * @brief   Create image processing instance for format conversion and resize
+ * @details Returns a singleton instance for format conversion/resize operations.
+ *          The singleton is lazily initialized and shared across all callers.
+ * @param   config  Pointer to configuration
+ * @return  Shared singleton handle on success, NULL on failure
+ * @note    Thread-safe. Caller must NOT call factory_destroy() on returned handle.
+ * @see     img_proc_codec_create() for encoder instance
+ */
+img_proc_handle_t *img_proc_convert_create(const img_proc_config_t *config);
+
+/**
+ * @brief   Create image processing instance for encoding (H.264/JPEG)
+ * @details Returns an independent instance for encoding operations.
+ *          Each call creates a new encoder with its own configuration.
+ * @param   config  Pointer to configuration
+ * @return  Independent encoder handle on success, NULL on failure
+ * @note    Caller MUST call factory_destroy() when done.
+ * @see     img_proc_convert_create() for shared conversion instance
+ */
+img_proc_handle_t *img_proc_codec_create(const img_proc_config_t *config);
+
+/**
+ * @brief   Get singleton image processing instance (legacy compatibility)
+ * @details Equivalent to img_proc_convert_create(). Kept for backward compatibility.
+ * @param   config  Pointer to configuration
+ * @return  Shared singleton handle on success, NULL on failure
+ * @deprecated Use img_proc_convert_create() instead
+ */
+img_proc_handle_t *img_proc_factory_get_singleton(const img_proc_config_t *config);
+
+/**
+ * @brief   Create image processing instance based on platform configuration (legacy)
+ * @details Kept for backward compatibility. Use img_proc_convert_create() or
+ *          img_proc_codec_create() for new code.
+ * @param   config  Pointer to configuration
  * @return  Valid image processing handle on success, NULL on failure
- *
- * @pre     config must not be NULL and must contain valid parameters
- * @post    Handle is allocated but module is NOT initialized (call init() to start)
- * @note    Factory pattern hides implementation details from caller
- * @warning Caller is responsible for destroying the handle when done
- *
- * @example
- * @code
- * img_proc_config_t config = {
- *     .width = 640,
- *     .height = 480,
- *     .fps = 30,
- *     .bitrate = 500,
- *     .gop = 15,
- *     .jpeg_quality = 50
- * };
- * img_proc_handle_t *handle = img_proc_factory_create(&config);
- * if (handle) {
- *     handle->ops->init(handle);
- *     // ... use image processing ...
- *     handle->ops->deinit(handle);
- *     img_proc_factory_destroy(handle);
- * }
- * @endcode
+ * @deprecated Use img_proc_convert_create() or img_proc_codec_create() instead
  */
 img_proc_handle_t *img_proc_factory_create(const img_proc_config_t *config);
 
 /**
  * @brief   Destroy image processing instance
  * @param   handle  Image processing handle to destroy
- * @note    Safe to call with NULL handle
+ * @note    Safe to call with NULL handle. Singleton handles are silently ignored.
  */
 void img_proc_factory_destroy(img_proc_handle_t *handle);
 

@@ -3,8 +3,8 @@
  * @brief   UltraFace MNN Face Detection Implementation
  * @details Internal design & optimizations:
  *          1. Anchor-based detection with precomputed prior boxes
- *          2. libyuv acceleration for image conversion/resizing
- *          3. Low-precision inference for i.MX6ULL CPU optimization
+ *          2. img_proc_factory backend for image conversion/resizing (RGA or software)
+ *          3. Low-precision inference for embedded CPU optimization
  *          4. Memory-safe buffer management (no runtime leaks)
  *          5. NMS suppression for redundant face removal
  *
@@ -15,13 +15,15 @@
  * @date    2026-05-29
  * @version v1.0.0
  * @license MIT License
+ *
+ * @note    Image processing is delegated to img_proc_factory (RGA hardware or libyuv software)
  */
 
 #include "UltraFaceMNN.hpp"
 #include <string.h>
 #include <algorithm>
 #include <math.h>
-#include "img_joint.h"
+#include "img_joint.h"  /* For legacy detect() compatibility, will be removed later */
 
 /** Clip value to range [0, y] */
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
@@ -104,7 +106,7 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
 }
 
 // ==============================================================================
-// Public: Core Face Detection Inference
+// Public: Core Face Detection Inference (Legacy - uses img_joint directly)
 // ==============================================================================
 int UltraFaceMNN::detect(const uint8_t* input_data, 
                          int cam_w, 
@@ -132,9 +134,25 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
         return conv_ret;
     }
 
+    // Use the RGB-only detection function
+    return detect_rgb_only(external_rgb_buf, cam_w, cam_h, face_list);
+}
+
+// ==============================================================================
+// Public: Face Detection with Pre-converted RGB Input
+// ==============================================================================
+int UltraFaceMNN::detect_rgb_only(const uint8_t* rgb_data,
+                                  int cam_w,
+                                  int cam_h,
+                                  std::vector<FaceInfo_MNN>& face_list) {
+    if (!m_ready || !rgb_data) {
+        return MNN_FACE_ERR_INPUT;
+    }
+    face_list.clear();
+
     // ---------------------- RGB Image Resizing (libyuv hardware acceleration) ----------------------
     uint8_t* ai_img_buf = new uint8_t[m_ai_w * m_ai_h * 3];
-    conv_ret = rgb_resize(external_rgb_buf, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
+    int conv_ret = rgb_resize(rgb_data, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
     if (conv_ret != 0) {
         delete[] ai_img_buf;
         return MNN_FACE_ERR_INPUT;

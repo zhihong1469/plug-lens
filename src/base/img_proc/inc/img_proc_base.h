@@ -6,10 +6,14 @@
  *          Provides unified abstract interface for format conversion, encoding, compression.
  *          Supports software (libyuv/libjpeg-turbo/openh264) and hardware (RGA/MPP) backends.
  *
+ *          Architecture (方案C - 混合方案):
+ *          - 转换/缩放: 使用单例共享（img_proc_convert_create）
+ *          - 编解码: 独立创建（img_proc_codec_create）
+ *
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
  * @date    2026-06-19
- * @version v1.0.0
+ * @version v2.0.0
  * @license MIT License
  *
  * @note    Global rules:
@@ -41,8 +45,8 @@ typedef enum {
     IMG_PROC_ERR_PARAM    = -1,   /**< Invalid input parameter */
     IMG_PROC_ERR_INIT     = -2,   /**< Module initialization failure */
     IMG_PROC_ERR_CONVERT  = -3,   /**< Format conversion failure */
-    IMG_PROC_ERR_ENCODE   = -4,   /**< Encoding/compression failure */
-    IMG_PROC_ERR_NO_MEM   = -5,   /**< Memory allocation failure */
+    IMG_PROC_ERR_ENCODE  = -4,   /**< Encoding/compression failure */
+    IMG_PROC_ERR_NO_MEM  = -5,   /**< Memory allocation failure */
     IMG_PROC_ERR_UNSUPPORTED = -6 /**< Unsupported format/operation */
 } img_proc_err_t;
 
@@ -56,8 +60,8 @@ typedef enum {
 typedef enum {
     IMG_FORMAT_YUYV   = 0,    /**< YUYV 4:2:2 interleaved (camera default) */
     IMG_FORMAT_RGB888 = 1,    /**< RGB888 24-bit (AI model input) */
-    IMG_FORMAT_BGR888 = 2,    /**< BGR888 24-bit (OpenCV compatible) */
-    IMG_FORMAT_NV12   = 3,    /**< NV12 semi-planar (MPP encoder input) */
+    IMG_FORMAT_BGR888 = 2,   /**< BGR888 24-bit (OpenCV compatible) */
+    IMG_FORMAT_NV12   = 3,   /**< NV12 semi-planar (MPP encoder input) */
     IMG_FORMAT_I420   = 4,    /**< I420 planar (openh264 encoder input) */
     IMG_FORMAT_MJPEG  = 5,    /**< MJPEG compressed (some cameras) */
     IMG_FORMAT_JPEG   = 6,    /**< JPEG compressed (storage) */
@@ -83,8 +87,6 @@ typedef struct {
 
 /**
  * @brief   H.264 encoder configuration
- * @details Reuse img_joint.h definition for compatibility
- * @note    Include img_joint.h for detailed definition
  */
 typedef struct {
     int     width;          /**< Video width (MUST be even) */
@@ -96,7 +98,71 @@ typedef struct {
 } h264_enc_config_t;
 
 /* ==========================================================================
- * Base Class Core Structures
+ * Image Processing Type (for factory selection)
+ * ========================================================================== */
+
+/**
+ * @brief   Image processing capability type
+ * @details Used by factory to select appropriate backend ops table
+ */
+typedef enum {
+    IMG_PROC_TYPE_CONVERT = 0,  /**< Format conversion + resize (ai_model_mnn uses) */
+    IMG_PROC_TYPE_CODEC   = 1,  /**< Encoding + JPEG (net_push_srv uses) */
+    IMG_PROC_TYPE_ALL     = 2   /**< All capabilities (legacy compatibility) */
+} img_proc_type_t;
+
+/* ==========================================================================
+ * Sub-operation Tables (for interface segregation)
+ * ========================================================================== */
+
+/**
+ * @brief   H.264 encoder handle (forward declaration for sub-ops)
+ */
+typedef void* h264_encoder_t;
+
+/**
+ * @brief   Format conversion operations
+ * @details Subset of img_proc_ops for format conversion
+ */
+typedef struct img_proc_convert_ops {
+    img_proc_err_t (*init)(void *user_data);
+    img_proc_err_t (*deinit)(void *user_data);
+    img_proc_err_t (*yuyv_to_rgb)(void *user_data, const uint8_t *yuyv, uint8_t *rgb);
+    img_proc_err_t (*yuyv_to_nv12)(void *user_data, const uint8_t *yuyv, uint8_t *nv12);
+    img_proc_err_t (*yuyv_to_i420)(void *user_data, const uint8_t *yuyv, uint8_t *i420);
+    img_proc_err_t (*mjpeg_to_rgb)(void *user_data, const uint8_t *mjpeg, int mjpeg_len, uint8_t *rgb);
+    img_proc_err_t (*rgb_resize)(void *user_data, const uint8_t *src, int src_w, int src_h,
+                                 uint8_t *dst, int dst_w, int dst_h);
+} img_proc_convert_ops_t;
+
+/**
+ * @brief   Codec operations (H.264 + JPEG)
+ * @details Subset of img_proc_ops for encoding
+ */
+typedef struct img_proc_codec_ops {
+    img_proc_err_t (*init)(void *user_data);
+    img_proc_err_t (*deinit)(void *user_data);
+    h264_encoder_t (*h264_encoder_create)(void *user_data, const h264_enc_config_t *cfg);
+    img_proc_err_t (*yuyv_to_h264)(void *user_data, h264_encoder_t enc,
+                                   const uint8_t *yuyv, int yuyv_len,
+                                   uint8_t *h264, int *h264_len);
+    img_proc_err_t (*h264_encoder_get_sps_pps)(void *user_data, h264_encoder_t enc,
+                                               uint8_t *sps_pps, int *len);
+    void (*h264_encoder_destroy)(void *user_data, h264_encoder_t enc);
+    img_proc_err_t (*rgb_to_jpeg)(void *user_data, const uint8_t *rgb,
+                                  uint8_t *jpeg, size_t *jpeg_len);
+} img_proc_codec_ops_t;
+
+/**
+ * @brief   Drawing operations
+ */
+typedef struct img_proc_draw_ops {
+    void (*bgr_draw_rect)(void *user_data, uint8_t *bgr, int width, int height,
+                          int x, int y, int w, int h, uint32_t color, int thickness);
+} img_proc_draw_ops_t;
+
+/* ==========================================================================
+ * Unified Operation Table (backward compatible)
  * ========================================================================== */
 
 /**
@@ -111,17 +177,13 @@ typedef struct img_proc_ops img_proc_ops_t;
 typedef struct {
     const img_proc_ops_t *ops;      /**< Polymorphic operation table */
     img_proc_config_t     config;   /**< Configuration copy */
+    img_proc_type_t       type;     /**< Processing type */
     void                 *user_data; /**< Backend private data */
+    bool                  is_singleton; /**< Singleton flag: true=global shared, don't destroy */
 } img_proc_handle_t;
 
 /**
- * @brief   H.264 encoder handle (opaque)
- * @details Reuse img_joint.h definition: typedef void* h264_encoder_t
- */
-typedef void* h264_encoder_t;
-
-/**
- * @brief   Image processing virtual function table
+ * @brief   Image processing virtual function table (full capabilities)
  * @details Mandatory interfaces for all backends (software/hardware)
  */
 struct img_proc_ops {
@@ -168,6 +230,11 @@ struct img_proc_ops {
                           uint8_t *bgr_data, int width, int height,
                           int x, int y, int w, int h,
                           uint32_t color, int thickness);
+
+    /* Sub-operation tables (new in v2.0.0) */
+    const img_proc_convert_ops_t *convert_ops;
+    const img_proc_codec_ops_t   *codec_ops;
+    const img_proc_draw_ops_t    *draw_ops;
 };
 
 /* ==========================================================================
@@ -181,7 +248,8 @@ struct img_proc_ops {
  * @return  Valid handle on success, NULL on failure
  */
 img_proc_handle_t *img_proc_create(const img_proc_config_t *config,
-                                    const img_proc_ops_t *ops);
+                                    const img_proc_ops_t *ops,
+                                    img_proc_type_t type);
 
 /**
  * @brief   Destroy image processing instance
@@ -202,6 +270,31 @@ img_proc_err_t img_proc_init(img_proc_handle_t *handle);
  * @return  img_proc_err_t
  */
 img_proc_err_t img_proc_deinit(img_proc_handle_t *handle);
+
+/* ==========================================================================
+ * Sub-operation Accessors (for v2.0.0 interface segregation)
+ * ========================================================================== */
+
+/**
+ * @brief   Get convert operations from handle
+ * @param   handle  Instance handle
+ * @return  Convert ops table or NULL if not supported
+ */
+const img_proc_convert_ops_t *img_proc_get_convert_ops(img_proc_handle_t *handle);
+
+/**
+ * @brief   Get codec operations from handle
+ * @param   handle  Instance handle
+ * @return  Codec ops table or NULL if not supported
+ */
+const img_proc_codec_ops_t *img_proc_get_codec_ops(img_proc_handle_t *handle);
+
+/**
+ * @brief   Get draw operations from handle
+ * @param   handle  Instance handle
+ * @return  Draw ops table or NULL if not supported
+ */
+const img_proc_draw_ops_t *img_proc_get_draw_ops(img_proc_handle_t *handle);
 
 /* ==========================================================================
  * Helper Functions

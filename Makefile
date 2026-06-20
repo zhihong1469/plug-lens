@@ -81,7 +81,10 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
-	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
+	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
+	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
+	-I$(TOPDIR)/third_lib/rk3562/rkrga/include \
+# 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/aarch64/libjpeg_turbo/include \
 	-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
 	-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels \
@@ -89,9 +92,7 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/third_lib/aarch64/live555/include/groupsock \
 	-I$(TOPDIR)/third_lib/aarch64/live555/include/UsageEnvironment \
 	-I$(TOPDIR)/third_lib/aarch64/live555/include/BasicUsageEnvironment \
-	-I$(TOPDIR)/third_lib/aarch64/rkrga/include \
-# 	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
-	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
+
 
 # @brief  Export global includes to all submodules
 export GLOBAL_INC

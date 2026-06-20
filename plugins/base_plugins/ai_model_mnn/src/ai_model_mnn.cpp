@@ -26,6 +26,9 @@
 #include <vector>
 #include <algorithm>
 #include "utils.h"
+/* Image processing backend: use factory pattern for hardware/software switching */
+#include "img_proc_factory.h"
+/* Drawing utilities (bgr_draw_rect) */
 #include "img_joint.h"
 
 using namespace std;
@@ -44,6 +47,8 @@ typedef struct {
     const uint8_t*           frame_data;     /**< Input camera frame data */
     uint8_t*                 external_bgr_buf;/**< External BGR preprocessing buffer */
     vector<FaceInfo_MNN>     curr_faces;     /**< Internal face detection results */
+    /* Image processing backend handle (factory pattern) */
+    img_proc_handle_t*       img_proc;       /**< Hardware/software backend handle */
 } mnn_priv_t;
 
 // ==========================
@@ -90,6 +95,21 @@ static ai_model_err_t mnn_ai_init(ai_model_handle_t* handle)
         delete priv;
         return AI_MODEL_ERR_INIT;
     }
+
+    /* Get shared image processing singleton (RGA or software) */
+    img_proc_config_t img_config;
+    img_config.width = (int)handle->config.input_width;
+    img_config.height = (int)handle->config.input_height;
+    img_config.fps = 30;
+    img_config.jpeg_quality = 85;
+    priv->img_proc = img_proc_factory_get_singleton(&img_config);
+    if (!priv->img_proc) {
+        priv->ultra_face->deinit();
+        delete priv->ultra_face;
+        delete priv;
+        return AI_MODEL_ERR_INIT;
+    }
+    /* Singleton is auto-initialized by factory, no need to call init() */
 
     priv->ai_w = handle->config.input_width;
     priv->ai_h = handle->config.input_height;
@@ -190,6 +210,9 @@ static ai_model_err_t mnn_ai_deinit(ai_model_handle_t* handle)
 
     mnn_priv_t* priv = (mnn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_OK;
+
+    /* Note: img_proc is a singleton, do NOT destroy it here.
+     * The singleton persists for the lifetime of the process. */
 
     if (priv->ultra_face) {
         priv->ultra_face->deinit();
@@ -476,26 +499,50 @@ bool ai_model_mnn_is_ready(void)
 
 /**
  * @brief   Universal inference with format support
+ * @details Uses img_proc_factory backend (RGA or software) for format conversion
  */
 int ai_model_mnn_infer_image(const uint8_t* image_data, int cam_w, int cam_h,
                             uint8_t* external_bgr_buf,
                             FaceInfo_C* out_faces, int max_faces, int* out_face_num,
                             uint8_t format)
 {
-    if (!g_priv || !out_faces || !out_face_num || !external_bgr_buf) {
+    if (!g_priv || !out_faces || !out_face_num || !external_bgr_buf || !g_priv->img_proc) {
         return MNN_FACE_ERR_INPUT;
     }
 
     g_priv->external_bgr_buf = external_bgr_buf;
 
+    /* Use img_proc_factory backend for format conversion (RGA or software) */
+    img_proc_err_t proc_ret;
+    if (format == IMG_FORMAT_YUYV) {
+        proc_ret = g_priv->img_proc->ops->yuyv_to_rgb(g_priv->img_proc, image_data, external_bgr_buf);
+    } else if (format == IMG_FORMAT_MJPEG) {
+        /* MJPEG decode not supported by RGA, fallback to software */
+        proc_ret = g_priv->img_proc->ops->mjpeg_to_rgb(g_priv->img_proc, 
+                                                         image_data, cam_w * cam_h * 2,
+                                                         external_bgr_buf);
+        if (proc_ret == IMG_PROC_ERR_UNSUPPORTED) {
+            /* Fallback: use software implementation directly if RGA doesn't support MJPEG */
+            extern img_proc_err_t software_mjpeg_to_rgb(img_proc_handle_t *handle,
+                                                        const uint8_t *mjpeg, int mjpeg_len,
+                                                        uint8_t *rgb);
+            proc_ret = software_mjpeg_to_rgb(g_priv->img_proc, image_data, cam_w * cam_h * 2, external_bgr_buf);
+        }
+    } else {
+        return MNN_FACE_ERR_INPUT;
+    }
+
+    if (proc_ret != IMG_PROC_OK) {
+        return MNN_FACE_ERR_INFER;
+    }
+
+    /* Call UltraFaceMNN for detection (input is already converted RGB) */
     vector<FaceInfo_MNN> faces;
-    int ret = g_priv->ultra_face->detect(
-        image_data, 
+    int ret = g_priv->ultra_face->detect_rgb_only(
+        external_bgr_buf, 
         cam_w, 
         cam_h, 
-        external_bgr_buf, 
-        faces, 
-        (ImageFormat)format
+        faces
     );
     if (ret != MNN_FACE_OK) {
         return ret;
