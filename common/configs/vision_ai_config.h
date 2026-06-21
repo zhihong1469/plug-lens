@@ -208,7 +208,7 @@ typedef enum {
 
 // --------------------- AI人脸检测模型配置 ---------------------
 /** AI模型文件路径 | MNN量化模型存储路径 */
-#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_MODEL_PATH "./rknn/model/face_detector_rfb320_int8.rknn"
 /** AI模型输入宽度 | 模型推理图像宽度 */
 #define CONFIG_AI_INPUT_W    320
 /** AI模型输入高度 | 模型推理图像高度 */

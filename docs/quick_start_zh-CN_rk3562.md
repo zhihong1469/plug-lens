@@ -1,6 +1,6 @@
 # RK3562 视觉AI采集终端 开发&运行使用手册
 **文档用途**：个人内部使用手册，整合交叉编译、NFS文件传输、双网络模式配置、硬件加速环境校验、脚本启停、RTSP拉流、调试排错全流程
-**运行环境**：RK3562开发板 + 裁剪版Buildroot + BusyBox + sysvinit（无systemd），架构为aarch64
+**运行环境**：RK3562开发板(YM3562) + Ubuntu 22.04 LTS + sysvinit，架构为aarch64
 **工程目录**：板端主目录 `/root/run_on_board_rk3562`，NFS共享目录 `~/nfs/run_on_board_rk3562`
 
 ---
@@ -62,26 +62,23 @@ aarch64-linux-gnu-readelf -d output/vision_ai_app | grep NEEDED
 将**可执行程序、AI模型、硬件加速库、所有第三方动态库**统一拷贝到PC端NFS共享目录 `~/nfs/run_on_board_rk3562`，开发板通过NFS挂载访问：
 ```bash
 # 创建目录结构
-mkdir -p ~/nfs/run_on_board_rk3562/{mnn_rknn,rga,mpp,libjpeg,openh264,libyuv,drv}
+mkdir -p ~/nfs/run_on_board_rk3562/{libjpeg,drv,rknn,rkmpp,auto_rk}
 
 # 1. 拷贝主程序
 cp output/vision_ai_app ~/nfs/run_on_board_rk3562/
 
-# 2. 拷贝板端驱动文件
-cp -rf boards/rk3562/drv/led_drv/*.{ko,dtb}  ~/nfs/run_on_board_rk3562/drv
+# 2. 拷贝启动脚本
+cp scripts/auto_rk/*.sh ~/nfs/run_on_board_rk3562/auto_rk/
+chmod +x ~/nfs/run_on_board_rk3562/auto_rk/*.sh
 
 # 3. 拷贝AI模型文件（RKNN量化版，适配RK3562 NPU）
 cp third_lib/aarch64/face_detector/model/ultraface_rk3562.rknn ~/nfs/run_on_board_rk3562/
 
-# 4. 拷贝硬件加速动态库
-cp -rf third_lib/aarch64/rk3562/librga/lib/*.so* ~/nfs/run_on_board_rk3562/rga
-cp -rf third_lib/aarch64/rk3562/mpp/lib/*.so* ~/nfs/run_on_board_rk3562/mpp
-cp -rf third_lib/aarch64/rk3562/mnn_rknn/lib/*.so* ~/nfs/run_on_board_rk3562/mnn_rknn
-
-# 5. 拷贝备用软件实现库（兜底兼容用，可按需保留）
-cp -rf third_lib/aarch64/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board_rk3562/libjpeg
-cp -rf third_lib/aarch64/openh264/lib/* ~/nfs/run_on_board_rk3562/openh264
-cp -rf third_lib/aarch64/libyuv/lib/*  ~/nfs/run_on_board_rk3562/libyuv
+# 4. 拷贝RK3562硬件加速库
+cp -a third_lib/rk3562/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board_rk3562/libjpeg/
+cp -a third_lib/rk3562/rkrga/lib/*.so* ~/nfs/run_on_board_rk3562/
+cp -a third_lib/rk3562/rkmpp/lib/*.so* ~/nfs/run_on_board_rk3562/drv/
+cp -a third_lib/rk3562/rknn/lib/*.so* ~/nfs/run_on_board_rk3562/rknn/
 ```
 
 ---
@@ -107,7 +104,7 @@ mkdir -p /root/run_on_board_rk3562
 cp -rp /mnt/run_on_board_rk3562/* /root/run_on_board_rk3562/
 
 # 给自动化脚本赋予执行权限（首次部署必执行）
-chmod +x /root/run_on_board_rk3562/auto/*.sh
+chmod +x /root/run_on_board_rk3562/auto_rk/*.sh
 ```
 
 ### 3.2 模式二：接入路由器局域网（多设备拉流播放---临时）
@@ -137,7 +134,7 @@ mount -t nfs -o nolock,port=2050 10.168.1.173:/home/luo/nfs /mnt
 # 5. 同步文件至板端固定目录
 mkdir -p /root/run_on_board_rk3562
 cp -rp /mnt/run_on_board_rk3562/* /root/run_on_board_rk3562/
-chmod +x /root/run_on_board_rk3562/auto/*.sh
+chmod +x /root/run_on_board_rk3562/auto_rk/*.sh
 ```
 
 > 永久静态IP配置（需长期固定网段时使用）：
@@ -180,46 +177,40 @@ umount /mnt/sdcard
 ```
 
 ### 4.3 硬件加速环境校验（RK3562必做）
-确认RGA、VPU(MPP)、NPU三大硬件加速节点正常，设置访问权限：
+确认RGA、MPP、VPU三大硬件加速节点正常，设置访问权限：
 ```bash
-# 1. 校验硬件节点是否存在
-ls /dev/rga
-ls /dev/mpp_service
-ls /dev/rknpu
+# 1. 校验硬件节点是否存在（已验证可用的设备）
+ls -la /dev/rga              # RGA图像加速 ✅
+ls -la /dev/mpp_service      # MPP视频编解码服务 ✅
+ls -la /dev/video-enc0       # VPU硬件编码 ✅
+ls -la /dev/mali0            # Mali GPU ✅
 
 # 2. 赋予节点访问权限（程序非root运行时必须配置）
-chmod 666 /dev/rga /dev/mpp_service /dev/rknpu
+chmod 666 /dev/rga /dev/mpp_service /dev/video-enc0 /dev/mali0
 
-# 3. 确认驱动已加载
+# 3. 确认驱动已加载（可选）
 lsmod | grep rga
 lsmod | grep mpp
-lsmod | grep rknpu
 ```
 
-### 4.4 LED驱动加载测试
-严格遵循 **卸载旧驱动 → 按顺序加载新驱动 → 设备节点校验** 流程：
+### ⚠️ NPU设备节点特殊说明
+**问题**：`/dev/rknpu` 设备节点不存在，AI模型无法使用RKNN NPU推理
+- 内核已配置 `CONFIG_ROCKCHIP_RKNPU=y`，但驱动未创建设备节点
+- 可能原因：设备树中NPU节点被禁用或硬件引脚被复用
+- **临时方案**：使用MNN软件推理（CPU）替代RKNN NPU
+
+### 4.4 LED驱动加载测试（RK3562使用系统GPIO，无需额外驱动）
 ```bash
-# 1. 卸载已加载的旧驱动（避免重复加载报错）
-rmmod board_led 2>/dev/null
-rmmod chip_gpio 2>/dev/null
-rmmod leddrv 2>/dev/null
-
-# 2. 按顺序加载驱动（固定顺序，不可颠倒）
-insmod /root/run_on_board_rk3562/drv/leddrv.ko 2>/dev/null
-insmod /root/run_on_board_rk3562/drv/chip_gpio.ko 2>/dev/null
-insmod /root/run_on_board_rk3562/drv/board_led.ko 2>/dev/null
-
-# 3. 校验驱动是否加载成功
-lsmod | grep led
-ls /dev/plug_led0
-
-# 4. 驱动功能测试（可选）
-/root/run_on_board_rk3562/drv/ledtest /dev/plug_led0 on   # LED点亮
-/root/run_on_board_rk3562/drv/ledtest /dev/plug_led0 off  # LED熄灭
+# RK3562 使用系统GPIO控制LED，无需加载额外驱动
+echo "✅ RK3562 GPIO 已就绪"
 ```
 
 ### 4.5 环境变量说明
-整套脚本已内置环境变量加载逻辑（`set_env.sh`），自动配置硬件加速库、第三方库的动态链接路径，守护进程/后台进程可自动继承，**无需手动执行export配置**。
+整套脚本已内置环境变量加载逻辑（`set_env.sh`），自动配置硬件加速库、第三方库的动态链接路径：
+```bash
+export APP_HOME="/mnt/nfs/run_on_board_rk3562"
+export LD_LIBRARY_PATH=$APP_HOME/libjpeg:$APP_HOME/drv:$APP_HOME/rknn:$APP_HOME/rkmpp
+```
 
 ---
 
@@ -228,23 +219,23 @@ ls /dev/plug_led0
 基于自动化脚本，一键启动/停止全套服务（业务程序+软件看门狗）
 ```bash
 # 进入板端根目录
-cd /root
+cd /root/run_on_board_rk3562
 
 # 一键启动：自动切换目录、加载环境、拉起看门狗+业务程序
-./run_on_board_rk3562/auto/app_start.sh &
+./auto_rk/app_start.sh &
 
 # 一键停止：优雅关闭看门狗、业务进程，防止僵尸进程
-./run_on_board_rk3562/auto/app_stop.sh
+./auto_rk/app_stop.sh
 
 # 实时查看运行日志
-tail -f /mnt/sdcard/log/app.log
+tail -f /mnt/nfs/test/log/app.log
 ```
 
 ### 5.2 方案二：开机全自动自启（量产/无人值守）
 依托系统 `sysvinit + rc.local` 实现上电自启，无需登录终端
 1. 编辑 `/etc/rc.local`，添加启动流程（内置延时、驱动加载、环境变量、启动脚本调用）
 2. 确认 `/etc/inittab` 配置不变，保留sysinit阶段调用rc.local
-3. 重启开发板，上电后系统自动完成：挂载SD卡 → 加载LED驱动 → 校验硬件节点 → 启动全套服务
+3. 重启开发板，上电后系统自动完成：挂载SD卡 → 校验硬件节点 → 启动全套服务
 
 ---
 
@@ -335,13 +326,17 @@ cat /sys/devices/platform/rknpu/info
    排查：`set_env.sh` 中库路径是否正确、NFS同步是否完整、动态库是否为aarch64架构；优先使用脚本内置环境加载，不手动配置。
 
 2. **硬件节点不存在 / 硬件加速调用失败**
-   排查：内核是否开启RGA/MPP/NPU驱动配置、设备树是否对应启用；确认`lsmod`能查到对应驱动模块。
+   排查：内核是否开启RGA/MPP驱动配置；确认`lsmod`能查到对应驱动模块。
+   - RK3562实际验证：`/dev/rga`、`/dev/mpp_service`、`/dev/video-enc0` 均存在且可用
+   - NPU节点（`/dev/rknpu`）不存在问题见"4.3 NPU设备节点特殊说明"
 
 3. **摄像头打开失败 / 找不到设备节点**
    排查：量产模式确认rc.local中是否预留USB枚举延时；RK3562视频节点较多，执行 `cat /sys/class/video4linux/video*/name` 定位名称含 `USB Camera` 的节点，一般为 `/dev/video18`。
 
 4. **NPU推理报错 / 模型加载失败**
-   排查：RKNN Toolkit版本、Runtime版本与板端NPU驱动版本是否严格匹配；模型是否为RK3562专属量化版本，不可使用其他平台模型。
+   排查：检查 `/dev/rknpu` 设备节点是否存在
+   - 设备节点不存在时：`AI model initialization failed` - RKNN驱动未正确初始化
+   - 解决方案：更换为MNN软件推理，或修复设备树启用NPU节点
 
 5. **RTSP拉流超时/黑屏**
    排查：两端IP是否同网段、Windows防火墙是否关闭、端口8554是否被占用、VPU编码输出格式是否与live555匹配。
@@ -354,3 +349,64 @@ cat /sys/devices/platform/rknpu/info
 
 8. **VPU编码花屏 / 颜色异常**
    排查：输入图像格式是否为NV12（VPU原生支持格式）、图像宽高是否按硬件要求对齐、内存是否为物理连续内存。
+
+---
+
+## 九、目录结构（实际）
+
+```
+/mnt/nfs/run_on_board_rk3562/
+├── vision_ai_app          # 主程序
+├── auto_rk/               # 脚本目录
+│   ├── set_env.sh         # 环境变量设置
+│   ├── app_start.sh       # 启动脚本
+│   ├── app_stop.sh        # 停止脚本
+│   ├── app_watchdog.sh    # 看门狗脚本
+│   ├── cpu_monitor.sh     # CPU监控脚本
+│   ├── log_rotate.sh      # 日志轮转脚本
+│   ├── clear_sd_cache.sh  # 清理缓存脚本
+│   ├── backup_all_to_tmp.sh # 备份脚本
+│   └── rc.local           # 开机自启脚本
+├── libjpeg/               # libjpeg-turbo 库
+├── drv/                   # RKMPP/VPU 驱动库
+├── rknn/                  # RKNN NPU 库
+├── rkmpp/                 # RKMPP 编码库
+├── librga.so              # RGA 硬件加速库
+└── ultraface_rk3562.rknn  # RKNN量化AI模型
+```
+
+---
+
+## 十、开发板实际环境验证记录
+
+### 10.1 系统信息（2026-06-20验证）
+```
+开发板型号: YM3562 (RK3562核心板)
+操作系统:   Ubuntu 22.04 LTS (Jammy)
+内核版本:   6.1.99
+架构:       aarch64
+内存:       1.9GiB
+存储:       27GB eMMC + 1007GB NFS
+```
+
+### 10.2 硬件加速节点验证结果
+| 设备节点 | 功能 | 验证状态 | 说明 |
+|---------|------|---------|------|
+| `/dev/rga` | RGA图像加速 | ✅ 正常 | 可用 |
+| `/dev/mpp_service` | MPP视频编解码 | ✅ 正常 | 可用 |
+| `/dev/video-enc0` | VPU硬件编码 | ✅ 正常 | 可用 |
+| `/dev/mali0` | Mali GPU | ✅ 正常 | 可用 |
+| `/dev/rknpu` | NPU推理 | ❌ 不存在 | 驱动未创建设备 |
+
+### 10.3 摄像头设备
+```
+/dev/video18  - USB Camera (实际使用)
+/dev/video0-19 - V4L2设备节点
+/dev/video-dec0 - 视频解码器
+/dev/video-enc0 - 视频编码器
+```
+
+### 10.4 已知问题
+1. **NPU设备节点缺失**：`/dev/rknpu` 不存在，导致RKNN模型无法初始化
+   - 内核配置已启用，但驱动未创建设备节点
+   - 临时方案：使用MNN软件推理（CPU）
