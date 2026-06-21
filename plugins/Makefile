@@ -6,20 +6,13 @@
 # ==========================================================================
 
 # ===================== 条件编译：AI推理引擎 =====================
-ifeq ($(PLATFORM_RK3562),1)
-    # RK3562: 使用RKNN NPU硬件加速
-    AI_MODEL_SRC := \
-        base_plugins/ai_model_rknn/src/ai_model_rknn.cpp
-    AI_MODEL_INC := \
-        -I$(TOPDIR)/plugins/base_plugins/ai_model_rknn/inc
-else
-    # i.MX6ULL: 使用MNN CPU推理
-    AI_MODEL_SRC := \
-        base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
-        base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp
-    AI_MODEL_INC := \
-        -I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc
-endif
+# Note: Both platforms use MNN (AI_ENGINE_MNN = 1) per board_option.h
+# RKNN is disabled (AI_ENGINE_RKNN = 0) due to environment/firmware issues
+AI_MODEL_SRC := \
+    base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
+    base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp
+AI_MODEL_INC := \
+    -I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc
 
 # ===================== 条件编译：图像处理引擎 =====================
 ifeq ($(PLATFORM_RK3562),1)

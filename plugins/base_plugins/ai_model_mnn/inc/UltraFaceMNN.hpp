@@ -32,6 +32,8 @@
 #include "Interpreter.hpp"
 #include "Tensor.hpp"
 #include "ImageProcess.hpp"
+/* Image processing backend: use factory pattern for hardware/software switching */
+#include "img_proc_factory.h"
 
 /**
  * @defgroup ultra_face_mnn UltraFace MNN Face Detection Module
@@ -237,6 +239,9 @@ private:
     std::shared_ptr<MNN::Interpreter> m_interpreter;  /**< MNN model interpreter */
     MNN::Session* m_session;                          /**< MNN inference session */
     MNN::Tensor* m_input_tensor;                      /**< MNN input image tensor */
+
+    // Image Processing Backend (factory pattern for RGA/software switch)
+    img_proc_handle_t* m_img_proc;                    /**< Image processing handle (singleton) */
 
     // Model Configuration
     int m_ai_w;                /**< Model input width */

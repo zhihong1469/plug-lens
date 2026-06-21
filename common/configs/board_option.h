@@ -54,8 +54,8 @@ extern "C" {
  * @note  RKNN 已完成实现，支持 INT8 量化模型
  */
 #if PLATFORM_RK3562
-    #define AI_ENGINE_RKNN   1  /* RK3562 NPU hardware acceleration - Enabled */
-    #define AI_ENGINE_MNN    0  /* CPU-based inference */
+    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration - Enabled */
+    #define AI_ENGINE_MNN    1  /* CPU-based inference */
 #else
     #define AI_ENGINE_RKNN   0
     #define AI_ENGINE_MNN    1  /* i.MX6ULL uses MNN */

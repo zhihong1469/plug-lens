@@ -54,6 +54,10 @@ COMPILE_COMMANDS := $(OUTPUTDIR)/compile_commands.json
 export CC CXX LD AR OBJCOPY OBJDUMP 
 export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 
+# ===================== Third-party Library Configuration =====================
+# @brief  Centralized third-party library paths (see third_lib/third_lib.mk)
+include $(TOPDIR)/third_lib/third_lib.mk
+
 # ===================== Build Order Configuration =====================
 # @brief  Fixed build order (critical for dependency resolution)
 # @order  1. common   (base library)
@@ -93,24 +97,12 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
 	-I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
 
-# @brief  RK3562 platform specific includes
+# @brief  RK3562 platform specific includes (unified via third_lib.mk)
 GLOBAL_INC += \
-	-I$(TOPDIR)/third_lib/rk3562/rkmpp/include \
-	-I$(TOPDIR)/third_lib/rk3562/rknn/include \
-	-I$(TOPDIR)/third_lib/rk3562/rkrga/include \
-	-I$(TOPDIR)/third_lib/rk3562/live555/include/liveMedia \
-	-I$(TOPDIR)/third_lib/rk3562/live555/include/groupsock \
-	-I$(TOPDIR)/third_lib/rk3562/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/rk3562/live555/include/BasicUsageEnvironment \
-	-I$(TOPDIR)/third_lib/rk3562/libjpeg_turbo/include \
+	$(THIRD_LIB_INC)
 
 # @brief  Software libraries - only needed for i.MX6ULL (RK3562 uses hardware acceleration)
-ifeq ($(PLATFORM_IMX6ULL),1)
-# 	-I$(TOPDIR)/third_lib/aarch64/face_detector/mnn/include \
-	GLOBAL_INC += \
-		-I$(TOPDIR)/third_lib/aarch64/libyuv/include \
-		-I$(TOPDIR)/third_lib/aarch64/openh264/include/wels
-endif
+# Note: THIRD_LIB_INC already handles platform-specific paths automatically
 
 # @brief  Export global includes to all submodules
 export GLOBAL_INC

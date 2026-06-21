@@ -30,15 +30,12 @@ TARGET_NAME := vision_ai_app
 TARGET_TYPE := EXE
 
 # 4. 链接所有库：必须先用先链接，后用后链接，ex:先libplug.a+再libcom.a+ pthread
-# @note   Platform-specific libraries are passed via PLATFORM_LIBS from top-level Makefile
+# @note   Unified third-party library flags via third_lib/third_lib.mk
+#         Platform auto-selection handled in third_lib.mk
 LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
 	-pthread \
-	-L$(TOPDIR)/third_lib/rk3562/rkrga/lib -lrga \
-	-L$(TOPDIR)/third_lib/rk3562/rkmpp/lib -lrockchip_mpp \
-	-L$(TOPDIR)/third_lib/rk3562/rknn/lib -lrknnrt -lmk_api \
-	-L$(TOPDIR)/third_lib/rk3562/libjpeg_turbo/lib -ljpeg -lturbojpeg \
-	-L$(TOPDIR)/third_lib/rk3562/live555/lib -lliveMedia -lgroupsock -lUsageEnvironment -lBasicUsageEnvironment \
+	$(THIRD_LIB_LDFLAGS) \
 	$(PLATFORM_LIBS)
