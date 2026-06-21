@@ -46,6 +46,7 @@ mkdir -p ~/nfs/run_on_board_rk3562/{libjpeg,drv,rknn,rkmpp}
 cp -a third_lib/rk3562/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board_rk3562/libjpeg/
 cp -a third_lib/rk3562/rkrga/lib/*.so* ~/nfs/run_on_board_rk3562/
 cp -a third_lib/rk3562/rkmpp/lib/*.so* ~/nfs/run_on_board_rk3562/drv/
+
 cp -a third_lib/rk3562/rknn/lib/*.so* ~/nfs/run_on_board_rk3562/rknn/
 ```
 
