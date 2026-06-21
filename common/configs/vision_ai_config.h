@@ -175,7 +175,7 @@ typedef enum {
  */
 // 脚本守护和程序内部守护只能选其一
 #define USE_SH 1
-#define RUN_PRODUCT_MODE  1
+#define RUN_PRODUCT_MODE  0
 
 // --------------------- 双总线(Event/DataBus)核心配置 ---------------------
 /** 事件总线最大订阅者数 | 支持多服务并发订阅 */
@@ -192,7 +192,7 @@ typedef enum {
 
 // --------------------- 视频采集服务配置 ---------------------
 /** 摄像头设备节点 | 嵌入式Linux V4L2设备路径 */
-#define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
+#define CONFIG_CAPTURE_DEV_PATH "/dev/video18"
 /** 视频采集格式 | 0=YUYV 1=NV12 2=MJPEG */
 #define CONFIG_CAPTURE_FORMAT 0
 /** 视频采集帧率 | 单位：FPS */
@@ -208,7 +208,7 @@ typedef enum {
 
 // --------------------- AI人脸检测模型配置 ---------------------
 /** AI模型文件路径 | MNN量化模型存储路径 */
-#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
+#define CONFIG_AI_MODEL_PATH "./rknn/model/face_detector_rfb320_int8.rknn"
 /** AI模型输入宽度 | 模型推理图像宽度 */
 #define CONFIG_AI_INPUT_W    320
 /** AI模型输入高度 | 模型推理图像高度 */

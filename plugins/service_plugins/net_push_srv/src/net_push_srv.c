@@ -25,7 +25,7 @@
 #include "event_bus.h"
 #include "vision_ai_config.h"
 #include "initcall.h"
-#include "img_joint.h"
+#include "img_proc_factory.h"
 #include "thread.h"
 
 // Third-party dependencies
@@ -97,6 +97,7 @@ typedef struct {
     int                     evt_sys_sub_id;     /* System event bus subscription ID */
     int                     evt_capture_sub_id; /* Capture event subscription ID */
 
+    img_proc_handle_t       *img_proc_handle;   /* Image processing factory handle */
     h264_encoder_t          h264_enc;           /* H.264 encoder handle */
     uint32_t                frame_sample_cnt;    /* FPS downsampling counter */
 
@@ -354,14 +355,15 @@ static void *net_push_work_thread(void *arg)
                         h264_len = H264_MAX_FRAME_SIZE;
 
                         /* YUYV to H.264 encoding (direct bus write, zero-copy) */
-                        int ret_h = yuyv_to_h264(srv->h264_enc, frame_data, frame_size, h264_wbuf, &h264_len);
-                        if ( ret_h == IMG_JOINT_OK)
+                        img_proc_err_t ret_h = srv->img_proc_handle->ops->yuyv_to_h264(
+                            srv->img_proc_handle, srv->h264_enc, frame_data, frame_size, h264_wbuf, &h264_len);
+                        if ( ret_h == IMG_PROC_OK)
                         {
                             data_bus_set_item_size(h264_item, h264_len);
                             /* Publish encoded frame to H.264 DataBus */
                             data_bus_push(H264_DATA_BUS_NAME, h264_item);
                         }
-                        else if(ret_h == IMG_JOINT_ERR_SKIP)
+                        else if(ret_h == IMG_PROC_ERR_ENCODE)
                         {
                             LOG_I(MODULE_TAG "Performance limit, frame skipped normally");
                         }
@@ -427,27 +429,57 @@ static int net_push_srv_start(void)
         return -1;
     }
 
-    /* Initialize H.264 encoder parameters */
-    h264_encode_param_t enc_param = {
+    /* Step 2: Create image processing factory handle */
+    img_proc_config_t img_proc_cfg = {
+        .width = VIDEO_WIDTH,
+        .height = VIDEO_HEIGHT,
+        .fps = NET_PUSH_TARGET_FPS,
+        .bitrate = H264_BITRATE,
+        .gop = H264_GOP,
+        .jpeg_quality = 50
+    };
+    srv->img_proc_handle = img_proc_factory_create(&img_proc_cfg);
+    if (!srv->img_proc_handle) {
+        LOG_E(MODULE_TAG "Image processing factory creation failed");
+        pthread_cond_destroy(&srv->cond);
+        data_bus_deinit(H264_DATA_BUS_NAME);
+        return -1;
+    }
+
+    /* Initialize image processing module */
+    if (srv->img_proc_handle->ops->init(srv->img_proc_handle) != IMG_PROC_OK) {
+        LOG_E(MODULE_TAG "Image processing module initialization failed");
+        img_proc_factory_destroy(srv->img_proc_handle);
+        pthread_cond_destroy(&srv->cond);
+        data_bus_deinit(H264_DATA_BUS_NAME);
+        return -1;
+    }
+
+    /* Step 3: Create H.264 encoder through factory */
+    h264_enc_config_t enc_cfg = {
         .width = VIDEO_WIDTH,
         .height = VIDEO_HEIGHT,
         .fps = NET_PUSH_TARGET_FPS/FPS_DOWNSAMPLE_STEP,
         .bitrate = H264_BITRATE,
         .gop = H264_GOP,
+        .use_cpu_core = true
     };
     LOG_I(MODULE_TAG "Create H264 encoder | %dx%d | %dFPS | GOP=%d",
           VIDEO_WIDTH, VIDEO_HEIGHT, NET_PUSH_TARGET_FPS, H264_GOP);
-    srv->h264_enc = h264_encoder_create(&enc_param);
+    srv->h264_enc = srv->img_proc_handle->ops->h264_encoder_create(srv->img_proc_handle, &enc_cfg);
     if (!srv->h264_enc) {
         LOG_E(MODULE_TAG "H.264 encoder creation failed");
+        srv->img_proc_handle->ops->deinit(srv->img_proc_handle);
+        img_proc_factory_destroy(srv->img_proc_handle);
         pthread_cond_destroy(&srv->cond);
         data_bus_deinit(H264_DATA_BUS_NAME);
         return -2;
     }
 
-    /* Get and set H.264 SPS/PPS for RTSP */
+    /* Step 4: Get and set H.264 SPS/PPS for RTSP */
     srv->sps_pps_len = sizeof(srv->sps_pps_cache);
-    if (h264_encoder_get_sps_pps(srv->h264_enc, srv->sps_pps_cache, &srv->sps_pps_len) == IMG_JOINT_OK)
+    if (srv->img_proc_handle->ops->h264_encoder_get_sps_pps(
+        srv->img_proc_handle, srv->h264_enc, srv->sps_pps_cache, &srv->sps_pps_len) == IMG_PROC_OK)
     {
         LOG_I(MODULE_TAG "Get SPS+PPS success | Size: %d bytes", srv->sps_pps_len);
         rtsp_set_sps_pps(srv->sps_pps_cache, srv->sps_pps_len);
@@ -468,7 +500,9 @@ static int net_push_srv_start(void)
 
     if (thread_ret != THREAD_OK) {
         LOG_E(MODULE_TAG "Realtime push thread creation failed err=%d", thread_ret);
-        h264_encoder_destroy(srv->h264_enc);
+        srv->img_proc_handle->ops->h264_encoder_destroy(srv->img_proc_handle, srv->h264_enc);
+        srv->img_proc_handle->ops->deinit(srv->img_proc_handle);
+        img_proc_factory_destroy(srv->img_proc_handle);
         pthread_cond_destroy(&srv->cond);
         data_bus_deinit(H264_DATA_BUS_NAME);
         return -5;
@@ -512,8 +546,18 @@ static void net_push_srv_cleanup(void)
     if (srv->evt_sys_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_sys_sub_id);
     if (srv->evt_capture_sub_id >= 0) event_bus_unsubscribe(SYS_EVENT_BUS, srv->evt_capture_sub_id);
 
-    /* Release H.264 encoder */
-    if (srv->h264_enc) { h264_encoder_destroy(srv->h264_enc); srv->h264_enc = NULL; }
+    /* Release H.264 encoder through factory */
+    if (srv->h264_enc && srv->img_proc_handle) {
+        srv->img_proc_handle->ops->h264_encoder_destroy(srv->img_proc_handle, srv->h264_enc);
+        srv->h264_enc = NULL;
+    }
+
+    /* Release image processing factory handle */
+    if (srv->img_proc_handle) {
+        srv->img_proc_handle->ops->deinit(srv->img_proc_handle);
+        img_proc_factory_destroy(srv->img_proc_handle);
+        srv->img_proc_handle = NULL;
+    }
 
     /* Stop RTSP server and destroy H.264 DataBus */
     rtsp_server_stop();

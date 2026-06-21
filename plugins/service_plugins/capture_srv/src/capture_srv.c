@@ -20,7 +20,8 @@
 #include "event_bus.h"
 #include "utils.h"
 #include "vision_ai_config.h"
-#include "camera_usb.h"
+#include "camera_base.h"
+#include "camera_factory.h"
 #include "thread.h"
 #include <stdlib.h>
 #include <string.h>
@@ -142,12 +143,12 @@ static void capture_srv_cleanup(void)
         LOG_I(MODULE_TAG " Event subscription cancelled");
     }
 
-    /* 3. Stop and destroy USB camera */
+    /* 3. Stop and destroy camera */
     if (srv->cam) {
         camera_stop_capture(srv->cam);
-        camera_usb_destroy(srv->cam);
+        camera_factory_destroy(srv->cam);
         srv->cam = NULL;
-        LOG_I(MODULE_TAG " USB camera destroyed");
+        LOG_I(MODULE_TAG " Camera destroyed");
     }
 
     /* 4. Deinitialize video DataBus */
@@ -416,14 +417,18 @@ static int capture_srv_init(void)
         return -1;
     }
 
-    /* Create and initialize USB camera */
-    srv->cam = camera_usb_create(CAPTURE_DEV_PATH,
-                                 srv->width,
-                                 srv->height,
-                                 srv->v4l2_format,
-                                 srv->fps);
+    /* Create and initialize camera via factory (auto-selects USB/CSI based on platform) */
+    camera_config_t cam_cfg = {
+        .dev_path   = CAPTURE_DEV_PATH,
+        .width      = srv->width,
+        .height     = srv->height,
+        .fps        = srv->fps,
+        .format     = srv->v4l2_format,
+        .buf_count  = CAPTURE_BUF_CNT
+    };
+    srv->cam = camera_factory_create(&cam_cfg);
     if (!srv->cam || camera_init(srv->cam) != 0) {
-        LOG_E(MODULE_TAG " USB camera initialization failed");
+        LOG_E(MODULE_TAG " Camera initialization failed");
         data_bus_deinit(CAPTURE_DATA_BUS_NAME);
         pthread_mutex_destroy(&srv->lock);
         return -1;
@@ -438,7 +443,7 @@ static int capture_srv_init(void)
     srv->evt_sub_id = event_bus_subscribe(CAPTURE_EVENT_BUS_NAME, &evt_sub);
     if (srv->evt_sub_id < 0) {
         LOG_E(MODULE_TAG " Event bus subscription failed");
-        camera_usb_destroy(srv->cam);
+        camera_factory_destroy(srv->cam);
         data_bus_deinit(CAPTURE_DATA_BUS_NAME);
         pthread_mutex_destroy(&srv->lock);
         return -1;

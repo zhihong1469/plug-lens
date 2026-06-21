@@ -347,5 +347,5 @@ static int __demo_auto_init(void)
 
 // Compile ONLY in debug mode
 #if RUN_PRODUCT_MODE == 0
-    MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
+    // MODULE_INIT_LEVEL(INIT_APP, __demo_auto_init);
 #endif

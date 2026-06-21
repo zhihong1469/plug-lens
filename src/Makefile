@@ -4,10 +4,14 @@
 # @license MIT License
 # ==========================================================================
 
-# 1. 源文件（新增 ai_model_link.cpp）
+# 1. 源文件（新增工厂模块）
 SRC_FILES := \
 	base/camera/src/camera_base.c \
+	base/camera/src/camera_factory.c \
  	base/ai_model/src/ai_model_base.cpp \
+	base/ai_model/src/ai_model_factory.c \
+	base/img_proc/src/img_proc_base.c \
+	base/img_proc/src/img_proc_factory.c \
 	base/led/src/led_base.c \
 	bus/event_bus/src/event_bus.c \
 	bus/data_bus/src/data_bus.c \
@@ -26,26 +30,12 @@ TARGET_NAME := vision_ai_app
 TARGET_TYPE := EXE
 
 # 4. 链接所有库：必须先用先链接，后用后链接，ex:先libplug.a+再libcom.a+ pthread
+# @note   Unified third-party library flags via third_lib/third_lib.mk
+#         Platform auto-selection handled in third_lib.mk
 LDFLAGS := \
 	-L$(OUTPUTDIR) \
 	-lplug \
 	-lcom \
-	-L$(TOPDIR)/third_lib/imx6ull/face_detector/mnn/lib/ \
-	-lMNN \
-	-L$(TOPDIR)/third_lib/imx6ull/live555/lib \
-	-L$(TOPDIR)/third_lib/imx6ull/libjpeg_turbo/lib \
-	-lliveMedia \
-	-lgroupsock \
-	-lBasicUsageEnvironment \
-	-lUsageEnvironment \
-	-lturbojpeg \
-	-lssl \
-	-lcrypto \
-	-lstdc++ \
 	-pthread \
-	-L$(TOP_DIR)/third_lib/imx6ull/libjpeg_turbo/lib \
-	-lturbojpeg \
-	-L$(TOPDIR)/third_lib/imx6ull/openh264/lib \
-	-lopenh264 \
-	-L$(TOPDIR)/third_lib/imx6ull/libyuv/lib \
-	-lyuv
+	$(THIRD_LIB_LDFLAGS) \
+	$(PLATFORM_LIBS)

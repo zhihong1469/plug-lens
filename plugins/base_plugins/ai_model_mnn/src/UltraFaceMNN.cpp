@@ -3,8 +3,8 @@
  * @brief   UltraFace MNN Face Detection Implementation
  * @details Internal design & optimizations:
  *          1. Anchor-based detection with precomputed prior boxes
- *          2. libyuv acceleration for image conversion/resizing
- *          3. Low-precision inference for i.MX6ULL CPU optimization
+ *          2. img_proc_factory backend for image conversion/resizing (RGA or software)
+ *          3. Low-precision inference for embedded CPU optimization
  *          4. Memory-safe buffer management (no runtime leaks)
  *          5. NMS suppression for redundant face removal
  *
@@ -15,13 +15,14 @@
  * @date    2026-05-29
  * @version v1.0.0
  * @license MIT License
+ *
+ * @note    Image processing is delegated to img_proc_factory (RGA hardware or libyuv software)
  */
 
 #include "UltraFaceMNN.hpp"
 #include <string.h>
 #include <algorithm>
 #include <math.h>
-#include "img_joint.h"
 
 /** Clip value to range [0, y] */
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
@@ -30,7 +31,7 @@
 // Constructor & Destructor
 // ==============================================================================
 UltraFaceMNN::UltraFaceMNN() 
-    : m_session(nullptr), m_input_tensor(nullptr), m_ready(false),
+    : m_session(nullptr), m_input_tensor(nullptr), m_img_proc(nullptr), m_ready(false),
       m_num_thread(DEFAULT_NUM_THREAD), 
       m_score_thresh(DEFAULT_SCORE_THRESH),
       m_iou_thresh(DEFAULT_IOU_THRESH),
@@ -99,12 +100,26 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
         }
     }
     m_num_anchors = m_priors.size();
+
+    // Get shared image processing singleton (RGA or software backend)
+    img_proc_config_t img_config;
+    img_config.width = m_ai_w;
+    img_config.height = m_ai_h;
+    img_config.fps = 30;
+    img_config.jpeg_quality = 85;
+    m_img_proc = img_proc_convert_create(&img_config);
+    if (!m_img_proc) {
+        m_interpreter->releaseModel();
+        m_interpreter.reset();
+        return MNN_FACE_ERR_INIT;
+    }
+
     m_ready = true;
     return MNN_FACE_OK;
 }
 
 // ==============================================================================
-// Public: Core Face Detection Inference
+// Public: Core Face Detection Inference (uses img_proc_factory backend)
 // ==============================================================================
 int UltraFaceMNN::detect(const uint8_t* input_data, 
                          int cam_w, 
@@ -112,30 +127,56 @@ int UltraFaceMNN::detect(const uint8_t* input_data,
                          uint8_t* external_rgb_buf,
                          std::vector<FaceInfo_MNN>& face_list,
                          ImageFormat format) {
-    if (!m_ready || !input_data || !external_rgb_buf) {
+    if (!m_ready || !input_data || !external_rgb_buf || !m_img_proc) {
         return MNN_FACE_ERR_INPUT;
     }
     face_list.clear();
 
-    int conv_ret = MNN_FACE_OK;
-    // ---------------------- Image Format Conversion (libyuv) ----------------------
+    img_proc_err_t conv_ret = IMG_PROC_OK;
+    // ---------------------- Image Format Conversion (RGA or software) ----------------------
     if (format == IMAGE_FORMAT_YUYV) {
-        conv_ret = yuyv_to_rgb(input_data, cam_w, cam_h, external_rgb_buf);
+        conv_ret = m_img_proc->ops->yuyv_to_rgb(m_img_proc, input_data, external_rgb_buf);
     } else if (format == IMAGE_FORMAT_MJPEG) {
-        // Fixed buffer length for embedded camera compatibility
-        conv_ret = mjpeg_to_rgb(input_data, cam_w * cam_h * 2, cam_w, cam_h, external_rgb_buf);
+        // MJPEG decode not supported by RGA, fallback to software
+        conv_ret = m_img_proc->ops->mjpeg_to_rgb(m_img_proc, 
+                                                 input_data, cam_w * cam_h * 2,
+                                                 external_rgb_buf);
+        if (conv_ret == IMG_PROC_ERR_UNSUPPORTED) {
+            /* Fallback: use software implementation directly */
+            extern img_proc_err_t software_mjpeg_to_rgb(img_proc_handle_t *handle,
+                                                        const uint8_t *mjpeg, int mjpeg_len,
+                                                        uint8_t *rgb);
+            conv_ret = software_mjpeg_to_rgb(m_img_proc, input_data, cam_w * cam_h * 2, external_rgb_buf);
+        }
     } else {
         return MNN_FACE_ERR_INPUT;
     }
 
-    if (conv_ret != MNN_FACE_OK) {
-        return conv_ret;
+    if (conv_ret != IMG_PROC_OK) {
+        return MNN_FACE_ERR_INPUT;
     }
 
-    // ---------------------- RGB Image Resizing (libyuv hardware acceleration) ----------------------
+    // Use the RGB-only detection function
+    return detect_rgb_only(external_rgb_buf, cam_w, cam_h, face_list);
+}
+
+// ==============================================================================
+// Public: Face Detection with Pre-converted RGB Input
+// ==============================================================================
+int UltraFaceMNN::detect_rgb_only(const uint8_t* rgb_data,
+                                  int cam_w,
+                                  int cam_h,
+                                  std::vector<FaceInfo_MNN>& face_list) {
+    if (!m_ready || !rgb_data || !m_img_proc) {
+        return MNN_FACE_ERR_INPUT;
+    }
+    face_list.clear();
+
+    // ---------------------- RGB Image Resizing (RGA or software) ----------------------
     uint8_t* ai_img_buf = new uint8_t[m_ai_w * m_ai_h * 3];
-    conv_ret = rgb_resize(external_rgb_buf, cam_w, cam_h, ai_img_buf, m_ai_w, m_ai_h);
-    if (conv_ret != 0) {
+    img_proc_err_t conv_ret = m_img_proc->ops->rgb_resize(m_img_proc, rgb_data, cam_w, cam_h,
+                                                          ai_img_buf, m_ai_w, m_ai_h);
+    if (conv_ret != IMG_PROC_OK) {
         delete[] ai_img_buf;
         return MNN_FACE_ERR_INPUT;
     }
@@ -265,5 +306,8 @@ void UltraFaceMNN::deinit() {
     // Reset all pointers and state
     m_session = nullptr;
     m_input_tensor = nullptr;
+    /* Note: m_img_proc is a singleton, do NOT destroy it here.
+     * The singleton persists for the lifetime of the process. */
+    m_img_proc = nullptr;
     m_ready = false;
 }

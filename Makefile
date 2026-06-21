@@ -9,8 +9,21 @@
 # @license MIT License
 # ==========================================================================
 
+# ===================== Platform Configuration =====================
+# @brief  Platform selection (must match board_option.h)
+# @usage  Set PLATFORM_RK3562=1 for RK3562, or PLATFORM_IMX6ULL=1 for i.MX6ULL
+# @note   Default: RK3562 platform
+PLATFORM_RK3562 ?= 1
+PLATFORM_IMX6ULL ?= 0
+
+# @brief  Export platform configuration to sub-makefiles
+export PLATFORM_RK3562 PLATFORM_IMX6ULL
+
 # ===================== Cross-Compiler Toolchain =====================
 # @brief  Toolchain configuration (native for test, cross-compile for embedded)
+# @usage  Before building, select toolchain:
+#         - i.MX6ULL: use_toolchain arm32-linux-hf6ull
+#         - RK3562:   use_toolchain arm64-linux-75
 # CROSS_COMPILE ?= arm-buildroot-linux-gnueabihf-
 CROSS_COMPILE ?=
 CC 			:= $(CROSS_COMPILE)gcc
@@ -41,6 +54,10 @@ COMPILE_COMMANDS := $(OUTPUTDIR)/compile_commands.json
 export CC CXX LD AR OBJCOPY OBJDUMP 
 export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS
 
+# ===================== Third-party Library Configuration =====================
+# @brief  Centralized third-party library paths (see third_lib/third_lib.mk)
+include $(TOPDIR)/third_lib/third_lib.mk
+
 # ===================== Build Order Configuration =====================
 # @brief  Fixed build order (critical for dependency resolution)
 # @order  1. common   (base library)
@@ -68,20 +85,24 @@ GLOBAL_INC := \
 	-I$(TOPDIR)/common/configs \
 	-I$(TOPDIR)/src/base/camera/inc \
 	-I$(TOPDIR)/src/base/ai_model/inc \
+	-I$(TOPDIR)/src/base/img_proc/inc \
 	-I$(TOPDIR)/src/base/led/inc \
 	-I$(TOPDIR)/src/bus/event_bus/inc \
 	-I$(TOPDIR)/src/bus/data_bus/inc \
 	-I$(TOPDIR)/src/app/inc \
-	-I$(TOPDIR)/third_lib/imx6ull/face_detector/mnn/include \
 	-I$(TOPDIR)/third_lib/tlsf-master \
-	-I$(TOPDIR)/third_lib/imx6ull/live555/include/liveMedia \
-	-I$(TOPDIR)/third_lib/imx6ull/live555/include/groupsock \
-	-I$(TOPDIR)/third_lib/imx6ull/live555/include/BasicUsageEnvironment \
-	-I$(TOPDIR)/third_lib/imx6ull/live555/include/UsageEnvironment \
-	-I$(TOPDIR)/third_lib/imx6ull/libjpeg_turbo/include \
-	-I$(TOPDIR)/third_lib/imx6ull/openh264/include/wels \
-	-I$(TOPDIR)/third_lib/imx6ull/libyuv/include \
-	-I$(TOPDIR)/third_lib/imx6ull/libyuv/include/libyuv
+	-I$(TOPDIR)/plugins/base_plugins/camera_usb/inc \
+	-I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc \
+	-I$(TOPDIR)/plugins/base_plugins/ai_model_rknn/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_joint/inc \
+	-I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
+
+# @brief  RK3562 platform specific includes (unified via third_lib.mk)
+GLOBAL_INC += \
+	$(THIRD_LIB_INC)
+
+# @brief  Software libraries - only needed for i.MX6ULL (RK3562 uses hardware acceleration)
+# Note: THIRD_LIB_INC already handles platform-specific paths automatically
 
 # @brief  Export global includes to all submodules
 export GLOBAL_INC
