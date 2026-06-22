@@ -3,9 +3,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Added
+- `PROCESS_RK3562_SDK.md` - RK3562 SDK 移植进程文档
+
 ### Changed
+- 交叉编译工具链支持 ARM64 (`aarch64-linux-gnu-`)
+- 优化 Makefile 链接配置，修复 `libMNN` 大小写、添加 `-lturbojpeg`
+- 修复 `ai_model_mnn_ops` C++ 符号导出问题（添加 `extern "C"`）
+
 ### Fixed
+- 编译产物架构从 32 位 ARM 升级到 64 位 ARM64
+- 开发板可执行文件更新，程序可正常运行
+
 ### Docs
+- 更新 `build-linux-app` 技能文档，完善工具链选择指南
 
 ## [v1.0.1] - 2026-06-04
 ### Docs

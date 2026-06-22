@@ -175,7 +175,7 @@ typedef enum {
  */
 // 脚本守护和程序内部守护只能选其一
 #define USE_SH 1
-#define RUN_PRODUCT_MODE  1
+#define RUN_PRODUCT_MODE  0
 
 // --------------------- 双总线(Event/DataBus)核心配置 ---------------------
 /** 事件总线最大订阅者数 | 支持多服务并发订阅 */
@@ -192,7 +192,7 @@ typedef enum {
 
 // --------------------- 视频采集服务配置 ---------------------
 /** 摄像头设备节点 | 嵌入式Linux V4L2设备路径 */
-#define CONFIG_CAPTURE_DEV_PATH "/dev/video1"
+#define CONFIG_CAPTURE_DEV_PATH "/dev/video18"
 /** 视频采集格式 | 0=YUYV 1=NV12 2=MJPEG */
 #define CONFIG_CAPTURE_FORMAT 0
 /** 视频采集帧率 | 单位：FPS */
@@ -237,6 +237,14 @@ typedef enum {
 #define GLOBAL_FRAME_INTERVAL_MS        (1000 / GLOBAL_VIDEO_FPS)
 /** 全局帧间隔(微秒) | RTSP底层时间戳用 */
 #define GLOBAL_FRAME_INTERVAL_US        (1000000 / GLOBAL_VIDEO_FPS)
+
+// --------------------- H.264 编码全局配置 ---------------------
+/** 全局H.264编码码率 | 单位：kbps（千比特/秒） */
+#define GLOBAL_H264_BITRATE_KBPS        500
+/** 全局H.264编码码率 | 单位：bps（比特/秒），供编码器使用 */
+#define GLOBAL_H264_BITRATE_BPS         (GLOBAL_H264_BITRATE_KBPS * 1000)
+/** 全局H.264编码GOP大小 | I帧间隔 */
+#define GLOBAL_H264_GOP                 (GLOBAL_VIDEO_FPS * 2)
 
 #ifdef __cplusplus
 }

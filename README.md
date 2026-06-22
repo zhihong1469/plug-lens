@@ -1,6 +1,10 @@
 # plug-lens：插镜感知终端
 [简体中文](README.md) | [English](README.en.md)
-🎬 项目V1_6ull系列演示视频：[B站链接](https://www.bilibili.com/video/BV1ZsVa6pEsY/)
+
+🎬 **演示视频**
+- V1_6ull系列：[B站5分钟链接](https://www.bilibili.com/video/BV1ZsVa6pEsY/)
+- V2_rk3562系列：[10秒本地速览](docs/effect%20display/rk3562_quickly_look_2026-06-22_09-50-52.gif)
+
 
 ---
 
@@ -12,152 +16,188 @@
 ---
 
 ## 📖 项目概述
-plug-lens V1_6ull系列 是基于 **NXP i.MX6ULL(Cortex-A7@792MHz)** 开发的工业级嵌入式Linux边缘视觉AI采集终端，系统环境：Linux 4.9.88 + 定制Buildroot + sysvinit（摒弃systemd）。定位为**资源极致受限**场景下的工程思维学习项目。
+plug-lens 是一个基于嵌入式 Linux 的**跨平台边缘视觉 AI 采集终端框架**，支持多硬件平台：
+
+| 版本系列 | 硬件平台 | 核心特性 | 状态 |
+|----------|----------|----------|------|
+| **V1_6ull** | NXP i.MX6ULL (Cortex-A7@792MHz) | USB摄像头采集 + MNN人脸检测 + RTSP推流 | ✅ 稳定发布 |
+| **V2_rk3562** | Rockchip RK3562 (4×A53@2.0GHz + 1TOPS NPU) | CSI摄像头 + RKNN/NPU加速 + MPP硬编码 | ⚡ 开发中 |
+
+系统环境：Linux + 定制 Buildroot + sysvinit（摒弃 systemd）。定位为**资源极致受限**场景下的工业级边缘视觉解决方案。
 
 ### 核心能力
-集成 **USB摄像头采集 + MNN离线人脸检测 + SD卡人脸抓拍 + RTSP多客户端实时推流** 全链路业务；
-采用**C语言面向对象、四层分层架构、双总线通信、编译期自动初始化**工业级工程设计，低功耗、高稳定、易扩展，可直接落地边缘视觉监控、无人值守抓拍、实时流媒体传输等场景。
-
-> 备注：代码内置状态机、自定义协议框架，v1.x 版本暂未启用，预留后续扩展。
+- **全局统一配置**：视频参数（分辨率、帧率、码率）全系统共用一套配置
+- **软件降频策略**：各服务独立实现软件帧采样降频，适配不同硬件算力
+- **双总线架构**：事件总线传输控制指令，数据总线路由视频裸流
+- **插件化设计**：业务模块按需加载，编译期自动注册
 
 ---
 
 ## ✨ 核心特性
+
 ### 🏗️ 架构设计
-- 四层分层架构：应用编排层 / 业务服务层 / 中间枢纽层 / 系统基建层，层间单向依赖
-- 双总线解耦：**事件总线**传输控制指令、**数据总线**路由视频裸流，实现业务模块完全解耦
-- 插件化体系：基于 `initcall` 编译期自动注册，模块按需加载、独立编译
-- 抽象基类封装：不同硬件设备与业务逻辑解耦，便于跨平台快速移植
+- **五层分层架构**：应用层 → 总线层 → 业务服务层 → 基建层 → 基础层
+- **双总线解耦**：事件总线（控制指令）+ 数据总线（视频帧/AI数据）
+- **全局配置统一**：所有模块共用 `vision_ai_config.h` 中的视频基准宏
+- **插件化体系**：基于 `initcall` 编译期自动注册
 
 ### 🎯 业务功能
-- USB YUYV 原始视频帧采集
-- UltraLight 轻量化模型 + MNN 离线人脸检测（无云端依赖）
-- 人脸触发自动抓拍，SD 卡循环存储
-- Live555 实现 RTSP 流媒体服务，支持多设备同时拉流
-- LED 状态指示灯联动硬件工作状态
+| 服务 | 功能 | 软件降频策略 | 线程优先级 |
+|------|------|-------------|-----------|
+| **capture_srv** | USB/CSI摄像头采集 | 30FPS → 14FPS | 80 |
+| **face_detect_srv** | MNN/RKNN人脸检测 | 14FPS → 5FPS | 70 |
+| **net_push_srv** | RTSP流媒体推流 | 14FPS → 5FPS | 90 |
+| **img_storage** | SD卡人脸抓拍存储 | 事件触发 | - |
 
-### ⚙️ 工业级工程规范
-- 完整顶层 Makefile + 自定义链接脚本，标准交叉编译工程
-- 静态内存池 + 引用计数管理视频帧生命周期，**零内存泄漏**
-- 单职责多线程设计，配合实时优先级调度，适配嵌入式低功耗需求
-- 分级日志系统，方便现场调试与运维故障排查
-- 守护进程保活、一键启停脚本、开机自启整套运维方案
+### ⚙️ 软件降频机制
+针对资源受限场景，采用**多级软件帧采样降频**策略：
+
+```
+摄像头硬件采集 (28FPS)
+       ↓
+   采集服务降频 (每2帧取1帧 → 14FPS)
+       ↓                                    ↓
+   人脸检测降频 (每14帧取1帧 → 1FPS)    推流服务降频 (每2帧取1帧 → 7FPS)
+
+```
+
+**设计优势**：
+- 各服务独立控制帧率，避免级联性能瓶颈
+- 低功耗唤醒机制，无事件时线程休眠
+- RTSP客户端自适应，无客户端时自动降功耗
 
 ### 🛡️ 运行稳定性
-- 线程隔离、事件低功耗唤醒，无空轮询造成的CPU无效占用
-- 帧采样降频控制，适配 i.MX6ULL 算力瓶颈
-- RTSP 客户端状态自适应，无客户端拉流时自动休眠降功耗
-- 完整资源回收机制，异常场景不产生僵尸进程、无内存泄漏
+- 线程隔离、事件低功耗唤醒，无空轮询
+- 静态内存池 + 引用计数管理，**零内存泄漏**
+- 完整资源回收机制，异常场景无僵尸进程
+
+---
+
+## 🔧 全局配置体系
+
+### 统一视频基准宏（`vision_ai_config.h`）
+
+```c
+// 全局统一视频参数（所有模块共用）
+#define GLOBAL_VIDEO_FPS           14      // 统一帧率
+#define GLOBAL_VIDEO_WIDTH         640     // 统一宽度
+#define GLOBAL_VIDEO_HEIGHT        360     // 统一高度
+#define GLOBAL_JPEG_QUALITY        75      // JPEG压缩质量
+
+// H.264编码配置
+#define GLOBAL_H264_BITRATE_KBPS   500     // 码率
+#define GLOBAL_H264_GOP            28      // I帧间隔
+```
+
+### 服务降频配置
+
+| 服务 | 输入帧率 | 输出帧率 | 降频因子 | 代码位置 |
+|------|---------|---------|---------|---------|
+| capture_srv | 30FPS | 14FPS | 2 | `FPS_DOWNSAMPLE_STEP = CAPTURE_FPS / AI_TARGET_FPS` |
+| face_detect_srv | 14FPS | 5FPS | 14 | `FPS_DOWNSAMPLE_STEP = 14` |
+| net_push_srv | 14FPS | 5FPS | 2 | `FPS_DOWNSAMPLE_STEP = 2` |
 
 ---
 
 ## 🛠️ 硬件 & 运行环境
+
 ### 硬件平台
-- 主控：100ASK NXP i.MX6ULL(Cortex-A7@792MHz)
-- 外设：USB摄像头、板载LED、SD存储卡、以太网口
+
+| 平台 | 主控 | 核心配置 | 外设支持 |
+|------|------|----------|----------|
+| **i.MX6ULL** | NXP Cortex-A7@792MHz | 512MB DDR3 | USB摄像头、LED、SD卡、以太网 |
+| **RK3562** | Rockchip 4×A53@2.0GHz | 1GB LPDDR4 + 1TOPS NPU | CSI摄像头、LED、SD卡、以太网 |
 
 ### 软件环境
-- 系统：Linux 4.9.88 + 裁剪 Buildroot
-- 初始化：sysvinit（无 systemd）
-- 编译：ARM32 嵌入式交叉编译工具链
-- 板端固定工作目录：`/root/run_on_board`
-
-### 网络支持
-支持双模式切换：
-1. **直连PC**：纯开发调试场景
-2. **路由器局域网**：多设备同网段 RTSP 拉流场景
-
----
-
-## 🏗️ 系统架构
-### 分层架构
-应用编排层 → 业务服务层 → 中间枢纽层 → 系统基建层
-内核驱动层完全独立隔离，不耦合上层应用业务。
-
-### 核心数据流
-摄像头驱动采集 → 业务帧服务 → 数据总线分发 → 人脸检测 / RTSP推流 / 图片存储 → 自动帧回收
+请看具体开发板的指南文档
+- [快速上手（RK3562）](docs/quick_start_zh-CN_rk3562.md)
 
 ---
 
 ## 📊 性能指标
-| 性能项 | 指标值 | 说明 |
-|--------|--------|------|
-| 视频分辨率 | 640 × 360 | 摄像头固定输出规格 |
-| RTSP 推流帧率 | 7fps | 局域网环境稳定传输 |
-| 人脸检测帧率 | 1fps | MNN 本地离线推理 |
-| 内存占用 | < 100MB | 虚拟内存统计口径，实际物理占用更低 |
+
+| 性能项 | i.MX6ULL | RK3562（软件模式） | RK3562（NPU模式） |
+|--------|----------|-------------------|-------------------|
+| 摄像头采集 | 28FPS | 28FPS | 30FPS |
+| 人脸检测 | 1FPS | 1FPS | 30FPS+ |
+| RTSP推流 | 7FPS | 7FPS | 14FPS+ |
+| 内存占用 | < 100MB | < 150MB | < 200MB |
 
 ---
 
 ## 🚀 快速开始
-编译部署链路：PC交叉编译 → NFS挂载分发 → 开发板挂载 → 加载驱动/环境 → 脚本启停 → RTSP拉流验证
-详细编译、部署、调试教程：[快速上手指南](docs/quick_start_zh-CN.md)
+
+### 编译命令
+
+```bash
+# i.MX6ULL 平台
+use_toolchain arm32-linux-hf6ull
+make TARGET_PLATFORM=imx6ull
+
+# RK3562 平台（软件模式）
+use_toolchain arm64-linux-75
+make TARGET_PLATFORM=rk3562 ENGINE=software
+
+# RK3562 平台（硬件模式，需厂商库）
+use_toolchain arm64-linux-103
+make TARGET_PLATFORM=rk3562 ENGINE=hardware
+```
+
+### 运行服务
+
+```bash
+# 启动所有服务
+cd /root/run_on_board
+./start_all.sh
+
+# 查看服务状态
+./status.sh
+
+# 停止服务
+./stop_all.sh
+```
+
+---
 
 ## 📚 文档导航
-- [快速上手](docs/quick_start_zh-CN.md)：编译、部署、运行全流程
-- [架构说明](docs/architecture.md)：项目架构框图与设计思路
-- [agent调度](SKILL.md)：AI编程调度示例
-- [性能报告](docs/performance_report.md)：根据实际日志、运行数据整理的详细项目性能演进报告
-- [加入贡献](docs/CONTRIBUTING.md)：如有优化思路，欢迎参与项目共建
-> [!TIP]
-> 运维手册、接口文档、工程具体架构agent提示词持续迭代[补充](docs/waitme.md)
-> ——what？
-> 拿到它后，在AI的时代，您将可以低成本的基于我们的项目结构开发属于您自己的应用实现。让我们一起共建嵌入式社区，是我希望做的。
-> ——why？
-> 尽管AI已经可以承担70%的代码实现，但稳定性仍然需要物理验证，产品落地需要有负责人。很多高复用性的代码仍然需要测试，开源共享能帮助我们把时间花在更高维度学习。多人行才能走得远，相互学习。
-> ——how？
-> 项目社区仍在筹建中，欢迎点击页面右上角⭐Star支持；项目会持续紧跟行业趋势迭代优化，期待能为你的嵌入式开发提供启发。
+- [快速上手（RK3562）](docs/quick_start_zh-CN_rk3562.md)
+- [快速上手（i.MX6ULL）](docs/quick_start_zh-CN_imx6ull.md)
+- [架构说明](docs/architecture.md)
+- [技能指南](SKILL.md)
+- [性能报告](docs/performance_report.md)
 
-## 🔀 分支与版本管理规范
-本项目遵循企业级Git研发工作流，采用语义化版本(SemVer `vX.Y.Z`)管控迭代：
-### 1. 分支职责定义
+---
+
+## 🔀 分支与版本管理
+
 | 分支名称 | 定位与用途 |
-| ---- | ---- |
-| `main` | **已限制直接提交代码**；项目基线（对外展示最新稳定版），仅在版本发布里程碑从`release/*`分支合并稳定代码；后续`release/*`新硬件适配版本从此分支派生 |
-| `release/*` | **已限制直接提交代码**；永久锁定对应固定硬件的发布稳定分支；所有BUG修复、文档增补、功能迭代全部落地于此；全系列版本标签均基于该分支生成 |
-| `release/v1_6ull` | 永久锁定i.MX6ULL平台；单核792Mhz+无NPU+无硬编码GPU，基于资源极限压榨思路开发；已实现:`v4l2`采集、人脸检测+MJPEG编码存储、H264软编码+RTSP推流，7FPS为当前硬件短期性能上限|
-| `release/v2_rk3562`(构建中) | 永久锁定rk3562平台；4×A53@2.0GHz+1TOPS算力+Mali-G52 2EE |
-| `feature/*/*` | 临时开发分支，用于新功能开发、大批量文档补充，开发完成后通过PR压缩合并入release，合并完毕即刻删除 |
-| `fix/*/*` | 临时缺陷分支，用于bug修复，开发完成后通过PR压缩合并入release，合并完毕即刻删除 |
+|----------|----------|
+| `main` | 项目基线，仅在版本发布里程碑合并稳定代码 |
+| `release/v1_6ull` | i.MX6ULL 平台稳定分支 |
+| `release/v2_rk3562` | RK3562 平台开发分支 |
+| `feature/*/*` | 临时开发分支 |
+| `fix/*/*` | 临时缺陷修复分支 |
 
-### 2. 标准化开发流程
-1. 从`release/v1_6ull`拉出feature/fix临时分支；
-2. 本地调试迭代，所有提交使用GPG签名：`git commit -S`；
-3. 推送远端创建PR，选择`Squash and merge`，多条零散提交压缩为单条规范记录并入release；
-4. PR合并完成，清理本地+远端临时分支；
-5. 版本稳定后在release分支打GPG签名Tag，同步合并至main基线。
-
-### 3. 语义化版本 `vX.Y.Z`
-- X(主版本)：架构重构/更换硬件平台（如v2.0.0适配RK系列）
-- Y(次版本)：新增完整业务、大规模文档重构（如v1.1.0新增存储扩展模块）
-- Z(补丁版)：BUG修复、零散文档补充（如v1.0.1完善快速上手文档）
-
-### 4. 版本发布规则（重点：Tag对应正式Release）
-1. **Git Tag = 项目正式发行快照**，仅经过全量测试、文档补齐后才生成GPG签名标签；
-2. GitHub Release 绑定对应Tag发布，用于上传预编译固件、源码压缩包，作为对外正式发布入口；
-3. v1.0.0为项目首发正式版，已完成Release基线锚定；后续v1.0.x补丁版本迭代完成后新建Tag+Release。
+---
 
 ## 🧩 第三方开源依赖
 
-| 开源项目 | 用途 | 开源协议 | 项目地址 |
-|--------|------|--------|----------|
-| MNN | 轻量化AI推理 | Apache 2.0 | https://github.com/alibaba/MNN |
-| Ultra-Light-Fast-Generic-Face-Detector-1MB | 人脸检测模型 | MIT | https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB |
-| Live555 | RTSP流媒体服务 | LGPL 2.1 | http://www.live555.com/liveMedia/ |
-| libjpeg-turbo | JPEG图像编解码加速 | BSD-3-Clause | https://github.com/libjpeg-turbo/libjpeg-turbo |
-| OpenH264 | H264软编码 | BSD 2-Clause | https://github.com/cisco/openh264 |
-| libyuv | YUV图像格式转换 | BSD-3-Clause | https://github.com/lemenkov/libyuv |
-| OpenCV | 图像调试绘图（调试依赖） | Apache 2.0 | https://github.com/opencv/opencv |
-| GDB12.1 | 远程交叉调试（调试依赖） | GPL-3.0 | https://ftp.gnu.org/gnu/gdb/gdb-12.1.tar.xz |
-> 标注「调试依赖」仅PC编译调试使用，正式固件不打包集成
-### 参考学习项目
-1. 韦东山100askTeam：Linux驱动分层架构参考
-2. 兆鸣嵌入式：C语言面向对象工程设计思路
-3. FFmpeg-Builds：PC端音视频调试工具参考
+| 开源项目 | 用途 | 开源协议 |
+|----------|------|----------|
+| MNN | 轻量化AI推理 | Apache 2.0 |
+| RKNN | NPU加速推理 | 专有协议 |
+| Live555 | RTSP流媒体服务 | LGPL 2.1 |
+| libjpeg-turbo | JPEG编解码 | BSD-3-Clause |
+| OpenH264 | H264软编码 | BSD 2-Clause |
+| libyuv | YUV格式转换 | BSD-3-Clause |
+
+---
 
 ## 📄 开源许可证
-- 项目自研代码采用 **MIT License**，协议文件：`./LICENSE`
-- 所有第三方组件遵循各自原厂开源协议，协议文档存放于对应`third_lib/*`目录
+- 项目自研代码采用 **MIT License**
+- 所有第三方组件遵循各自原厂开源协议
+
+---
 
 ## 🙏 致谢
 1. 感谢各开源项目开发者提供底层技术支撑；

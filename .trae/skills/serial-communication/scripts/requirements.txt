@@ -1,0 +1,10 @@
+# Serial Communication Skill Dependencies
+
+# Core serial library
+pyserial>=3.5
+
+# Interactive terminal support (Linux recommended)
+pexpect>=4.8.0
+
+# Note: On Linux, also install picocom system tool:
+# sudo apt-get install picocom

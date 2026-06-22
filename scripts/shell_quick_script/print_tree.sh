@@ -8,6 +8,12 @@ SCRIPT_REL_PATH="scripts/shell_quick_script/print_tree.sh"
 
 # 2. 输出文件 相对于 项目根目录的路径
 OUTPUT_REL_PATH="scripts/shell_quick_script/tmp/catalog_tree.txt"
+
+# 3. 【新增】要扫描的目标目录 相对于 项目根目录的路径（留空则扫描整个项目）
+#    示例：.trae    ← 扫描 .trae 目录
+#    示例：src      ← 扫描 src 目录
+#    示例：(留空)   ← 扫描整个项目根目录
+TARGET_DIR=""
 # ==============================================
 
 # ===================== 核心：自动计算路径（零报错） =====================
@@ -36,6 +42,20 @@ if [ ! -d "$PROJECT_ROOT" ]; then
     exit 1
 fi
 
+# ===================== 确定扫描目标目录 =====================
+if [ -n "$TARGET_DIR" ]; then
+    SCAN_TARGET="$PROJECT_ROOT/$TARGET_DIR"
+    SCAN_DISPLAY="$PROJECT_ROOT/$TARGET_DIR (相对路径: $TARGET_DIR)"
+    
+    if [ ! -d "$SCAN_TARGET" ]; then
+        echo -e "\033[31m❌ 错误：指定的扫描目录不存在：$SCAN_TARGET\033[0m"
+        exit 1
+    fi
+else
+    SCAN_TARGET="$PROJECT_ROOT"
+    SCAN_DISPLAY="$PROJECT_ROOT (整个项目根目录)"
+fi
+
 # 清空旧文件
 > "$OUTPUT_FILE"
 
@@ -43,16 +63,22 @@ fi
 # 写入标题
 echo "============ $PROJECT_NAME - 实际目录结构 ============" >> "$OUTPUT_FILE"
 echo "✅ 项目根目录：$PROJECT_ROOT" >> "$OUTPUT_FILE"
+echo "✅ 扫描目录：$SCAN_DISPLAY" >> "$OUTPUT_FILE"
+echo "✅ 包含隐藏文件：是" >> "$OUTPUT_FILE"
 echo -e "\n\n" >> "$OUTPUT_FILE"
 
-# 执行tree命令（保留原过滤规则）
-tree -I "build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags|third_lib" "$PROJECT_ROOT" >> "$OUTPUT_FILE"
+# 执行tree命令
+# -a: 显示所有文件（包括隐藏文件）
+# -I: 排除不需要的目录和文件类型
+tree  -I "*.h|*.c|*.cpp|*.h|*.c|*.cpp|*.build|scripts|.git|*.o|*.so|*.sh|*.a|*.log|*.md|*.txt|*.png|*.d|*.tmp|out|tags|third_lib" "$SCAN_TARGET" >> "$OUTPUT_FILE"
 
 # ===================== 完成提示（统一风格） =====================
 echo -e "\033[32m==================================================\033[0m"
 echo -e "\033[32m✅ 目录树导出完成！\033[0m"
 echo -e "\033[32m📂 项目根目录：\033[0m"
-echo -e "\033[32m$PROJECT_ROOT \033[0m"
+echo -e "\033[32m$PROJECT_ROOT\033[0m"
+echo -e "\033[32m📂 扫描目录：\033[0m"
+echo -e "\033[32m$SCAN_DISPLAY\033[0m"
 echo -e "\033[32m📄 输出文件：\033[0m"
-echo -e "\033[32m$OUTPUT_FILE \033[0m"
+echo -e "\033[32m$OUTPUT_FILE\033[0m"
 echo -e "\033[32m==================================================\033[0m"
