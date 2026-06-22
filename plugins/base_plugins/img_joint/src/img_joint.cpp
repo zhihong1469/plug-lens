@@ -289,6 +289,12 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
     impl->param.bEnableFrameSkip = true;
 
+    // Set spatial layer bitrate parameters (critical for OpenH264)
+    // iMaxSpatialBitrate must be >= iSpatialBitrate
+    int bitrate_bps = param->bitrate * 1000;
+    impl->param.sSpatialLayers[0].iSpatialBitrate = bitrate_bps;
+    impl->param.sSpatialLayers[0].iMaxSpatialBitrate = bitrate_bps * 2;  // Set max to 2x target
+
     // Initialize encoder
     ret = impl->p_encoder->InitializeExt(&impl->param);
     if (ret != 0) {

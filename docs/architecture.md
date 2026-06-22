@@ -12,67 +12,185 @@
 | **分层架构** | 基建层 → 插件层 → 应用层 清晰分离 |
 | **接口封闭** | 源文件对内隐藏，只开放头文件接口 |
 | **插件化业务** | 业务逻辑以插件形式动态加载 |
+| **上下层解耦** | 上层业务服务与底层硬件抽象完全隔离 |
 
 ---
 
 ## 二、系统架构图
 
+### 2.1 分层架构总览
+
 ```mermaid
 flowchart TD
-    %% 1. 定义样式
-    classDef layer fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000;
-    classDef bus fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#000,stroke-dasharray: 5 5;
-    classDef core fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000;
+    %% 样式定义
+    classDef appLayer fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000;
+    classDef busLayer fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#000,stroke-dasharray: 5 5;
+    classDef serviceLayer fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#000;
+    classDef infraLayer fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000;
+    classDef baseLayer fill:#e0e0e0,stroke:#424242,stroke-width:2px,color:#000;
 
-    %% 2. 定义节点
-    A["🚀 Main 系统入口层"]
-    B["📱 App 应用交互层"]
-    C["📨 Event Bus 事件总线"]
-    Z["⚙️ 业务服务层 (plugins)"]
-    D["💾 Data Bus 数据总线"]
-    E["🔧 基建层 (src)"]
-    F["📦 公共组件 (common)"]
-    G["📚 第三方库 (third_lib)"]
-
-    %% 3. 定义子图（逻辑分组）
-    subgraph Application [应用层]
-        direction TB
-        A
-        B
+    %% 应用层 (Application Layer)
+    subgraph AppLayer [应用层]
+        direction LR
+        A1["main() 系统入口"]
+        A2["App 应用交互"]
     end
-
-    subgraph Business [业务层 - plugins]
-        direction TB
-        Z
+    
+    %% 总线层 (Bus Layer) - 核心解耦层
+    subgraph BusLayer [总线层 - 解耦核心]
+        direction LR
+        B1["📨 Event Bus 事件总线"]
+        B2["💾 Data Bus 数据总线"]
     end
-
-    subgraph Infrastructure [基建层 - src]
-        direction TB
-        E
+    
+    %% 业务服务层 (Service Layer)
+    subgraph ServiceLayer [业务服务层 - plugins]
+        direction LR
+        S1["face_detect_srv 人脸检测"]
+        S2["net_push_srv RTSP推流"]
+        S3["camera_srv 摄像头采集"]
+        S4["其他业务服务"]
     end
-
-    subgraph Foundation [基础层]
-        direction TB
-        F
-        G
+    
+    %% 基建层 (Infrastructure Layer)
+    subgraph InfraLayer [基建层 - src]
+        direction LR
+        I1["camera_base 摄像头抽象"]
+        I2["ai_model_base AI模型抽象"]
+        I3["img_proc_base 图像处理抽象"]
+        I4["led_base LED控制抽象"]
     end
-
-    subgraph Bus [总线层]
-        direction TB
-        C
-        D
+    
+    %% 基础层 (Foundation Layer)
+    subgraph BaseLayer [基础层]
+        direction LR
+        F1["common/ 公共组件"]
+        F2["third_lib/ 第三方库"]
     end
+    
+    %% 连接关系：严格单向依赖
+    AppLayer --> BusLayer
+    BusLayer <--> ServiceLayer
+    ServiceLayer --> InfraLayer
+    InfraLayer --> BaseLayer
+    
+    %% 应用样式
+    class AppLayer appLayer;
+    class BusLayer busLayer;
+    class ServiceLayer serviceLayer;
+    class InfraLayer infraLayer;
+    class BaseLayer baseLayer;
+    
+    %% 标注解耦关系
 
-    %% 4. 连接关系
-    Application <--> Bus
-    Bus <--> Business
-    Business <--> Infrastructure
-    Infrastructure --> Foundation
+```
 
-    %% 5. 应用样式
-    class A,B layer;
-    class C,D bus;
-    class E,F,G core;
+### 2.2 层次解耦关系
+
+```mermaid
+flowchart LR
+    %% 定义节点
+    subgraph L5 [应用层]
+        direction TB
+        A["应用入口 / 交互逻辑"]
+    end
+    
+    subgraph L4 [总线层]
+        direction TB
+        E["事件总线<br/>(控制指令)"]
+        D["数据总线<br/>(视频数据)"]
+    end
+    
+    subgraph L3 [业务服务层]
+        direction TB
+        FD["人脸检测服务"]
+        NP["网络推流服务"]
+        CA["摄像头采集服务"]
+    end
+    
+    subgraph L2 [设备抽象层]
+        direction TB
+        CB["摄像头抽象接口"]
+        AB["AI模型抽象接口"]
+        IB["图像处理抽象接口"]
+    end
+    
+    subgraph L1 [设备/库层]
+        direction TB
+        HW["设备抽象"]
+        LIB["第三方库"]
+    end
+    
+    %% 连接关系
+    L5 --> L4
+    L4 <--> L3
+    L3 --> L2
+    L2 --> L1
+    
+    %% 箭头标注
+    style L5 fill:#e3f2fd,stroke:#1976d2
+    style L4 fill:#fff9c4,stroke:#fbc02d,stroke-dasharray: 5 5
+    style L3 fill:#e8f5e9,stroke:#388e3c
+    style L2 fill:#fce4ec,stroke:#c2185b
+    style L1 fill:#e0e0e0,stroke:#424242
+```
+
+### 2.3 服务间通信架构
+
+```mermaid
+flowchart TD
+    %% 数据流向
+    subgraph Camera [摄像头采集]
+        CAM["camera_srv"]
+    end
+    
+    subgraph VideoBus [视频数据总线]
+        VID["YUYV原始帧"]
+    end
+    
+    subgraph FaceDetect [人脸检测]
+        FD["face_detect_srv"]
+        AI["MNN/RKNN模型"]
+    end
+    
+    subgraph AIBus [AI结果总线]
+        RES["人脸检测结果"]
+    end
+    
+    subgraph NetPush [网络推流]
+        NP["net_push_srv"]
+        ENC["H.264编码器"]
+    end
+    
+    subgraph EventBus [事件总线]
+        EVT["控制事件"]
+    end
+    
+    %% 数据流
+    CAM -->|"生产"| VID
+    VID -->|"消费"| FD
+    FD -->|"生产"| RES
+    RES -->|"消费"| NP
+    VID -->|"消费"| ENC
+    
+    %% 事件流
+    EVT <--> CAM
+    EVT <--> FD
+    EVT <--> NP
+    
+    %% 样式
+    classDef producer fill:#c8e6c9,stroke:#388e3c;
+    classDef consumer fill:#ffecb3,stroke:#ff9800;
+    classDef bus fill:#fff9c4,stroke:#fbc02d,stroke-dasharray: 5 5;
+    
+    class CAM producer;
+    class FD consumer;
+    class FD producer;
+    class NP consumer;
+    class ENC consumer;
+    class VID bus;
+    class RES bus;
+    class EVT bus;
 ```
 
 ---
@@ -279,9 +397,54 @@ plug-lens/
 
 ---
 
-## 五、总线设计
+## 五、解耦架构设计
 
-### 5.1 事件总线 (Event Bus)
+### 5.1 上下层解耦原则
+
+本项目通过**三层解耦架构**实现上下层的完全隔离：
+
+| 层次 | 名称 | 职责 | 依赖方向 |
+|------|------|------|----------|
+| L5 | 应用层 | 系统入口和顶层协调 | 只依赖总线层 |
+| L4 | 总线层 | 事件和数据的中转分发 | 不依赖任何业务层 |
+| L3 | 业务服务层 | 具体业务逻辑实现 | 依赖基建层，通过总线通信 |
+| L2 | 基建层 | 硬件抽象接口定义 | 依赖公共组件和第三方库 |
+| L1 | 基础层 | 公共组件和第三方库 | 无外部依赖 |
+
+### 5.2 解耦点说明
+
+**解耦点 1：应用层 ↔ 业务层**
+- 应用层不直接调用业务服务接口
+- 通过事件总线发送控制指令
+- 通过数据总线获取业务数据
+- **优势**：新增/替换业务服务无需修改应用层
+
+**解耦点 2：业务服务之间**
+- 服务之间无直接函数调用
+- 通过数据总线传递数据（生产者-消费者模式）
+- 通过事件总线协调状态
+- **优势**：服务可独立开发、测试、部署
+
+**解耦点 3：业务层 ↔ 基建层**
+- 业务层只调用抽象接口（如 `camera_base`、`ai_model_base`）
+- 具体硬件实现由基建层封装
+- **优势**：同一业务逻辑可适配不同硬件平台
+
+### 5.3 架构优势
+
+| 优势 | 说明 |
+|------|------|
+| **可扩展性** | 新增业务服务只需实现接口并注册到总线 |
+| **可维护性** | 模块独立，定位问题和修复更高效 |
+| **可移植性** | 更换硬件平台只需替换基建层实现 |
+| **可测试性** | 各模块可独立进行单元测试 |
+| **低耦合** | 模块间依赖最小化，变更影响可控 |
+
+---
+
+## 六、总线设计
+
+### 6.1 事件总线 (Event Bus)
 
 **用途**: 系统控制命令和事件通知的传递。
 
@@ -304,7 +467,7 @@ plug-lens/
 #define H264_RTSP_DATA_BUS_NAME   "h264_stream_bus"
 ```
 
-### 5.2 数据总线 (Data Bus)
+### 6.2 数据总线 (Data Bus)
 
 **用途**: 视频帧、AI 数据等大容量数据的传输。
 
@@ -312,9 +475,9 @@ plug-lens/
 
 ---
 
-## 六、编译说明
+## 七、编译说明
 
-### 6.1 编译产物位置
+### 7.1 编译产物位置
 
 | 产物类型 | 位置 |
 |----------|------|
@@ -322,7 +485,7 @@ plug-lens/
 | 最终可执行文件 | `output/vision_ai_app` |
 | 链接库 | `output/` |
 
-### 6.2 编译命令
+### 7.2 编译命令
 
 ```bash
 # 完整编译
@@ -334,11 +497,11 @@ make clean
 
 ---
 
-## 七、瑞芯微库集成
+## 八、瑞芯微库集成
 
 已在 Makefile 中添加 RK3562 组件支持：
 
-### 7.1 头文件路径
+### 8.1 头文件路径
 
 ```makefile
 -I$(TOPDIR)/third_lib/rk3562/rkmpp/include
@@ -346,7 +509,7 @@ make clean
 -I$(TOPDIR)/.tool/rknn-toolkit2-master/rknpu2/runtime/Linux/librknn_api/include
 ```
 
-### 7.2 库链接
+### 8.2 库链接
 
 ```makefile
 -L$(TOPDIR)/third_lib/rk3562/rkmpp/lib -lrockchip_mpp

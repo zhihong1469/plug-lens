@@ -16,15 +16,25 @@ AI_MODEL_INC := \
 
 # ===================== 条件编译：图像处理引擎 =====================
 ifeq ($(PLATFORM_RK3562),1)
-    # RK3562: 使用RGA硬件加速进行格式转换
-    # 但编解码（MJPEG/H.264）和辅助函数仍需要 img_joint 软件实现
-    IMG_PROC_SRC := \
-        base_plugins/img_rga/src/img_rga.cpp \
-        base_plugins/img_joint/src/img_joint.cpp \
-        base_plugins/img_joint/src/img_proc_software_ops.cpp
-    IMG_PROC_INC := \
-        -I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
-        -I$(TOPDIR)/plugins/base_plugins/img_joint/inc
+    # RK3562: 根据 IMG_PROC_RGA 选择硬件加速或软件实现
+    ifeq ($(IMG_PROC_RGA),1)
+        # 使用RGA硬件加速进行格式转换
+        # 但编解码（MJPEG/H.264）和辅助函数仍需要 img_joint 软件实现
+        IMG_PROC_SRC := \
+            base_plugins/img_rga/src/img_rga.cpp \
+            base_plugins/img_joint/src/img_joint.cpp \
+            base_plugins/img_joint/src/img_proc_software_ops.cpp
+        IMG_PROC_INC := \
+            -I$(TOPDIR)/plugins/base_plugins/img_rga/inc \
+            -I$(TOPDIR)/plugins/base_plugins/img_joint/inc
+    else
+        # IMG_PROC_RGA=0: 使用纯软件实现（libjpeg-turbo、libyuv等）
+        IMG_PROC_SRC := \
+            base_plugins/img_joint/src/img_joint.cpp \
+            base_plugins/img_joint/src/img_proc_software_ops.cpp
+        IMG_PROC_INC := \
+            -I$(TOPDIR)/plugins/base_plugins/img_joint/inc
+    endif
 else
     # i.MX6ULL: 使用软件实现（libjpeg-turbo、libyuv、openh264等）
     IMG_PROC_SRC := \

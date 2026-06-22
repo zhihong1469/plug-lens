@@ -208,7 +208,7 @@ typedef enum {
 
 // --------------------- AI人脸检测模型配置 ---------------------
 /** AI模型文件路径 | MNN量化模型存储路径 */
-#define CONFIG_AI_MODEL_PATH "./rknn/model/face_detector_rfb320_int8.rknn"
+#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
 /** AI模型输入宽度 | 模型推理图像宽度 */
 #define CONFIG_AI_INPUT_W    320
 /** AI模型输入高度 | 模型推理图像高度 */
@@ -237,6 +237,14 @@ typedef enum {
 #define GLOBAL_FRAME_INTERVAL_MS        (1000 / GLOBAL_VIDEO_FPS)
 /** 全局帧间隔(微秒) | RTSP底层时间戳用 */
 #define GLOBAL_FRAME_INTERVAL_US        (1000000 / GLOBAL_VIDEO_FPS)
+
+// --------------------- H.264 编码全局配置 ---------------------
+/** 全局H.264编码码率 | 单位：kbps（千比特/秒） */
+#define GLOBAL_H264_BITRATE_KBPS        500
+/** 全局H.264编码码率 | 单位：bps（比特/秒），供编码器使用 */
+#define GLOBAL_H264_BITRATE_BPS         (GLOBAL_H264_BITRATE_KBPS * 1000)
+/** 全局H.264编码GOP大小 | I帧间隔 */
+#define GLOBAL_H264_GOP                 (GLOBAL_VIDEO_FPS * 2)
 
 #ifdef __cplusplus
 }

@@ -1,164 +1,202 @@
 # plug-lens: Plug-in Perception Terminal
 [简体中文](README.md) | [English](README.en.md)
-🎬 Project V1_6ull Series Demo Video: [Bilibili Link](https://www.bilibili.com/video/BV1ZsVa6pEsY/)
+
+🎬 **Demo Videos**
+- V1_6ull Series: [Bilibili Link](https://www.bilibili.com/video/BV1ZsVa6pEsY/)
+- V2_rk3562 Series: [10s Preview](docs/effect%20display/rk3562_quickly_look_2026-06-22_09-50-52.gif)
 
 ---
 
 ## 📛 Project Name Origin
-**plug-lens (插镜感知终端)**
+**plug-lens**
 - "Lens" refers to the camera visual imaging unit, and also abstracts into various environmental perception hardware;
 - "Plug" represents the **pluggable modular architecture**, based on the decoupled design of Event Bus + Data Bus, supporting on-demand expansion of peripherals such as cameras and sensors. Business modules can be freely cropped with extremely strong reusability and portability.
 
 ---
 
 ## 📖 Project Overview
-The plug-lens V1_6ull series is an industrial-grade embedded Linux edge vision AI acquisition terminal developed based on **NXP i.MX6ULL (Cortex-A7@792MHz)**. System environment: Linux 4.9.88 + Custom Buildroot + sysvinit (systemd abandoned). Positioned as an **engineering thinking learning project under extremely resource-constrained scenarios**.
+plug-lens is a **cross-platform edge vision AI acquisition terminal framework** based on embedded Linux, supporting multiple hardware platforms:
+
+| Version Series | Hardware Platform | Core Features | Status |
+|---------------|------------------|---------------|--------|
+| **V1_6ull** | NXP i.MX6ULL (Cortex-A7@792MHz) | USB Camera + MNN Face Detection + RTSP Streaming | ✅ Stable Release |
+| **V2_rk3562** | Rockchip RK3562 (4×A53@2.0GHz + 1TOPS NPU) | CSI Camera + RKNN/NPU Acceleration + MPP Hardware Encoding | ⚡ Under Development |
+
+System Environment: Linux + Custom Buildroot + sysvinit (systemd abandoned). Positioned as an **industrial-grade edge vision solution for extremely resource-constrained scenarios**.
 
 ### Core Capabilities
-Integrates the full-link business of **USB camera acquisition + MNN offline face detection + SD card face capture + RTSP multi-client real-time streaming**;
-Adopts industrial-grade engineering design including **C language object-oriented programming, four-layer architecture, dual-bus communication, and compile-time automatic initialization**. With low power consumption, high stability and easy scalability, it can be directly applied to edge visual monitoring, unattended capture, real-time streaming media transmission and other scenarios.
-
-> Note: The code has built-in state machine and custom protocol framework, which are not enabled in v1.x versions and reserved for future expansion.
+- **Global Unified Configuration**: Video parameters (resolution, FPS, bitrate) shared across the entire system
+- **Software Frame Rate Downsampling**: Each service independently implements software frame sampling to adapt to different hardware computing power
+- **Dual-Bus Architecture**: Event Bus for control commands, Data Bus for video stream routing
+- **Plugin Design**: Business modules loaded on demand with compile-time automatic registration
 
 ---
 
 ## ✨ Core Features
+
 ### 🏗️ Architecture Design
-- Four-layer architecture: Application Orchestration Layer / Business Service Layer / Middle Hub Layer / System Infrastructure Layer, with unidirectional dependency between layers
-- Dual-bus decoupling: **Event Bus** transmits control commands, **Data Bus** routes raw video streams, achieving complete decoupling of business modules
-- Plugin system: Based on `initcall` compile-time automatic registration, modules are loaded on demand and compiled independently
-- Abstract base class encapsulation: Decouples different hardware devices from business logic, facilitating rapid cross-platform porting
+- **Five-Layer Architecture**: Application Layer → Bus Layer → Business Service Layer → Infrastructure Layer → Foundation Layer
+- **Dual-Bus Decoupling**: Event Bus (control commands) + Data Bus (video frames/AI data)
+- **Global Configuration Unification**: All modules share video reference macros from `vision_ai_config.h`
+- **Plugin System**: Based on `initcall` compile-time automatic registration
 
 ### 🎯 Business Functions
-- USB YUYV raw video frame acquisition
-- UltraLight lightweight model + MNN offline face detection (no cloud dependency)
-- Face-triggered automatic capture with SD card cyclic storage
-- RTSP streaming media service implemented with Live555, supporting simultaneous streaming from multiple devices
-- LED status indicator linked to hardware working state
+| Service | Function | Software Downsampling Strategy | Thread Priority |
+|---------|----------|--------------------------------|-----------------|
+| **capture_srv** | USB/CSI Camera Capture | 30FPS → 14FPS | 80 |
+| **face_detect_srv** | MNN/RKNN Face Detection | 14FPS → 5FPS | 70 |
+| **net_push_srv** | RTSP Streaming | 14FPS → 5FPS | 90 |
+| **img_storage** | SD Card Face Capture Storage | Event-triggered | - |
 
-### ⚙️ Industrial-Grade Engineering Specifications
-- Complete top-level Makefile + custom linker script, standard cross-compilation project
-- Static memory pool + reference count management for video frame lifecycle, **zero memory leaks**
-- Single-responsibility multi-thread design with real-time priority scheduling, adapting to embedded low-power requirements
-- Hierarchical logging system, facilitating on-site debugging and operation and maintenance troubleshooting
-- Complete operation and maintenance solution including daemon process keep-alive, one-click start/stop script, and auto-start on boot
+### ⚙️ Software Frame Rate Downsampling Mechanism
+For resource-constrained scenarios, a **multi-stage software frame sampling downsampling** strategy is adopted:
+
+```
+Camera Hardware Capture (28FPS)
+       ↓
+   Capture Service Downsampling (1 in 2 frames → 14FPS)
+       ↓                                    ↓
+   Face Detection Downsampling (1 in 14 frames → 1FPS)    Streaming Downsampling (1 in 2 frames → 7FPS)
+```
+
+**Design Advantages**:
+- Each service independently controls frame rate, avoiding cascading performance bottlenecks
+- Low-power wake-up mechanism, threads sleep when no events
+- RTSP client adaptive, automatic power reduction when no clients connected
 
 ### 🛡️ Operational Stability
-- Thread isolation and event-based low-power wake-up, no invalid CPU occupation caused by empty polling
-- Frame sampling frequency reduction control, adapting to i.MX6ULL computing power bottleneck
-- RTSP client state self-adaptation, automatic sleep to reduce power consumption when no client is streaming
-- Complete resource recycling mechanism, no zombie processes or memory leaks in abnormal scenarios
+- Thread isolation and event-based low-power wake-up, no empty polling
+- Static memory pool + reference count management, **zero memory leaks**
+- Complete resource recycling mechanism, no zombie processes in abnormal scenarios
+
+---
+
+## 🔧 Global Configuration System
+
+### Unified Video Reference Macros (`vision_ai_config.h`)
+
+```c
+// Global unified video parameters (shared by all modules)
+#define GLOBAL_VIDEO_FPS           14      // Unified frame rate
+#define GLOBAL_VIDEO_WIDTH         640     // Unified width
+#define GLOBAL_VIDEO_HEIGHT        360     // Unified height
+#define GLOBAL_JPEG_QUALITY        75      // JPEG compression quality
+
+// H.264 encoding configuration
+#define GLOBAL_H264_BITRATE_KBPS   500     // Bitrate in kbps
+#define GLOBAL_H264_GOP            28      // I-frame interval
+```
+
+### Service Downsampling Configuration
+
+| Service | Input FPS | Output FPS | Downsampling Factor | Code Location |
+|---------|-----------|------------|---------------------|---------------|
+| capture_srv | 30FPS | 14FPS | 2 | `FPS_DOWNSAMPLE_STEP = CAPTURE_FPS / AI_TARGET_FPS` |
+| face_detect_srv | 14FPS | 5FPS | 14 | `FPS_DOWNSAMPLE_STEP = 14` |
+| net_push_srv | 14FPS | 5FPS | 2 | `FPS_DOWNSAMPLE_STEP = 2` |
 
 ---
 
 ## 🛠️ Hardware & Runtime Environment
+
 ### Hardware Platform
-- Main Controller: 100ASK NXP i.MX6ULL (Cortex-A7@792MHz)
-- Peripherals: USB camera, on-board LED, SD memory card, Ethernet port
+
+| Platform | Main Controller | Core Configuration | Peripherals |
+|----------|----------------|-------------------|-------------|
+| **i.MX6ULL** | NXP Cortex-A7@792MHz | 512MB DDR3 | USB Camera, LED, SD Card, Ethernet |
+| **RK3562** | Rockchip 4×A53@2.0GHz | 1GB LPDDR4 + 1TOPS NPU | CSI Camera, LED, SD Card, Ethernet |
 
 ### Software Environment
-- System: Linux 4.9.88 + Tailored Buildroot
-- Initialization: sysvinit (no systemd)
-- Compilation: ARM32 embedded cross-compilation toolchain
-- Fixed working directory on board: `/root/run_on_board`
-
-### Network Support
-Supports dual-mode switching:
-1. **Direct connection to PC**: Pure development and debugging scenario
-2. **Router LAN**: Multi-device RTSP streaming in the same network segment
-
----
-
-## 🏗️ System Architecture
-### Layered Architecture
-Application Orchestration Layer → Business Service Layer → Middle Hub Layer → System Infrastructure Layer
-The kernel driver layer is completely independent and isolated, and does not couple with upper-layer application business.
-
-### Core Data Flow
-Camera Driver Acquisition → Business Frame Service → Data Bus Distribution → Face Detection / RTSP Streaming / Image Storage → Automatic Frame Recycling
+Please refer to the specific development board guide:
+- [Quick Start (RK3562)](docs/quick_start_zh-CN_rk3562.md)
 
 ---
 
 ## 📊 Performance Metrics
-| Performance Item | Value | Description |
-|------------------|-------|-------------|
-| Video Resolution | 640 × 360 | Fixed camera output specification |
-| RTSP Streaming Frame Rate | 7fps | Stable transmission in LAN environment |
-| Face Detection Frame Rate | 1fps | MNN local offline inference |
-| Memory Usage | < 100MB | Virtual memory statistics, actual physical usage is lower |
+
+| Performance Item | i.MX6ULL | RK3562 (Software Mode) | RK3562 (NPU Mode) |
+|------------------|----------|------------------------|-------------------|
+| Camera Capture | 28FPS | 28FPS | 30FPS |
+| Face Detection | 1FPS | 1FPS | 30FPS+ |
+| RTSP Streaming | 7FPS | 7FPS | 14FPS+ |
+| Memory Usage | < 100MB | < 150MB | < 200MB |
 
 ---
 
 ## 🚀 Quick Start
-Compilation and deployment process: PC cross-compilation → NFS mount distribution → Development board mount → Load driver/environment → Script start/stop → RTSP streaming verification
-Detailed compilation, deployment and debugging tutorial: [Quick Start Guide](docs/quick_start_zh-CN.md)
+
+### Compilation Commands
+
+```bash
+# i.MX6ULL Platform
+use_toolchain arm32-linux-hf6ull
+make TARGET_PLATFORM=imx6ull
+
+# RK3562 Platform (Software Mode)
+use_toolchain arm64-linux-75
+make TARGET_PLATFORM=rk3562 ENGINE=software
+
+# RK3562 Platform (Hardware Mode, requires vendor libraries)
+use_toolchain arm64-linux-103
+make TARGET_PLATFORM=rk3562 ENGINE=hardware
+```
+
+### Running Services
+
+```bash
+# Start all services
+cd /root/run_on_board
+./start_all.sh
+
+# Check service status
+./status.sh
+
+# Stop services
+./stop_all.sh
+```
+
+---
 
 ## 📚 Documentation Navigation
-- [Quick Start](docs/quick_start_zh-CN.md): Full process of compilation, deployment and operation
-- [Architecture Description](docs/architecture.md): Project architecture block diagram and design ideas
-- [Agent Scheduling](SKILL.md): AI programming scheduling example
-- [Performance Report](docs/performance_report.md): Detailed project performance evolution report based on actual logs and running data
-- [Contributing](docs/CONTRIBUTING.en.md): If you have optimization ideas, welcome to participate in project co-construction
-> [!TIP]
-> Operation and maintenance manual, interface documentation, and engineering-specific architecture agent prompts are continuously iterated and supplemented at: [docs/waitme.md](docs/waitme.md)
-> —— What?
-> With this project framework, users can develop their own applications at extremely low learning cost in the AI era. Building an embedded community together is what I hope to do.
-> —— Why?
-> Although AI can complete 70% of basic code writing, the stability of project implementation still requires hardware testing and verification, and product launch requires human responsibility. A large amount of reusable engineering code cannot be separated from actual testing and polishing. Open source sharing allows developers to focus on higher-level technical learning; only with collective collaboration can the path of technical growth go further.
-> —— How?
-> The project community is still under preparation. Welcome to click the ⭐Star in the upper right corner of the page to support; the project will continue to iterate and optimize following industry trends, and I look forward to providing inspiration for your embedded development.
+- [Quick Start (RK3562)](docs/quick_start_zh-CN_rk3562.md)
+- [Quick Start (i.MX6ULL)](docs/quick_start_zh-CN_imx6ull.md)
+- [Architecture Description](docs/architecture.md)
+- [Skill Guide](SKILL.md)
+- [Performance Report](docs/performance_report.md)
+- [Contributing](docs/CONTRIBUTING.en.md)
 
-## 🔀 Branch and Version Management Specifications
-This project follows enterprise-level Git R&D workflow and uses semantic versioning (SemVer `vX.Y.Z`) for iteration management:
-### 1. Branch Responsibility Definition
+---
+
+## 🔀 Branch and Version Management
+
 | Branch Name | Positioning and Purpose |
 |-------------|-------------------------|
-| `main` | **Direct code submission is restricted**; project baseline (displays the latest stable version externally), only merges stable code from `release/*` branches at version release milestones; future `release/*` new hardware adaptation branches are derived from this branch |
-| `release/*` | **Direct code submission is restricted**; permanently locked release stable branch for corresponding fixed hardware; all bug fixes, document additions, and function iterations are implemented here; all series version tags are generated based on this branch |
-| `release/v1_6ull` | Permanently locked i.MX6ULL platform; single-core 792MHz + no NPU + no hardware-encoded GPU, developed based on resource extreme squeezing idea; implemented: `v4l2` acquisition, face detection + MJPEG encoding storage, H264 soft encoding + RTSP streaming, 7FPS is the current short-term performance limit of this hardware |
-| `release/v2_rk3562` (Under construction) | Permanently locked rk3562 platform; 4×A53@2.0GHz + 1TOPS computing power + Mali-G52 2EE |
-| `feature/*/*` | Temporary development branch for new function development and large-scale document supplementation. After development is completed, merge into release via PR with squash, and delete immediately after merging |
-| `fix/*/*` | Temporary defect branch for bug fixes. After development is completed, merge into release via PR with squash, and delete immediately after merging |
+| `main` | Project baseline, merges stable code only at release milestones |
+| `release/v1_6ull` | i.MX6ULL platform stable branch |
+| `release/v2_rk3562` | RK3562 platform development branch |
+| `feature/*/*` | Temporary development branches |
+| `fix/*/*` | Temporary bug fix branches |
 
-### 2. Standardized Development Process
-1. Create a feature/fix temporary branch from `release/v1_6ull`;
-2. Local debugging and iteration, all commits use GPG signature: `git commit -S`;
-3. Push to remote and create a PR, select `Squash and merge` to compress multiple scattered commits into a single standard record and merge into release;
-4. After PR merging is completed, clean up local + remote temporary branches;
-5. After the version is stable, create a GPG-signed Tag on the release branch and synchronize it to the main baseline.
-
-### 3. Semantic Versioning `vX.Y.Z`
-- X (Major version): Architecture reconstruction / hardware platform replacement (e.g., v2.0.0 adapts to RK series)
-- Y (Minor version): New complete business functions, large-scale document reconstruction (e.g., v1.1.0 adds storage expansion module)
-- Z (Patch version): Bug fixes, scattered document supplements (e.g., v1.0.1 improves the quick start document)
-
-### 4. Version Release Rules (Key: Tag corresponds to official Release)
-1. **Git Tag = Official project release snapshot**, only generate GPG-signed tags after full testing and document completion;
-2. GitHub Release is bound to the corresponding Tag for uploading precompiled firmware and source code packages, serving as the official external release entry;
-3. v1.0.0 is the first official release of the project, and the Release baseline has been anchored; subsequent v1.0.x patch versions will create new Tag + Release after iteration is completed.
+---
 
 ## 🧩 Third-Party Open Source Dependencies
 
-| Open Source Project | Purpose | Open Source License | Project Address |
-|---------------------|---------|---------------------|-----------------|
-| MNN | Lightweight AI inference | Apache 2.0 | https://github.com/alibaba/MNN |
-| Ultra-Light-Fast-Generic-Face-Detector-1MB | Face detection model | MIT | https://github.com/Linzaer/Ultra-Light-Fast-Generic-Face-Detector-1MB |
-| Live555 | RTSP streaming media service | LGPL 2.1 | http://www.live555.com/liveMedia/ |
-| libjpeg-turbo | JPEG image codec acceleration | BSD-3-Clause | https://github.com/libjpeg-turbo/libjpeg-turbo |
-| OpenH264 | H264 soft encoding | BSD 2-Clause | https://github.com/cisco/openh264 |
-| libyuv | YUV image format conversion | BSD-3-Clause | https://github.com/lemenkov/libyuv |
-| OpenCV | Image debugging and drawing (debug dependency) | Apache 2.0 | https://github.com/opencv/opencv |
-| GDB12.1 | Remote cross debugging (debug dependency) | GPL-3.0 | https://ftp.gnu.org/gnu/gdb/gdb-12.1.tar.xz |
-> Marked "debug dependency" is only used for PC compilation and debugging, and is not packaged and integrated into the official firmware
+| Open Source Project | Purpose | Open Source License |
+|---------------------|---------|---------------------|
+| MNN | Lightweight AI inference | Apache 2.0 |
+| RKNN | NPU-accelerated inference | Proprietary |
+| Live555 | RTSP streaming media service | LGPL 2.1 |
+| libjpeg-turbo | JPEG codec | BSD-3-Clause |
+| OpenH264 | H264 software encoding | BSD 2-Clause |
+| libyuv | YUV format conversion | BSD-3-Clause |
 
-### Reference Learning Projects
-1. Wei Dongshan 100askTeam: Linux driver layered architecture reference
-2. Zhaoming Embedded: C language object-oriented engineering design ideas
-3. FFmpeg-Builds: PC-side audio and video debugging tool reference
+---
 
 ## 📄 Open Source License
-- Project self-developed code adopts **MIT License**, agreement file: `./LICENSE`
-- All third-party components follow their respective original open source agreements, and the agreement documents are stored in the corresponding `third_lib/*` directory
+- Project self-developed code adopts **MIT License**
+- All third-party components follow their respective original open source licenses
+
+---
 
 ## 🙏 Acknowledgments
 1. Thanks to the developers of various open source projects for providing underlying technical support;

@@ -1,143 +1,310 @@
 ---
-name: embedded-c-coding
-description: 嵌入式C语言编码规范，适用于安全关键嵌入式系统。强制执行OOP设计模式、内存安全、线程安全、硬件交互规则和强制的编辑后安全审查。在编写、修改或审查C代码、嵌入式固件、驱动、HAL代码、RTOS任务或任何运行在嵌入式平台上的代码时使用此Skill。当用户提到C语言、嵌入式系统、MCU、STM32、驱动、外设或固件开发时也会触发。
+name: plug-lens-skill
+description: 嵌入式Linux视觉AI应用框架的开发技能集合，支持RK3562/i.MX6ULL开发板的编译、调试和部署。
 ---
 
-# 嵌入式C编码规范（安全关键嵌入式系统）
+# Plug-Lens 项目技能指南
 
-这是安全关键嵌入式系统代码。缺陷可能导致系统故障甚至安全事故。
-每一行代码都必须以极其谨慎的态度编写和审查。
+## 一、项目概述
 
-## 核心原则
+**Plug-Lens** 是一个基于嵌入式 Linux 的视觉 AI 应用框架，采用事件总线和数据总线的双总线架构设计，实现模块间的松耦合通信。本项目支持 **RK3562** 和 **i.MX6ULL** 两种开发板。
 
-1. **安全第一** - 这是安全关键嵌入式系统软件，对每一次修改
-   都要像生命攸关一样对待
-2. **C语言中的SOLID** - 即使在C语言中也要应用SOLID原则；
-   使用函数指针接口、不透明类型和依赖注入
-3. **Clean Code** - 函数只做一件事、命名揭示意图、不重复、
-   无副作用、一致的抽象层级
-4. **C语言中的OOP** - 即使在C语言中也要使用面向对象设计模式；
-   仅通过统一的外部接口访问设备
-5. **零容忍阻塞** - 如果应用层使用事件驱动框架 / RTC（运行至完成）
-   执行模型，整个调用链必须是非阻塞的
-6. **验证到底层** - 检查硬件交互到寄存器级别；
-   永远不要假设API是非阻塞的
-7. **防御性编程** - 断言内部契约、校验外部输入、传播错误、
-   绝不静默吞掉失败
+## 二、核心技能列表
 
-## 决策树：应该阅读哪个参考文档
+| 技能名称 | 功能描述 | 适用场景 |
+|----------|----------|----------|
+| `build-linux-app` | 构建 Linux 应用工程 | 配置/编译交叉编译项目 |
+| `debug-linux-app` | 调试 Linux 应用程序 | 本地/远程 GDB 调试 |
+| `serial-communication` | 串口通信工具 | 开发板串口登录、命令执行 |
+| `ssh-nfs-dev` | SSH + NFS 远程开发 | 远程连接、文件同步、程序执行 |
+| `embedded-c-coding` | 嵌入式C语言编码规范 | 代码审查、安全检查 |
 
-在编写或修改代码之前，判断哪些参考文档适用：
+## 三、开发工作流
 
-```
-编写/修改代码？
-├── 设计模块结构、接口、回调？
-│   ├── 阅读 documents/references/architecture.md
-│   └── 阅读 documents/references/design-patterns.md
-│
-├── 编写函数、命名、错误处理？
-│   └── 阅读 documents/references/clean-code.md
-│
-├── 使用堆内存、线程、共享资源？
-│   └── 阅读 documents/references/memory-safety.md
-│
-├── 与硬件、外设、HAL交互？
-│   └── 阅读 documents/references/hardware-interaction.md
-│
-├── 任何代码修改？
-│   ├── 阅读 documents/references/code-style.md
-│   └── 阅读 documents/references/safety-checklist.md（强制）
-│
-└── 编辑完成？
-    └── 阅读 documents/references/safety-checklist.md
-        并执行每一个检查项（阶段1-12）
+### 3.1 快速上手流程
+
+```mermaid
+flowchart TD
+    A[开始] --> B[选择开发板]
+    B -->|RK3562| C1[配置工具链 arm64-linux-75]
+    B -->|i.MX6ULL| C2[配置工具链 arm32-linux-hf6ull]
+    C1 --> D[编译项目]
+    C2 --> D
+    D --> E{编译成功?}
+    E -->|是| F[连接开发板]
+    E -->|否| G[调试编译错误]
+    G --> D
+    F -->|串口| H1[serial-communication]
+    F -->|网络| H2[ssh-nfs-dev]
+    H1 --> I[部署并运行]
+    H2 --> I
+    I --> J{运行正常?}
+    J -->|是| K[完成]
+    J -->|否| L[debug-linux-app]
+    L --> I
 ```
 
-**如有疑问，阅读所有参考文档。** 对于安全关键代码，
-过度检查总好过检查不足。
+### 3.2 详细工作流
 
-## 强制的编辑后协议
+#### 步骤 1：选择目标平台
 
-每次代码修改后，无论修改多小，都必须执行
-`documents/references/safety-checklist.md` 中的完整安全审查。这不是可选的。
-一行代码的改动就可能引入内存泄漏、竞态条件或栈溢出。
-每次后续修复后也要重新执行检查清单——修复一个问题可能引入另一个。
+```bash
+# RK3562 ARM64 开发板（推荐）
+use_toolchain arm64-linux-75
 
-## 速查表：硬性规则
+# i.MX6ULL ARM32 开发板
+use_toolchain arm32-linux-hf6ull
+```
 
-以下是不可商量的约束：
+#### 步骤 2：构建项目
 
-| 规则 | 限制 |
+```bash
+# 清理构建
+make clean
+
+# 编译 RK3562（软件模式）
+make TARGET_PLATFORM=rk3562 ENGINE=software
+
+# 编译 RK3562（硬件模式，需厂商库）
+make TARGET_PLATFORM=rk3562 ENGINE=hardware
+
+# 编译 i.MX6ULL
+make TARGET_PLATFORM=imx6ull
+```
+
+#### 步骤 3：连接开发板
+
+**方式一：串口连接**
+```bash
+# 使用 serial-communication 技能
+# 自动检测串口并登录
+```
+
+**方式二：SSH连接**
+```bash
+# 使用 ssh-nfs-dev 技能
+# 建立SSH连接：开发板 IP 默认 192.168.5.11
+# 挂载NFS：/mnt/nfs
+```
+
+#### 步骤 4：部署与运行
+
+```bash
+# 通过NFS同步（推荐）
+# 编译产物自动同步到开发板 /mnt/nfs
+
+# 运行应用
+cd /mnt/nfs/output
+./vision_ai_app
+```
+
+#### 步骤 5：调试（如需要）
+
+```bash
+# 使用 debug-linux-app 技能
+# 远程 GDB 调试
+```
+
+## 四、各技能详细说明
+
+### 4.1 build-linux-app
+
+**功能**：配置和构建基于 CMake/Makefile 的 Linux 应用工程
+
+**适用场景**：
+- 需要为 ARM32/ARM64 开发板进行交叉编译
+- 需要在构建前确认环境是否就绪
+
+**关键参数**：
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| TARGET_PLATFORM | 目标平台 | rk3562 |
+| ENGINE | 引擎模式 | software |
+| CROSS_COMPILE | 交叉编译前缀 | 自动检测 |
+
+**执行步骤**：
+1. 检测构建系统（CMake/Makefile）
+2. 确认工具链环境
+3. 执行编译
+4. 输出构建产物路径
+
+### 4.2 debug-linux-app
+
+**功能**：调试 Linux 应用程序，支持本地和远程 GDB 调试
+
+**适用场景**：
+- 程序崩溃或异常行为分析
+- 需要设置断点和检查变量
+- 性能分析和优化
+
+**执行步骤**：
+1. 选择调试目标（本地/远程）
+2. 设置断点
+3. 启动调试会话
+4. 分析执行流程
+
+### 4.3 serial-communication
+
+**功能**：串口通信工具，支持开发板登录和命令执行
+
+**适用场景**：
+- 开发板无网络连接时的调试
+- 系统启动过程观察
+- U-Boot 命令行操作
+
+**预设配置**：
+- 波特率：115200
+- 数据位：8
+- 停止位：1
+- 校验位：无
+
+### 4.4 ssh-nfs-dev
+
+**功能**：SSH 远程连接和 NFS 文件共享
+
+**适用场景**：
+- 高效开发-测试循环
+- 实时同步编译产物
+- 远程程序执行
+
+**网络配置**：
+```
+WSL2 IP:      192.168.5.10
+开发板 IP:    192.168.5.11
+子网掩码:     255.255.255.0
+NFS挂载点:    /mnt/nfs
+SSH用户:      root
+```
+
+### 4.5 embedded-c-coding
+
+**功能**：嵌入式 C 语言编码规范检查
+
+**适用场景**：
+- 代码审查和质量检查
+- 安全关键系统开发
+- 内存安全和线程安全检查
+
+**检查项**：
+- OOP 设计模式
+- 内存安全
+- 线程安全
+- 硬件交互规则
+
+## 五、平台配置
+
+### 5.1 RK3562 (ARM64)
+
+**工具链**：
+- `arm64-linux-75`: 软件模式（推荐）
+- `arm64-linux-103`: 硬件模式（需要厂商库）
+
+**第三方库**：
+- `third_lib/aarch64/`: 通用 ARM64 库
+- `third_lib/rk3562/`: RK3562 专用库（RGA、MPP、RKNN）
+
+**编译命令**：
+```bash
+# 软件模式（使用 MNN + OpenH264）
+make TARGET_PLATFORM=rk3562 ENGINE=software
+
+# 硬件模式（使用 RKNN + RGA + MPP）
+make TARGET_PLATFORM=rk3562 ENGINE=hardware
+```
+
+### 5.2 i.MX6ULL (ARM32)
+
+**工具链**：`arm32-linux-hf6ull`
+
+**第三方库**：`third_lib/imx6ull/`
+
+**编译命令**：
+```bash
+make TARGET_PLATFORM=imx6ull
+```
+
+## 六、技能协作关系
+
+```mermaid
+flowchart LR
+    subgraph 开发流程
+        A[build-linux-app] --> B[ssh-nfs-dev]
+        B --> C[运行应用]
+        C --> D{需要调试?}
+        D -->|是| E[debug-linux-app]
+        D -->|否| F[完成]
+        E --> C
+    end
+    
+    subgraph 辅助工具
+        G[serial-communication] -.-> B
+        H[embedded-c-coding] -.-> A
+    end
+    
+    style A fill:#e3f2fd,stroke:#1976d2
+    style B fill:#e8f5e9,stroke:#388e3c
+    style E fill:#fff3e0,stroke:#ff9800
+    style G fill:#fce4ec,stroke:#c2185b
+    style H fill:#f3e5f5,stroke:#7b1fa2
+```
+
+**技能调用顺序**：
+1. **embedded-c-coding** → 代码审查（可选）
+2. **build-linux-app** → 编译项目
+3. **serial-communication** → 串口连接（备用）
+4. **ssh-nfs-dev** → 部署和运行
+5. **debug-linux-app** → 调试（如需要）
+
+## 七、常用命令速查
+
+| 操作 | 命令 |
 |------|------|
-| 最大函数长度 | 80行 |
-| 最大嵌套深度 | 4层 |
-| 最大行宽 | 80列 |
-| 最大函数参数数 | 5个（超过则组合成结构体） |
-| 线程中大型局部变量 | 评估栈使用，紧张时用堆 |
-| 魔法数字 | 禁止，使用宏 |
-| 死代码/未使用代码 | 必须删除 |
-| 非公共符号 | 必须声明为 `static` |
-| 未修改的指针 | 必须使用 `const` |
-| 头文件 | 必须有头文件保护宏 |
-| 注释语言 | 推荐英文，或与项目一致 |
-| 注释中的作者 | 兆鸣嵌入式 |
+| 选择 RK3562 工具链 | `use_toolchain arm64-linux-75` |
+| 选择 i.MX6ULL 工具链 | `use_toolchain arm32-linux-hf6ull` |
+| 编译 RK3562 软件模式 | `make TARGET_PLATFORM=rk3562 ENGINE=software` |
+| 编译 i.MX6ULL | `make TARGET_PLATFORM=imx6ull` |
+| 清理构建 | `make clean` |
+| 查看编译输出 | `ls output/` |
 
-## 上下文感知编码
+## 八、注意事项
 
-在编写任何代码之前，先检查周围的代码库：
+### 8.1 安全红线
 
-1. **信号/插槽用法** - 查看同目录下的兄弟文件如何使用信号、
-   回调和事件机制；遵循相同的模式
-2. **头文件包含路径** - 搜索项目中其他文件如何包含同一头文件；
-   使用相同的路径格式
-3. **堆内存API** - 嵌入式平台可能使用非标准的malloc/free；
-   检查其他文件如何分配和释放内存
-4. **设备打开/关闭** - 不要直接访问设备指针；找到其他模块
-   如何打开/关闭同一设备并遵循该模式
-5. **编码风格** - 匹配同目录下文件的结构和格式约定
+1. **备份规则**：执行破坏性操作前必须备份到本地
+2. **固件烧录**：烧录前必须确认备份完整
+3. **远程操作**：禁止在没有本地备份的情况下执行破坏性操作
+4. **设备树修改**：禁止直接修改 `.dtsi` 文件，必须通过板级 `.dts` 或 overlay 修改
 
-## 驱动开发检查清单
+### 8.2 编译提示
 
-编写新驱动时：
+- 首次编译可能需要较长时间
+- 确保工具链路径已正确配置
+- 硬件模式需要预先安装厂商提供的库文件
+- 软件模式兼容性更好，适合快速验证
 
-1. 内部工作线程 + 消息队列实现非阻塞操作
-2. 周期性轮询留在驱动内部，不对外暴露
-3. 错误状态变化通过回调通知应用层
-4. 不暴露与业务无关的接口
-5. 完成后文档化应用层使用须知，包括：初始化顺序、
-   线程安全保证、回调上下文和清理要求
+### 8.3 网络配置
 
-## SOLID速查
+- 开发板和 WSL2 需要在同一网段
+- 推荐使用以太网直连（IP: 192.168.5.x）
+- NFS 需要在开发板端预先配置
 
-设计或修改模块结构时：
+## 九、问题排查
 
-- **SRP（单一职责）**：一个模块 = 一个职责 = 一个变更理由
-- **OCP（开闭原则）**：通过函数指针表扩展，而非修改代码
-- **LSP（里氏替换）**：所有接口实现遵守相同的契约
-- **ISP（接口隔离）**：使用者只依赖其使用的接口
-- **DIP（依赖倒置）**：高层依赖抽象，而非底层
+| 问题现象 | 可能原因 | 解决方案 |
+|----------|----------|----------|
+| 编译失败：找不到工具链 | 未选择工具链 | 使用 `use_toolchain` 命令 |
+| SSH 连接失败 | 网络不通或IP错误 | 检查网络配置 |
+| NFS 挂载失败 | 服务未启动 | 在开发板上执行 `mount_nfs_wired` |
+| 程序运行崩溃 | 缺少依赖库 | 检查库路径和 LD_LIBRARY_PATH |
+| 人脸检测图片异常 | 尺寸配置错误 | 检查全局视频配置 |
 
-## Clean Code速查
+## 十、参考文档
 
-编写任何函数时：
+- [架构文档](docs/architecture.md) - 项目架构设计
+- [RK3562 快速上手](docs/quick_start_zh-CN_rk3562.md) - RK3562 开发指南
+- [i.MX6ULL 快速上手](docs/quick_start_zh-CN_imx6ull.md) - i.MX6ULL 开发指南
+- [技能使用说明](.trae/skills/build-linux-app/references/usage.md) - 构建技能详细说明
 
-- **一件事**：函数只做一件事
-- **同层级**：所有操作处于相同的抽象层级
-- **无副作用**：查询函数不修改状态
-- **DRY**：如果在复制粘贴，提取共享函数
-- **表驱动**：用查找表替代冗长的if-else/switch
-- **防御性**：断言契约、校验输入、传播错误
+---
 
-## 参考文档
-
-按领域组织的详细规格：
-
-| 参考文档 | 何时阅读 |
-|---------|---------|
-| [architecture.md](documents/references/architecture.md) | 模块设计、OOP模式、接口、回调 |
-| [design-patterns.md](documents/references/design-patterns.md) | SOLID原则、C语言GoF模式（状态机、观察者、策略、工厂） |
-| [clean-code.md](documents/references/clean-code.md) | Clean Code + 华为规范：命名、防御性编程、错误处理、const/static |
-| [memory-safety.md](documents/references/memory-safety.md) | 堆分配、线程安全、共享资源、防御性编码 |
-| [hardware-interaction.md](documents/references/hardware-interaction.md) | HAL、寄存器、外设、事件驱动框架 / RTC |
-| [code-style.md](documents/references/code-style.md) | 格式、命名、注释、宏、头文件保护 |
-| [safety-checklist.md](documents/references/safety-checklist.md) | **每次编辑后强制执行** - 12阶段安全审查 |
+*Plug-Lens v1.0.0 | 嵌入式视觉AI应用框架*

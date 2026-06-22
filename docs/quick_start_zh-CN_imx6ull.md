@@ -24,46 +24,63 @@ use_toolchain arm32-linux-hf6ull
 ```
 
 ### 2.2 工程编译
-进入项目根目录，执行清理+编译：
+
+进入项目根目录，指定 i.MX6ULL 平台执行清理+编译：
+
 ```bash
-make clean && make
-# 我们的项目构建逻辑支持头文件检查,按理也包括链接库检查,一般直接make可以,但是如果出现问题可以给我反馈
+# 加载交叉编译工具链
+use_toolchain arm32-linux-hf6ull
+
+# 编译 i.MX6ULL 平台
+make clean && make TARGET_PLATFORM=imx6ull
 ```
 
 ### 2.3 依赖库检查
 编译完成后，检查可执行文件依赖的动态库，提前确认库完整性：
 ```bash
-arm-buildroot-linux-gnueabihf-readelf -d xxxxxxxxxxxx | grep NEEDED
+arm-buildroot-linux-gnueabihf-readelf -d output/vision_ai_app | grep NEEDED
 ```
->请确保库的交叉编译与您使用的工具链一致
 
 ### 2.4 批量拷贝文件至NFS共享目录
 将**可执行程序、AI模型、所有第三方动态库**统一拷贝到PC端NFS共享目录 `~/nfs/run_on_board`，开发板通过NFS挂载访问：
 ```bash
-mkdir -p ~/nfs/run_on_board/{mnn,libjpeg,openh264,libyuv,drv}
+mkdir -p ~/nfs/run_on_board/{mnn,libjpeg,openh264,libyuv,drv,auto}
+
 # 1. 拷贝主程序
 cp output/vision_ai_app ~/nfs/run_on_board/
 
-cp -rf boards/imx6ull/drv/led_drv/*.{ko,dtb}  ~/nfs/run_on_board/drv
-# 2. 拷贝MNN AI模型文件
-cp third_lib/imx6ull/face_detector/model/version-RFB/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
+# 2. 拷贝内核驱动和设备树
+cp -rf boards/imx6ull/drv/led_drv/*.{ko,dtb} ~/nfs/run_on_board/drv
 
-# 3. 拷贝第三方动态库（按目录分类）
-cp -rf third_lib/imx6ull/face_detector/mnn/lib/libMNN.so ~/nfs/run_on_board/mnn
-cp -rf third_lib/imx6ull/libjpeg_turbo/lib/*.so* ~/nfs/run_on_board/libjpeg
-cp -rf third_lib/imx6ull/openh264/lib/* ~/nfs/run_on_board/openh264
-cp -rf third_lib/imx6ull/libyuv/lib/*  ~/nfs/run_on_board/libyuv
+# 3. 拷贝AI模型文件
+cp third_lib/mnn/model/RFB-320-quant-KL-5792.mnn ~/nfs/run_on_board/
 
-########################  仅供参考/可选项：########################################
-# 4. OpenCV库（按调试需开启）
-cp third_lib/imx6ull/opencv_lib/lib/*.so.*  ~/nfs/run_on_board/opencv
-# 5. 拷贝SSL/加密依赖库（按需开启）
-cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libcrypto.so.1.1 ~/nfs/run_on_board/
-cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libssl.so.1.1 ~/nfs/run_on_board/
-# 6. 拷贝自动化脚本目录（守护进程、启停脚本等）
+# 4. 拷贝第三方动态库（统一目录结构：third_lib/xxx/lib_imx6ull）
+# MNN 推理库
+cp -a third_lib/mnn/lib_imx6ull/*.so* ~/nfs/run_on_board/mnn/
+
+# libjpeg-turbo 图像处理库
+cp -a third_lib/libjpeg_turbo/lib_imx6ull/*.so* ~/nfs/run_on_board/libjpeg/
+
+# OpenH264 视频编解码库
+cp -a third_lib/openh264/lib_imx6ull/*.so* ~/nfs/run_on_board/openh264/
+
+# libyuv 图像缩放库
+cp -a third_lib/libyuv/lib_imx6ull/*.so* ~/nfs/run_on_board/libyuv/
+
+# 5. 拷贝自动化脚本目录
 cp -rf scripts/auto ~/nfs/run_on_board/
 
+# 6. 拷贝 live555 RTSP 库（静态链接，无需拷贝）
+# 注意：live555 在编译时已静态链接到可执行文件中
 
+########################  仅供参考/可选项：########################################
+# 7. OpenCV库（按调试需开启）
+cp third_lib/opencv/lib_imx6ull/*.so.* ~/nfs/run_on_board/opencv
+
+# 8. 拷贝SSL/加密依赖库（按需开启）
+cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libcrypto.so.1.1 ~/nfs/run_on_board/
+cp /usr/local/arm/ToolChain/arm-buildroot-linux-gnueabihf_sdk-buildroot/arm-buildroot-linux-gnueabihf/sysroot/usr/lib/libssl.so.1.1 ~/nfs/run_on_board/
 ```
 
 ---

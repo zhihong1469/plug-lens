@@ -28,6 +28,7 @@
 #include <cstring>
 #include "utils.h"
 #include "img_proc_factory.h"
+#include "vision_ai_config.h"
 #include "img_joint.h"
 
 /* RKNN Runtime API */
@@ -169,8 +170,8 @@ static ai_model_err_t rknn_ai_init(ai_model_handle_t* handle)
     img_proc_config_t img_config;
     img_config.width = (int)handle->config.input_width;
     img_config.height = (int)handle->config.input_height;
-    img_config.fps = 30;
-    img_config.jpeg_quality = 85;
+    img_config.fps = GLOBAL_VIDEO_FPS;
+    img_config.jpeg_quality = GLOBAL_JPEG_QUALITY;
     priv->img_proc = img_proc_factory_get_singleton(&img_config);
     if (!priv->img_proc) {
         rknn_destroy(priv->rknn_ctx);

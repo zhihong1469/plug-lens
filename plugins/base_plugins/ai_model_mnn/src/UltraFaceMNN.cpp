@@ -23,6 +23,7 @@
 #include <string.h>
 #include <algorithm>
 #include <math.h>
+#include "vision_ai_config.h"
 
 /** Clip value to range [0, y] */
 #define clip(x, y) (x < 0 ? 0 : (x > y ? y : x))
@@ -102,11 +103,13 @@ int UltraFaceMNN::init(const char* model_path, int ai_w, int ai_h,
     m_num_anchors = m_priors.size();
 
     // Get shared image processing singleton (RGA or software backend)
+    // Use camera resolution (global video config) for YUYV->RGB conversion,
+    // NOT the model input size! The camera frame is full resolution.
     img_proc_config_t img_config;
-    img_config.width = m_ai_w;
-    img_config.height = m_ai_h;
-    img_config.fps = 30;
-    img_config.jpeg_quality = 85;
+    img_config.width = GLOBAL_VIDEO_WIDTH;
+    img_config.height = GLOBAL_VIDEO_HEIGHT;
+    img_config.fps = GLOBAL_VIDEO_FPS;
+    img_config.jpeg_quality = GLOBAL_JPEG_QUALITY;
     m_img_proc = img_proc_convert_create(&img_config);
     if (!m_img_proc) {
         m_interpreter->releaseModel();

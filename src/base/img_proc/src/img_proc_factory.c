@@ -53,7 +53,11 @@ img_proc_handle_t *img_proc_convert_create(const img_proc_config_t *config)
 
     if (!g_convert_initialized) {
         if (config) {
+#if IMG_PROC_SOFTWARE
+            g_convert_singleton = img_proc_create(config, &img_proc_software_ops, IMG_PROC_TYPE_CONVERT);
+#elif IMG_PROC_RGA
             g_convert_singleton = img_proc_create(config, &img_rga_ops, IMG_PROC_TYPE_CONVERT);
+#endif
         }
         if (g_convert_singleton) {
             g_convert_singleton->is_singleton = true;

@@ -50,8 +50,8 @@
 
 /* Frame wait timeout: 2x frame interval (dynamic with global FPS) */
 #define FRAME_WAIT_TIMEOUT_MS     (FRAME_INTERVAL_MS * 2U)
-/* H.264 optimal bitrate for 640x360@15FPS: 500kbps */
-#define H264_BITRATE              500U
+/* H.264 bitrate in kbps (matches img_proc_config_t::bitrate unit) */
+#define H264_BITRATE              GLOBAL_H264_BITRATE_KBPS
 
 /* Data Bus Identifiers */
 #define FACE_RESULT_RGB_DATA_BUS  FACE_YUV_DATA_BUS_NAME   /* Face detection result bus */
@@ -67,7 +67,7 @@
 /* Video Parameters */
 #define VIDEO_WIDTH               GLOBAL_VIDEO_WIDTH       /* Camera output width */
 #define VIDEO_HEIGHT              GLOBAL_VIDEO_HEIGHT      /* Camera output height */
-#define H264_GOP                  GLOBAL_VIDEO_FPS         /* H.264 GOP size */
+#define H264_GOP                  GLOBAL_H264_GOP          /* H.264 GOP size (I-frame interval) */
 
 /* Real-time Thread Configuration (Highest Priority) */
 #define NET_PUSH_THREAD_STACK_SIZE (1024U * 1024U)  /* Thread stack size: 1MB */

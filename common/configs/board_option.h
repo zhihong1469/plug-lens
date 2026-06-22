@@ -5,11 +5,16 @@
  * @details Centralized platform selection configuration for cross-platform support.
  *          Defines platform-specific options for i.MX6ULL and RK3562.
  *          Include this file in application code for platform-dependent logic.
- *
+ * 
+ * @note    Configuration can be set via:
+ *          1. Command-line: make PLATFORM=rk3562 ENGINE=hardware
+ *          2. Configuration file: common/configs/build_config.mk
+ *          3. Default values in this file
+ * 
  * @author  LuoZhihong
  * @github  https://github.com/zhihong1469/plug-lens
- * @date    2026-06-18
- * @version v1.0.0
+ * @date    2026-06-22
+ * @version v2.0.0
  * @license MIT License
  */
 
@@ -21,20 +26,20 @@ extern "C" {
 #endif
 
 /* ==========================================================================
- * Platform Selection Macros
+ * Platform Selection Macros (Auto-detected from Makefile)
  * ========================================================================== */
 
 /**
  * @brief   Platform selection: set to 1 to enable corresponding platform
- * @note    Only ONE platform should be enabled at a time
- * @warning Changing this requires recompilation
+ * @note    These are typically defined by Makefile, not hardcoded here
+ * @warning Only ONE platform should be enabled at a time
  */
 #ifndef PLATFORM_IMX6ULL
-#define PLATFORM_IMX6ULL  0  /* NXP i.MX6ULL - Default platform */
+#define PLATFORM_IMX6ULL  0  /* NXP i.MX6ULL */
 #endif
 
 #ifndef PLATFORM_RK3562
-#define PLATFORM_RK3562   1  /* Rockchip RK3562 - Experimental */
+#define PLATFORM_RK3562   1  /* Rockchip RK3562 - Default */
 #endif
 
 /* Validate platform selection */
@@ -47,15 +52,16 @@ extern "C" {
 #endif
 
 /* ==========================================================================
- * AI Inference Engine Selection (Auto-selected based on platform)
+ * AI Inference Engine Selection (Auto-selected based on platform/engine)
  * ========================================================================== */
-/**
- * @brief RK3562 使用 RKNN NPU 硬件加速
- * @note  RKNN 已完成实现，支持 INT8 量化模型
- */
+
 #if PLATFORM_RK3562
-    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration - Enabled */
+    #ifndef AI_ENGINE_RKNN
+    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration */
+    #endif
+    #ifndef AI_ENGINE_MNN
     #define AI_ENGINE_MNN    1  /* CPU-based inference */
+    #endif
 #else
     #define AI_ENGINE_RKNN   0
     #define AI_ENGINE_MNN    1  /* i.MX6ULL uses MNN */
@@ -74,30 +80,35 @@ extern "C" {
 #endif
 
 /* ==========================================================================
- * Video Encoder Selection (Auto-selected based on platform)
+ * Video Encoder Selection (Auto-selected based on platform/engine)
  * ========================================================================== */
-/**
- * @brief RK3562 使用 MPP 硬件编码（已集成在 img_rga 插件中）
- * @note  MPP H.264 硬件编码已实现，支持 NV12 输入
- */
+
 #if PLATFORM_RK3562
-    #define VIDEO_ENCODER_MPP   1  /* RKMPP hardware encoding - Enabled */
-    #define VIDEO_ENCODER_SW    0  /* Software encoding - Not needed */
+    #ifndef VIDEO_ENCODER_MPP
+    #define VIDEO_ENCODER_MPP   0  /* MPP hardware encoding */
+    #endif
+    #ifndef VIDEO_ENCODER_SW
+    #define VIDEO_ENCODER_SW    1  /* openh264 software encoding */
+    #endif
 #else
     #define VIDEO_ENCODER_MPP   0
-    #define VIDEO_ENCODER_SW    1  /* i.MX6ULL uses openh264/libjpeg-turbo */
+    #define VIDEO_ENCODER_SW    1  /* i.MX6ULL uses openh264 */
 #endif
 
 /* ==========================================================================
- * Image Processing Engine Selection (Auto-selected based on platform)
+ * Image Processing Engine Selection (Auto-selected based on platform/engine)
  * ========================================================================== */
 
 #if PLATFORM_RK3562
-    #define IMG_PROC_RGA        1  /* RGA hardware acceleration */
-    #define IMG_PROC_SOFTWARE   0  /* libyuv/libjpeg-turbo CPU processing */
+    #ifndef IMG_PROC_RGA
+    #define IMG_PROC_RGA        0  /* RGA hardware acceleration */
+    #endif
+    #ifndef IMG_PROC_SOFTWARE
+    #define IMG_PROC_SOFTWARE   1  /* libyuv/libjpeg-turbo */
+    #endif
 #else
     #define IMG_PROC_RGA        0
-    #define IMG_PROC_SOFTWARE   1  /* i.MX6ULL uses libyuv/libjpeg-turbo */
+    #define IMG_PROC_SOFTWARE   1  /* i.MX6ULL uses software */
 #endif
 
 /* ==========================================================================
