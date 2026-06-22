@@ -32,6 +32,8 @@
 #include "Interpreter.hpp"
 #include "Tensor.hpp"
 #include "ImageProcess.hpp"
+/* Image processing backend: use factory pattern for hardware/software switching */
+#include "img_proc_factory.h"
 
 /**
  * @defgroup ultra_face_mnn UltraFace MNN Face Detection Module
@@ -166,6 +168,24 @@ public:
                ImageFormat format = IMAGE_FORMAT_YUYV);
 
     /**
+     * @brief   Run face detection with pre-converted RGB input
+     * @param   rgb_data        Pointer to RGB888 image data (already converted)
+     * @param   cam_w           Image width
+     * @param   cam_h           Image height
+     * @param   face_list       Output list of detected faces
+     * @return  MNN_FACE_OK on success, negative error code on failure
+     * @pre     Module must be initialized (is_ready() == true)
+     * @pre     rgb_data must point to valid RGB888 buffer
+     * @post    face_list contains valid detection results
+     * @note    Used with img_proc_factory backend for hardware acceleration
+     * @thread_safety No
+     */
+    int detect_rgb_only(const uint8_t* rgb_data,
+                       int cam_w,
+                       int cam_h,
+                       std::vector<FaceInfo_MNN>& face_list);
+
+    /**
      * @brief   Map model coordinates to original image resolution
      * @param   face    Face result to be mapped
      * @param   ai_w    Model input width
@@ -219,6 +239,9 @@ private:
     std::shared_ptr<MNN::Interpreter> m_interpreter;  /**< MNN model interpreter */
     MNN::Session* m_session;                          /**< MNN inference session */
     MNN::Tensor* m_input_tensor;                      /**< MNN input image tensor */
+
+    // Image Processing Backend (factory pattern for RGA/software switch)
+    img_proc_handle_t* m_img_proc;                    /**< Image processing handle (singleton) */
 
     // Model Configuration
     int m_ai_w;                /**< Model input width */

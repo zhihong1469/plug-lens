@@ -167,6 +167,6 @@ static int __app_auto_init(void) {
 }
 
 // Compile ONLY in product mode
-#if RUN_PRODUCT_MODE
+// #if RUN_PRODUCT_MODE
     MODULE_INIT_LEVEL(INIT_APP, __app_auto_init);
-#endif
+// #endif

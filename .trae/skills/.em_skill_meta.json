@@ -1,0 +1,9 @@
+{
+  "source": "embed-ai-tool",
+  "version": "d6e41e9",
+  "installed_at": "2026-06-14T06:54:49.491757+00:00",
+  "skills": [
+    "build-linux-app",
+    "debug-linux-app"
+  ]
+}

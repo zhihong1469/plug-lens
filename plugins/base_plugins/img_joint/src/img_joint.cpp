@@ -19,10 +19,19 @@
  */
 #include "img_joint.h"
 #include <turbojpeg.h>
-#include "libyuv.h"
 #include <string.h>
 #include <stdlib.h>
+
+/* Platform-specific includes based on board_option.h */
+#include "board_option.h"
+
+#if IMG_PROC_SOFTWARE
+#include "libyuv.h"
+#endif
+
+#if VIDEO_ENCODER_SW
 #include "codec_api.h"
+#endif
 
 /**
  * @brief   16-byte alignment macro
@@ -33,8 +42,9 @@
 #define ALIGN16(x) (((x) + 15) & ~15)
 
 // =============================================================================
-// Private H264 Encoder Implementation Structure
+// Private H264 Encoder Implementation Structure (Software encoder only)
 // =============================================================================
+#if VIDEO_ENCODER_SW
 /**
  * @brief   Internal H264 encoder context (OpenH264 standard)
  * @details Stores encoder instance, parameters, and I420 conversion buffer.
@@ -47,6 +57,7 @@ typedef struct {
     int                   width;         /**< Image width */
     int                   height;        /**< Image height */
 } h264_encoder_impl_t;
+#endif
 
 // =============================================================================
 // Public Format Conversion Functions
@@ -54,6 +65,7 @@ typedef struct {
 /**
  * @copydoc yuyv_to_rgb
  */
+#if IMG_PROC_SOFTWARE
 int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_buf) {
     if (!yuyv_data || !rgb_buf || width <= 0 || height <= 0 || (width % 2 != 0)) {
         return IMG_JOINT_ERR_INPUT;
@@ -70,9 +82,11 @@ int yuyv_to_rgb(const uint8_t* yuyv_data, int width, int height, uint8_t* rgb_bu
     mem_free(temp_argb);
     return IMG_JOINT_OK;
 }
+#endif
 
 /**
  * @copydoc mjpeg_to_rgb
+ * @note   Always compiled (needed by both platforms - RGA doesn't support MJPEG decode)
  */
 int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height, uint8_t* rgb_buf) {
     if (!mjpeg_data || !rgb_buf || data_len <= 0 || width <= 0 || height <= 0) {
@@ -91,6 +105,7 @@ int mjpeg_to_rgb(const uint8_t* mjpeg_data, int data_len, int width, int height,
 /**
  * @copydoc yuyv_to_i420
  */
+#if IMG_PROC_SOFTWARE
 int yuyv_to_i420(const uint8_t* yuyv_data, int width, int height, uint8_t* i420_buf) {
     if (!yuyv_data || !i420_buf || width <= 0 || height <= 0 ||
         (width % 2 != 0) || (height % 2 != 0)) {
@@ -106,10 +121,12 @@ int yuyv_to_i420(const uint8_t* yuyv_data, int width, int height, uint8_t* i420_
     return libyuv::YUY2ToI420(yuyv_data, width * 2, y, width, u, uv_stride, v, uv_stride,
                              width, height) == 0 ? IMG_JOINT_OK : IMG_JOINT_ERR_INPUT;
 }
+#endif
 
 /**
  * @copydoc i420_to_rgb
  */
+#if IMG_PROC_SOFTWARE
 int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_buf) {
     if (!i420_data || !rgb_buf || width <= 0 || height <= 0) {
         return IMG_JOINT_ERR_INPUT;
@@ -124,10 +141,12 @@ int i420_to_rgb(const uint8_t* i420_data, int width, int height, uint8_t* rgb_bu
     return libyuv::I420ToRGB24(y, width, u, uv_stride, v, uv_stride,
                                rgb_buf, width * 3, width, height) == 0 ? IMG_JOINT_OK : IMG_JOINT_ERR_INPUT;
 }
+#endif
 
 /**
  * @copydoc rgb_resize
  */
+#if IMG_PROC_SOFTWARE
 int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
                uint8_t* dst_rgb, int dst_w, int dst_h) {
     if (!src_rgb || !dst_rgb || src_w<=0 || src_h<=0 || dst_w<=0 || dst_h<=0) {
@@ -166,15 +185,18 @@ int rgb_resize(const uint8_t* src_rgb, int src_w, int src_h,
 
     return 0;
 }
+#endif
 
 /**
  * @copydoc image_resize_ai_opencv
  */
+#if IMG_PROC_SOFTWARE
 int image_resize_ai_opencv(const uint8_t* src_bgr, int src_w, int src_h,
                            uint8_t* dst_bgr, int dst_w, int dst_h) {
     // Wrapper for standard AI preprocessing resize
     return rgb_resize(src_bgr, src_w, src_h, dst_bgr, dst_w, dst_h);
 }
+#endif
 
 /**
  * @copydoc bgr_draw_rect
@@ -215,8 +237,9 @@ void bgr_draw_rect(uint8_t* rgb_data, int w, int h,
 }
 
 // =============================================================================
-// H264 Encoder Implementation (Lifecycle Order)
+// H264 Encoder Implementation (Lifecycle Order) - Software encoder only
 // =============================================================================
+#if VIDEO_ENCODER_SW
 /**
  * @copydoc h264_encoder_create
  */
@@ -265,6 +288,12 @@ h264_encoder_t h264_encoder_create(const h264_encode_param_t* param) {
     impl->param.iLoopFilterDisableIdc = 1;
     impl->param.eSpsPpsIdStrategy = CONSTANT_ID;
     impl->param.bEnableFrameSkip = true;
+
+    // Set spatial layer bitrate parameters (critical for OpenH264)
+    // iMaxSpatialBitrate must be >= iSpatialBitrate
+    int bitrate_bps = param->bitrate * 1000;
+    impl->param.sSpatialLayers[0].iSpatialBitrate = bitrate_bps;
+    impl->param.sSpatialLayers[0].iMaxSpatialBitrate = bitrate_bps * 2;  // Set max to 2x target
 
     // Initialize encoder
     ret = impl->p_encoder->InitializeExt(&impl->param);
@@ -389,3 +418,4 @@ void h264_encoder_destroy(h264_encoder_t encoder) {
     mem_free(impl->i420_buf);
     mem_free(impl);
 }
+#endif

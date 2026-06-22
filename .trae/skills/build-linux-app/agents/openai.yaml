@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linux 应用构建"
+  short_description: "配置、编译 Linux 应用工程，支持 ARM64 交叉编译（如 RK3562）。"
+  default_prompt: "使用 build-linux-app skill，自动探测工程配置和目标架构，选择合适的编译器和构建类型，执行编译，定位可执行产物，并输出下一步建议。"

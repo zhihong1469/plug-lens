@@ -68,7 +68,8 @@
 #include "data_bus.h"
 #include "event_bus.h"
 #include "vision_ai_config.h"
-#include "ai_model_mnn.hpp"
+#include "ai_model_base.h"
+#include "ai_model_factory.h"
 #include "initcall.h"
 #include "img_storage.h"
 #include "thread.h"
@@ -99,7 +100,7 @@ typedef struct {
     bool                          is_started;             /* Service start flag */
     int                           evt_sys_sub_id;         /* System event bus subscription ID */
     int                           evt_capture_sub_id;     /* Capture event subscription ID */
-    FaceInfo_C                    faces[AI_MAX_FACES];    /* Face detection result array */
+    ai_model_detect_result_t      faces[AI_MAX_FACES];    /* Face detection result array */
     int                           face_num;               /* Number of detected faces */
     ImgStorage_t                  *img_storage;           /* SD card image storage handle */
     uint32_t                      frame_sample_cnt;       /* FPS downsampling counter */
@@ -305,16 +306,17 @@ static void *face_work_thread(void *arg)
         /* AI Inference: YUYV decode + RGB conversion + face detection */
         srv->face_num = 0;
         memset(srv->faces, 0, sizeof(srv->faces));
-        ret = ai_model_mnn_infer_image(src_camera,
-                                      CAPTURE_WIDTH,
-                                      CAPTURE_HEIGHT,
-                                      raw_rgb_data,
-                                      srv->faces,
-                                      AI_MAX_FACES,
-                                      &srv->face_num,
-                                      INPUT_FORMAT_YUYV);
+        ret = srv->ai_model->ops->infer_image(srv->ai_model,
+                                              (uint8_t *)src_camera,
+                                              CAPTURE_WIDTH,
+                                              CAPTURE_HEIGHT,
+                                              raw_rgb_data,
+                                              (ai_model_detect_result_t *)srv->faces,
+                                              AI_MAX_FACES,
+                                              &srv->face_num,
+                                              INPUT_FORMAT_YUYV);
 
-        if (ret != MNN_FACE_OK)
+        if (ret != AI_MODEL_OK)
         {
             LOG_E(MODULE_TAG "AI inference failed, error code:%d", ret);
             goto release_res;
@@ -339,12 +341,13 @@ static void *face_work_thread(void *arg)
         if (ret == DATA_BUS_OK)
         {
             uint8_t *result_rgb_data = data_bus_get_writable_ptr(result_rgb_item);
-            if (ai_model_mnn_map_and_draw_faces(srv->faces,
-                                            srv->face_num,
-                                            CAPTURE_WIDTH,
-                                            CAPTURE_HEIGHT,
-                                            raw_rgb_data,
-                                            result_rgb_data) )
+            if (srv->ai_model->ops->map_and_draw_faces(srv->ai_model,
+                                                       (ai_model_detect_result_t *)srv->faces,
+                                                       srv->face_num,
+                                                       CAPTURE_WIDTH,
+                                                       CAPTURE_HEIGHT,
+                                                       raw_rgb_data,
+                                                       result_rgb_data))
             {
                 /* Save result image to SD card */
                 if (srv->img_storage) 
@@ -551,7 +554,7 @@ static int face_srv_init(void)
         return -1;
     }
 
-    /* Initialize MNN AI model */
+    /* Initialize AI model via factory (auto-selects MNN/RKNN based on platform) */
     ai_model_config_t ai_cfg = {
         .model_path    = AI_MODEL_PATH,
         .input_width   = AI_INPUT_WIDTH,
@@ -559,7 +562,7 @@ static int face_srv_init(void)
         .score_thresh  = AI_SCORE_THRESH,
         .iou_thresh    = AI_IOU_THRESH
     };
-    srv->ai_model = ai_model_mnn_create(&ai_cfg);
+    srv->ai_model = ai_model_factory_create(&ai_cfg);
     if (!srv->ai_model || ai_model_init(srv->ai_model) != AI_MODEL_OK)
     {
         LOG_E(MODULE_TAG "AI model initialization failed");

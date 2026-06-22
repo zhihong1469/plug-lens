@@ -11,8 +11,6 @@ EXPORT_FILES=(
     "Makefile"
     "Makefile.build"
     "common/Makefile"
-    "common/configs/config_common.h"
-    "common/configs/vision_ai_config.h"
     "src/Makefile"
     "plugins/Makefile"
 )
