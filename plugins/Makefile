@@ -6,13 +6,18 @@
 # ==========================================================================
 
 # ===================== 条件编译：AI推理引擎 =====================
-# Note: Both platforms use MNN (AI_ENGINE_MNN = 1) per board_option.h
-# RKNN is disabled (AI_ENGINE_RKNN = 0) due to environment/firmware issues
-AI_MODEL_SRC := \
-    base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
-    base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp
-AI_MODEL_INC := \
-    -I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc
+ifeq ($(AI_ENGINE_RKNN),1)
+    AI_MODEL_SRC := \
+        base_plugins/ai_model_rknn/src/ai_model_rknn.cpp
+    AI_MODEL_INC := \
+        -I$(TOPDIR)/plugins/base_plugins/ai_model_rknn/inc
+else
+    AI_MODEL_SRC := \
+        base_plugins/ai_model_mnn/src/ai_model_mnn.cpp \
+        base_plugins/ai_model_mnn/src/UltraFaceMNN.cpp
+    AI_MODEL_INC := \
+        -I$(TOPDIR)/plugins/base_plugins/ai_model_mnn/inc
+endif
 
 # ===================== 条件编译：图像处理引擎 =====================
 ifeq ($(PLATFORM_RK3562),1)

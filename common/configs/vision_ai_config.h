@@ -207,12 +207,12 @@ typedef enum {
 #define CONFIG_CAPTURE_LOCK_GAIN true
 
 // --------------------- AI人脸检测模型配置 ---------------------
-/** AI模型文件路径 | MNN量化模型存储路径 */
-#define CONFIG_AI_MODEL_PATH "./RFB-320-quant-KL-5792.mnn"
+/** AI模型文件路径 | RKNN量化模型存储路径 */
+#define CONFIG_AI_MODEL_PATH "./face_detector.rknn"
 /** AI模型输入宽度 | 模型推理图像宽度 */
 #define CONFIG_AI_INPUT_W    320
 /** AI模型输入高度 | 模型推理图像高度 */
-#define CONFIG_AI_INPUT_H    240
+#define CONFIG_AI_INPUT_H    320
 /** AI置信度阈值 | 人脸检测最低置信度(0~1) */
 #define CONFIG_AI_SCORE_THRESH 0.25f
 /** AI非极大值抑制IOU阈值 | 去重重叠检测框 */
