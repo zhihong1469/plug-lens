@@ -60,15 +60,15 @@ endif
 ifndef CROSS_COMPILE
     ifeq ($(TARGET_PLATFORM),rk3562)
         ifeq ($(ENGINE),hardware)
-            TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-10.3.1-2021.07-x86_64_aarch64-linux-gnu/bin
-            CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-linux-gnu-
+            TOOLCHAIN_PATH := /usr/local/arm/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin
+            CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-none-linux-gnu-
         else
             TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin
             CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-linux-gnu-
         endif
     else ifeq ($(TARGET_PLATFORM),imx6ull)
-        TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-6.2.1-2016.11-x86_64_arm-linux-gnueabihf/bin
-        CROSS_COMPILE := $(TOOLCHAIN_PATH)/arm-linux-gnueabihf-
+        TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-5.5.0-2017.10-x86_64_arm-linux-gnueabi/bin
+        CROSS_COMPILE := $(TOOLCHAIN_PATH)/arm-linux-gnueabi-
     endif
     $(info Auto-selected toolchain: $(CROSS_COMPILE))
 endif
