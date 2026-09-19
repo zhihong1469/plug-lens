@@ -278,8 +278,8 @@ static ai_model_err_t rknn_ai_get_result(ai_model_handle_t* handle,
     rknn_priv_t* priv = (rknn_priv_t*)handle->user_data;
     if (!priv) return AI_MODEL_ERR_INIT;
 
-    float* boxes = (float*)priv->output_bufs[0];
-    float* scores = (float*)priv->output_bufs[1];
+    float* scores = (float*)priv->output_bufs[0];
+    float* boxes = (float*)priv->output_bufs[1];
 
     const float score_thresh = handle->config.score_thresh;
     const float iou_thresh = handle->config.iou_thresh;
@@ -644,8 +644,8 @@ int ai_model_rknn_infer_image(const uint8_t* image_data, int cam_w, int cam_h,
         return RKNN_FACE_ERR_INFER;
     }
 
-    float* boxes = (float*)outputs[0].buf;
-    float* scores = (float*)outputs[1].buf;
+    float* scores = (float*)outputs[0].buf;
+    float* boxes = (float*)outputs[1].buf;
 
     const float score_thresh = 0.5f;
     const float iou_thresh = 0.45f;

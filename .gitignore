@@ -18,8 +18,8 @@ Thumbs.db
 .cache/
 # 调试过程材料
 third_lib/compile_reference_configuration/
-third_lib/aarch64/face_detector/model/quant/*.json
-// 个人暂留文件
+third_lib/face_detector/model_mnn/quant/*.json
+# 个人暂留文件
 *.my
 # ==============================================
 # 2. 编译产物忽略（屏蔽所有临时文件）
@@ -45,16 +45,18 @@ scripts/shell_quick_script/tmp
 # 个人配置文件
 .bash_history
 .ssh/
+# 第三方库自带的 aarch64 demo/工具可执行程序（预编译产物，不入库）
+third_lib/libjpeg_turbo/bin/
+third_lib/rkmpp/bin/
+third_lib/rkrga/bin/
+third_lib/rknn/rknn_yolov5_video_demo
 
 # ==============================================
 # 3. 白名单：只放行项目核心文件（唯一允许提交的库/文件）
 # ==============================================
-# 放行最终可执行程序
-!/output/vision_ai_app
 # 放行VSCode配置（团队协作必备，包含调试配置）
-!.vscode/ 
-# 放行【预编译的第三方依赖库】（ARM版MNN+OpenCV，用户必备）
-!/third_lib/aarch64/face_detector/mnn/lib/**
-!/third_lib/aarch64/face_detector/mnn/include/**
+!.vscode/
+# 放行预编译 MNN 库（三平台，编译门槛高、用户必备；其余 *.so 仍忽略）
+!/third_lib/mnn/lib_*/libMNN.so*
 # 放行AI模型文件（核心资源，必须提交）
 !*.mnn

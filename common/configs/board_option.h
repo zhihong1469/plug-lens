@@ -57,10 +57,10 @@ extern "C" {
 
 #if PLATFORM_RK3562
     #ifndef AI_ENGINE_RKNN
-    #define AI_ENGINE_RKNN   0  /* RK3562 NPU hardware acceleration */
+    #define AI_ENGINE_RKNN   1  /* RK3562 NPU hardware acceleration (default) */
     #endif
     #ifndef AI_ENGINE_MNN
-    #define AI_ENGINE_MNN    1  /* CPU-based inference */
+    #define AI_ENGINE_MNN    0  /* CPU-based inference */
     #endif
 #else
     #define AI_ENGINE_RKNN   0
@@ -85,10 +85,10 @@ extern "C" {
 
 #if PLATFORM_RK3562
     #ifndef VIDEO_ENCODER_MPP
-    #define VIDEO_ENCODER_MPP   0  /* MPP hardware encoding */
+    #define VIDEO_ENCODER_MPP   1  /* MPP hardware encoding (default) */
     #endif
     #ifndef VIDEO_ENCODER_SW
-    #define VIDEO_ENCODER_SW    1  /* openh264 software encoding */
+    #define VIDEO_ENCODER_SW    0  /* openh264 software encoding */
     #endif
 #else
     #define VIDEO_ENCODER_MPP   0
@@ -101,10 +101,10 @@ extern "C" {
 
 #if PLATFORM_RK3562
     #ifndef IMG_PROC_RGA
-    #define IMG_PROC_RGA        0  /* RGA hardware acceleration */
+    #define IMG_PROC_RGA        1  /* RGA hardware acceleration (default) */
     #endif
     #ifndef IMG_PROC_SOFTWARE
-    #define IMG_PROC_SOFTWARE   1  /* libyuv/libjpeg-turbo */
+    #define IMG_PROC_SOFTWARE   0  /* libyuv/libjpeg-turbo */
     #endif
 #else
     #define IMG_PROC_RGA        0

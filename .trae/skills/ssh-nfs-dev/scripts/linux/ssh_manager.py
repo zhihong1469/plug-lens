@@ -30,7 +30,7 @@ class NFSConfig:
     """NFS mount configuration."""
     server_ip: str = "192.168.5.10"  # WSL2/Host IP
     mount_point: str = "/mnt/nfs"
-    nfs_path: str = "/home/luo/linux/6ull/project/plug-lens"
+    nfs_path: str = "/home/luo/linux/project/plug-lens"
     mount_cmd_alias: str = "mount_nfs_wired"
 
 

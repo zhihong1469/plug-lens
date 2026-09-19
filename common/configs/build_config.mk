@@ -13,7 +13,7 @@ TARGET_PLATFORM ?= rk3562
 # Available: hardware, software
 # - hardware: Use platform-specific hardware acceleration (RKNN/RGA/MPP)
 # - software: Use pure software implementations (MNN/libyuv/openh264)
-ENGINE ?= software
+ENGINE ?= hardware
 
 # ===================== Toolchain Auto-selection =====================
 # Toolchain is auto-selected based on TARGET_PLATFORM and ENGINE

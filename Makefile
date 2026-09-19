@@ -60,15 +60,15 @@ endif
 ifndef CROSS_COMPILE
     ifeq ($(TARGET_PLATFORM),rk3562)
         ifeq ($(ENGINE),hardware)
-            TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-10.3.1-2021.07-x86_64_aarch64-linux-gnu/bin
-            CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-linux-gnu-
+            TOOLCHAIN_PATH := /usr/local/arm/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin
+            CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-none-linux-gnu-
         else
             TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin
             CROSS_COMPILE := $(TOOLCHAIN_PATH)/aarch64-linux-gnu-
         endif
     else ifeq ($(TARGET_PLATFORM),imx6ull)
-        TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-6.2.1-2016.11-x86_64_arm-linux-gnueabihf/bin
-        CROSS_COMPILE := $(TOOLCHAIN_PATH)/arm-linux-gnueabihf-
+        TOOLCHAIN_PATH := /usr/local/arm/gcc-linaro-5.5.0-2017.10-x86_64_arm-linux-gnueabi/bin
+        CROSS_COMPILE := $(TOOLCHAIN_PATH)/arm-linux-gnueabi-
     endif
     $(info Auto-selected toolchain: $(CROSS_COMPILE))
 endif
@@ -121,12 +121,21 @@ GLOBAL_INC := \
 
 GLOBAL_INC += $(THIRD_LIB_INC)
 
+# ===================== Global Compiler Flags =====================
+GLOBAL_CFLAGS := \
+    -DPLATFORM_RK3562=$(PLATFORM_RK3562) \
+    -DPLATFORM_IMX6ULL=$(PLATFORM_IMX6ULL) \
+    -DAI_ENGINE_RKNN=$(AI_ENGINE_RKNN) \
+    -DAI_ENGINE_MNN=$(AI_ENGINE_MNN) \
+    -DIMG_PROC_RGA=$(IMG_PROC_RGA) \
+    -DVIDEO_ENCODER_MPP=$(VIDEO_ENCODER_MPP)
+
 # ===================== Export Configuration =====================
 export PLATFORM PLATFORM_RK3562 PLATFORM_IMX6ULL
 export ENGINE IMG_PROC_RGA VIDEO_ENCODER_MPP AI_ENGINE_RKNN AI_ENGINE_MNN
 export CC CXX LD AR OBJCOPY OBJDUMP 
 export TOPDIR SRCDIR BUILDDIR OUTPUTDIR COMPILE_COMMANDS SYSROOT_CFLAGS
-export GLOBAL_INC THIRD_LIB_INC THIRD_LIB_LDFLAGS
+export GLOBAL_INC GLOBAL_CFLAGS THIRD_LIB_INC THIRD_LIB_LDFLAGS
 
 # ===================== Build Targets =====================
 TARGETS := $(patsubst %, build-%, $(SUBDIRS))

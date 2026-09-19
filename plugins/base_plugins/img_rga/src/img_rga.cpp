@@ -395,7 +395,7 @@ static h264_encoder_t rga_h264_encoder_create(img_proc_handle_t *handle,
     enc_ctx->width = rga_ctx ? rga_ctx->width : cfg->width;
     enc_ctx->height = rga_ctx ? rga_ctx->height : cfg->height;
     enc_ctx->fps = cfg->fps > 0 ? cfg->fps : 30;
-    enc_ctx->bitrate = cfg->bitrate > 0 ? cfg->bitrate : 2000000;
+    enc_ctx->bitrate = cfg->bitrate > 0 ? cfg->bitrate * 1000 : 2000000;
 
     /* Initialize MPP */
     MPP_RET ret = mpp_create(&enc_ctx->ctx, &enc_ctx->mpi);
